@@ -31,15 +31,24 @@ impl Entity {
         }
     }
 
-    pub fn name(&self) -> &str { &self.name }
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
-    pub fn transform(&self) -> &Transform { &self.transform }
+    pub fn transform(&self) -> &Transform {
+        &self.transform
+    }
 
-    pub fn transform_mut(&mut self) -> &mut Transform { &mut self.transform }
+    pub fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
+    }
 
     /// Attach a component (gold's `entity += [entity, component]`).
     pub fn add_component(&mut self, component: Box<dyn Component>) -> &mut Self {
-        self.components.push(ComponentSlot { component, initialized: false });
+        self.components.push(ComponentSlot {
+            component,
+            initialized: false,
+        });
         self
     }
 
@@ -49,16 +58,22 @@ impl Entity {
         self
     }
 
-    pub fn children(&self) -> &[Entity] { &self.children }
+    pub fn children(&self) -> &[Entity] {
+        &self.children
+    }
 
     /// A mutable child by index (the engine's physics sync walks these).
     pub(crate) fn child_mut(&mut self, idx: usize) -> Option<&mut Entity> {
         self.children.get_mut(idx)
     }
 
-    pub fn enabled(&self) -> bool { self.enabled }
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
 
-    pub fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
 
     /// Typed component lookup (gold's `getComponent(prototype)`, as
     /// downcasting): the first component of type `T` on this entity.
@@ -91,13 +106,18 @@ impl Entity {
         }
     }
 
+    /// The immutable twin of [`slot_at_mut`](Self::slot_at_mut).
+    pub(crate) fn slot_at(&self, path: &[usize]) -> Option<&ComponentSlot> {
+        match path {
+            [i] => self.components.get(*i),
+            [child_idx, rest @ ..] => self.children.get(*child_idx)?.slot_at(rest),
+            [] => None,
+        }
+    }
+
     /// Collect `(priority, tree-path)` for every component in the subtree,
     /// pre-order; the engine sorts the flat list (gold's `sortComponents`).
-    pub(crate) fn collect_order(
-        &self,
-        path: &mut Vec<usize>,
-        out: &mut Vec<(i64, Vec<usize>)>,
-    ) {
+    pub(crate) fn collect_order(&self, path: &mut Vec<usize>, out: &mut Vec<(i64, Vec<usize>)>) {
         if !self.enabled {
             return;
         }

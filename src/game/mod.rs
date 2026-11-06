@@ -19,6 +19,8 @@
 //! struct Counter(u64);
 //! impl Component for Counter {
 //!     fn update(&mut self, _dt: f64) { self.0 += 1; }
+//!     fn as_any(&self) -> &dyn std::any::Any { self }
+//!     fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
 //! }
 //!
 //! let mut engine = Engine::new("acme", "demo");
@@ -37,42 +39,50 @@ pub mod camera;
 pub mod component;
 pub mod engine;
 pub mod entity;
-#[cfg(feature = "physics")]
-pub mod physics_rapier;
+pub mod light;
+pub mod mesh;
+pub mod model;
 pub mod physics;
 pub mod physics_body;
+#[cfg(feature = "physics")]
+pub mod physics_rapier;
 pub mod render;
-pub mod renderable;
 #[cfg(feature = "wgpu")]
 pub mod render_wgpu;
+pub mod renderable;
 #[cfg(feature = "stream")]
 pub mod stream_window;
 #[cfg(feature = "tray")]
 pub mod tray;
 #[cfg(feature = "tray")]
 pub use tray::spawn_tray_quit;
-#[cfg(feature = "winit")]
-pub mod winit_window;
+pub mod texture;
 pub mod transform;
 pub mod window;
+#[cfg(feature = "winit")]
+pub mod winit_window;
 
 pub use camera::Camera;
 pub use component::{Component, Priority};
 pub use engine::Engine;
 pub use entity::Entity;
+pub use light::{Light, LightKind, SceneLight};
+pub use mesh::{Mesh, MeshVertex};
+pub use model::{Model, ModelPart};
 pub use physics::PhysicsWorld;
 pub use physics_body::PhysicsBody;
-pub use render::{Quad, QuadShape, RenderBackend};
-pub use renderable::{MeshRenderer, MeshShape, Renderable};
 #[cfg(feature = "wgpu")]
 pub use render::FrameSink;
+pub use render::{Geometry, Quad, QuadShape, RenderBackend};
 #[cfg(feature = "wgpu")]
 pub use render_wgpu::WgpuRenderer;
+pub use renderable::{MeshGeometry, MeshRenderer, MeshShape, Renderable};
 #[cfg(feature = "stream")]
 pub use stream_window::StreamingWindow;
+pub use texture::Texture;
+pub use transform::Transform;
+pub use window::{create_window_backend, register_window_backend, HeadlessWindow, WindowSystem};
 #[cfg(feature = "winit")]
 pub use winit_window::{
     key_var, mouse_button_var, mouse_move_var, quit_var, wheel_var, WinitWindow,
 };
-pub use transform::Transform;
-pub use window::{create_window_backend, register_window_backend, HeadlessWindow, WindowSystem};

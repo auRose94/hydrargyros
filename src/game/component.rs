@@ -42,7 +42,9 @@ impl Priority {
 /// path); scripted components arrive later with the interpreter seam.
 pub trait Component: Send {
     /// Which tier of the frame this component updates in.
-    fn priority(&self) -> Priority { Priority::Generic }
+    fn priority(&self) -> Priority {
+        Priority::Generic
+    }
 
     /// Called once, the first frame the component exists in the engine.
     fn initialize(&mut self) {}
@@ -63,5 +65,14 @@ pub trait Component: Send {
 
     /// If this component contributes geometry to the drawn scene (gold's
     /// renderables), the engine's draw pass picks it up here.
-    fn as_renderable(&self) -> Option<&dyn super::renderable::Renderable> { None }
+    fn as_renderable(&self) -> Option<&dyn super::renderable::Renderable> {
+        None
+    }
+
+    /// If this component is a light (gold's `light` component), the
+    /// engine's draw pass gathers it — with its entity's world transform —
+    /// into the scene's light list.
+    fn as_light(&self) -> Option<&super::light::Light> {
+        None
+    }
 }

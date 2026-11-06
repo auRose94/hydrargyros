@@ -11,8 +11,8 @@
 
 use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Sub};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::list::List;
 use crate::object::Object;
@@ -62,21 +62,31 @@ pub struct Vec3 {
     pub z: f32,
 }
 impl Vec3 {
-    pub fn new(x: f32, y: f32, z: f32) -> Self { Vec3 { x, y, z } }
+    pub fn new(x: f32, y: f32, z: f32) -> Self {
+        Vec3 { x, y, z }
+    }
 
     /// A vector with the same value in all components.
     #[must_use]
-    pub fn splat(v: f32) -> Self { Vec3 { x: v, y: v, z: v } }
+    pub fn splat(v: f32) -> Self {
+        Vec3 { x: v, y: v, z: v }
+    }
 
     /// Component-wise scale (transform composition).
     #[must_use]
     pub fn scaled(self, by: Vec3) -> Self {
-        Vec3 { x: self.x * by.x, y: self.y * by.y, z: self.z * by.z }
+        Vec3 {
+            x: self.x * by.x,
+            y: self.y * by.y,
+            z: self.z * by.z,
+        }
     }
 
     /// Dot product.
     #[must_use]
-    pub fn dot(self, other: Vec3) -> f32 { self.x * other.x + self.y * other.y + self.z * other.z }
+    pub fn dot(self, other: Vec3) -> f32 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
 
     /// Cross product.
     #[must_use]
@@ -92,7 +102,11 @@ impl Vec3 {
 impl std::ops::Add for Vec3 {
     type Output = Vec3;
     fn add(self, other: Vec3) -> Vec3 {
-        Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+        Vec3 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+            z: self.z + other.z,
+        }
     }
 }
 
@@ -105,7 +119,9 @@ pub struct Vec4 {
     pub w: f32,
 }
 impl Vec4 {
-    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self { Vec4 { x, y, z, w } }
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Vec4 { x, y, z, w }
+    }
 }
 
 /// A quaternion.
@@ -117,19 +133,31 @@ pub struct Quat {
     pub w: f32,
 }
 impl Quat {
-    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self { Quat { x, y, z, w } }
+    pub fn new(x: f32, y: f32, z: f32, w: f32) -> Self {
+        Quat { x, y, z, w }
+    }
 
     /// Unit quaternion from an axis and an angle in radians.
     #[must_use]
     pub fn axis_angle(axis: Vec3, radians: f32) -> Self {
         let len = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
         if len == 0.0 {
-            return Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
+            return Quat {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                w: 1.0,
+            };
         }
         let (ax, ay, az) = (axis.x / len, axis.y / len, axis.z / len);
         let half = radians / 2.0;
         let (s, c) = (half.sin(), half.cos());
-        Quat { x: ax * s, y: ay * s, z: az * s, w: c }
+        Quat {
+            x: ax * s,
+            y: ay * s,
+            z: az * s,
+            w: c,
+        }
     }
 
     /// The Hamilton product — composing rotations applies `self` first,
@@ -147,7 +175,11 @@ impl Quat {
     /// Rotate a vector by this quaternion (`v + 2q × (q × v + wv)`).
     #[must_use]
     pub fn rotate(self, v: Vec3) -> Vec3 {
-        let q = Vec3 { x: self.x, y: self.y, z: self.z };
+        let q = Vec3 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        };
         let t = q.cross(v).scaled(Vec3::splat(2.0));
         v + q.cross(t) + t.scaled(Vec3::splat(self.w))
     }
@@ -543,24 +575,86 @@ impl Neg for Var {
 // ---- ergonomic conversions (gold's implicit constructor set) ----
 
 impl From<()> for Var {
-    fn from(_: ()) -> Self { Var::Null }
+    fn from(_: ()) -> Self {
+        Var::Null
+    }
 }
-impl From<bool> for Var { fn from(b: bool) -> Self { Var::Bool(b) } }
-impl From<i64> for Var { fn from(n: i64) -> Self { Var::I64(n) } }
-impl From<i32> for Var { fn from(n: i32) -> Self { Var::I64(n as i64) } }
-impl From<u64> for Var { fn from(n: u64) -> Self { Var::I64(n as i64) } }
-impl From<usize> for Var { fn from(n: usize) -> Self { Var::I64(n as i64) } }
-impl From<f64> for Var { fn from(n: f64) -> Self { Var::F64(n) } }
-impl From<f32> for Var { fn from(n: f32) -> Self { Var::F64(n as f64) } }
-impl From<&str> for Var { fn from(s: &str) -> Self { Var::Str(s.to_string()) } }
-impl From<String> for Var { fn from(s: String) -> Self { Var::Str(s) } }
-impl From<Vec3> for Var { fn from(v: Vec3) -> Self { Var::Vec3(v) } }
-impl From<Vec4> for Var { fn from(v: Vec4) -> Self { Var::Vec4(v) } }
-impl From<Quat> for Var { fn from(v: Quat) -> Self { Var::Quat(v) } }
+impl From<bool> for Var {
+    fn from(b: bool) -> Self {
+        Var::Bool(b)
+    }
+}
+impl From<i64> for Var {
+    fn from(n: i64) -> Self {
+        Var::I64(n)
+    }
+}
+impl From<i32> for Var {
+    fn from(n: i32) -> Self {
+        Var::I64(n as i64)
+    }
+}
+impl From<u64> for Var {
+    fn from(n: u64) -> Self {
+        Var::I64(n as i64)
+    }
+}
+impl From<usize> for Var {
+    fn from(n: usize) -> Self {
+        Var::I64(n as i64)
+    }
+}
+impl From<f64> for Var {
+    fn from(n: f64) -> Self {
+        Var::F64(n)
+    }
+}
+impl From<f32> for Var {
+    fn from(n: f32) -> Self {
+        Var::F64(n as f64)
+    }
+}
+impl From<&str> for Var {
+    fn from(s: &str) -> Self {
+        Var::Str(s.to_string())
+    }
+}
+impl From<String> for Var {
+    fn from(s: String) -> Self {
+        Var::Str(s)
+    }
+}
+impl From<Vec3> for Var {
+    fn from(v: Vec3) -> Self {
+        Var::Vec3(v)
+    }
+}
+impl From<Vec4> for Var {
+    fn from(v: Vec4) -> Self {
+        Var::Vec4(v)
+    }
+}
+impl From<Quat> for Var {
+    fn from(v: Quat) -> Self {
+        Var::Quat(v)
+    }
+}
 
-impl From<List> for Var { fn from(l: List) -> Self { Var::List(l) } }
-impl From<Object> for Var { fn from(o: Object) -> Self { Var::Object(o) } }
-impl From<Func> for Var { fn from(f: Func) -> Self { Var::Func(f) } }
+impl From<List> for Var {
+    fn from(l: List) -> Self {
+        Var::List(l)
+    }
+}
+impl From<Object> for Var {
+    fn from(o: Object) -> Self {
+        Var::Object(o)
+    }
+}
+impl From<Func> for Var {
+    fn from(f: Func) -> Self {
+        Var::Func(f)
+    }
+}
 
 // ---- serde: one trait covers every serde format (JSON/BSON/CBOR/MsgPack/…) ----
 //
@@ -677,16 +771,24 @@ impl<'de> serde::Deserialize<'de> for Var {
 /// and a type mismatch coerces via `to_string()` for strings or saturates to
 /// zero for numbers. For strict reads, use the `as_*()` methods instead.
 impl From<Var> for String {
-    fn from(v: Var) -> Self { v.to_string() }
+    fn from(v: Var) -> Self {
+        v.to_string()
+    }
 }
 impl From<Var> for i64 {
-    fn from(v: Var) -> Self { v.as_i64().unwrap_or(0) }
+    fn from(v: Var) -> Self {
+        v.as_i64().unwrap_or(0)
+    }
 }
 impl From<Var> for f64 {
-    fn from(v: Var) -> Self { v.as_f64().unwrap_or(0.0) }
+    fn from(v: Var) -> Self {
+        v.as_f64().unwrap_or(0.0)
+    }
 }
 impl From<Var> for bool {
-    fn from(v: Var) -> Self { v.is_truthy() }
+    fn from(v: Var) -> Self {
+        v.is_truthy()
+    }
 }
 
 /// Recursively write `path` ("a.b.c") on an object, creating intermediate

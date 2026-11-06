@@ -74,7 +74,14 @@ let json = serde_json::to_string(&v).unwrap();
   with pixel-verified screenshots (behind the `wgpu` feature), and a
   **streaming window** (behind the `stream` feature) that serves the
   render buffer to a browser and turns browser events into engine events.
-  Meshes/renderables next.
+  Triangle meshes render through a second pipeline (depth-tested, shaded):
+  procedural boxes/spheres/quads or glTF models loaded from `.gltf`/`.glb`
+  files (behind the `gltf` feature), drawn at their entity transforms.
+  glTF materials' base-color textures sample through the same pipeline
+  (behind the `image` feature), and `MeshRenderer::textured` turns a quad
+  into a sprite. Lights are gold's `light` component (`point`/`directional`/
+  `spot` at entity transforms, KHR punctual shading) gathered by the draw
+  pass and shaded per-fragment. The interpreter seam next.
 
 See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture
 decisions (why `Arc<Mutex>`, why serde, why not Bevy).

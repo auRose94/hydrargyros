@@ -11,10 +11,11 @@
 //! fall; press keys, click around — events print in the console; hit the
 //! page's quit button to end the pump.
 
+use hydrargyros::game::light::{forward_quat, Light};
 use hydrargyros::game::physics::Shape as PhysShape;
 use hydrargyros::game::render::FrameSink;
 use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::{Camera, Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hydrargyros::game::{Camera, Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, WgpuRenderer};
 use hydrargyros::var::Vec3;
 use hydrargyros::Var;
 
@@ -38,8 +39,20 @@ fn main() {
     let mut ball = Entity::new("ball");
     ball.transform_mut().position = Vec3::new(0.0, 8.0, 0.0);
     ball.add_component(Box::new(PhysicsBody::new("ball", PhysShape::Sphere(0.5))));
-    ball.add_component(Box::new(MeshRenderer::circle(0.5, [1.0, 0.4, 0.1, 1.0])));
+    // the ball is a real triangle mesh now: a shaded sphere instead of a
+    // flat disc — the key light reads its normals, so it looks round
+    ball.add_component(Box::new(MeshRenderer::mesh(
+        std::sync::Arc::new(Mesh::sphere(0.5, 24, 16)),
+        [1.0, 0.4, 0.1, 1.0],
+    )));
     engine.add_entity(ball);
+
+    // the sun: a directional light component aimed like the classic key
+    // light (up, right, toward the viewer) — lights are scene data now
+    let mut sun = Entity::new("sun");
+    sun.transform_mut().rotation = forward_quat([-0.4, -0.7, -0.5]);
+    sun.add_component(Box::new(Light::directional().with_intensity(0.55)));
+    engine.add_entity(sun);
 
     // the offscreen renderer publishes every frame into the sink
     let sink = FrameSink::new();
@@ -56,11 +69,9 @@ fn main() {
     // --no-open skips the auto-launch (paste the URL into any browser —
     // including an embedded one like ZCode's).
     let open_browser = !std::env::args().any(|a| a == "--no-open");
-    let window =
-        hydrargyros::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
-            .expect("stream server");
+    let window = hydrargyros::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
+        .expect("stream server");
     let window = std::sync::Arc::new(window);
-
 
     // tray icon: Quit reaches the engine even with no visible window
     #[cfg(feature = "tray")]
@@ -74,8 +85,15 @@ fn main() {
         }
     }
 
-    println!("streaming at {}{}", window.url(),
-        if open_browser { " (opened in your browser)" } else { " (paste into a browser)" });
+    println!(
+        "streaming at {}{}",
+        window.url(),
+        if open_browser {
+            " (opened in your browser)"
+        } else {
+            " (paste into a browser)"
+        }
+    );
 
     // the pump: polls the page, updates, draws the MeshRenderers, renders —
     // exits when the page's Quit button arrives through the event seam

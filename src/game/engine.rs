@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use super::camera::Camera;
 use super::component::Priority;
 use super::entity::Entity;
+use super::light::SceneLight;
 use super::physics::PhysicsWorld;
 use super::physics_body::PhysicsBody;
 use super::render::RenderBackend;
@@ -65,7 +66,9 @@ impl Engine {
     }
 
     /// The camera the scene renders through.
-    pub fn camera(&self) -> &Camera { &self.camera }
+    pub fn camera(&self) -> &Camera {
+        &self.camera
+    }
 
     /// Drive the pump with a fixed delta time instead of the wall clock —
     /// the headless way to get deterministic frames (240 frames at 1/60 =
@@ -98,7 +101,16 @@ impl Engine {
         self
     }
 
-    pub fn entities(&self) -> &[Entity] { &self.entities }
+    pub fn entities(&self) -> &[Entity] {
+        &self.entities
+    }
+
+    /// A top-level entity by name — the direct handle gold scripts get
+    /// with `engine.entities[i]`. First match wins; children are reached
+    /// through [`Entity::child_mut`](super::entity::Entity::child_mut).
+    pub fn entity_mut(&mut self, name: &str) -> Option<&mut Entity> {
+        self.entities.iter_mut().find(|e| e.name() == name)
+    }
 
     /// The frame cap in milliseconds; `0` disables it (headless runs).
     pub fn frame_time(&mut self, ms: f64) -> &mut Self {
@@ -112,15 +124,22 @@ impl Engine {
         self
     }
 
-    pub fn running(&self) -> bool { self.running }
+    pub fn running(&self) -> bool {
+        self.running
+    }
 
     /// Set `running` false — the pump exits after the current frame (gold's
     /// quit semantics: the frame in flight still completes).
-    pub fn stop(&mut self) { self.running = false; }
+    pub fn stop(&mut self) {
+        self.running = false;
+    }
 
     /// The settings file path: `{root}/{company}/{gameName}/settings.json`.
     pub fn settings_path(&self) -> PathBuf {
-        self.settings_root.join(&self.company).join(&self.game_name).join("settings.json")
+        self.settings_root
+            .join(&self.company)
+            .join(&self.game_name)
+            .join("settings.json")
     }
 
     /// Save settings as JSON (gold's `saveSettings`).
@@ -183,14 +202,12 @@ impl Engine {
                 renderer.pre_frame();
             }
 
-            let dt = self.fixed_dt.unwrap_or_else(|| last.elapsed().as_secs_f64());
+            let dt = self
+                .fixed_dt
+                .unwrap_or_else(|| last.elapsed().as_secs_f64());
             self.update(dt);
             self.draw();
-
-            // and gfx.renderFrame after the draw pass
-            if let Some(renderer) = &mut self.renderer {
-                renderer.render_frame();
-            }
+            self.render();
 
             if self.frame_time > 0.0 {
                 let elapsed = last.elapsed();
@@ -220,17 +237,42 @@ impl Engine {
         }
     }
 
-    /// One frame's draw pass: the camera scene opens, every renderable
-    /// component contributes its geometry at its entity's WORLD transform
-    /// (composed down the parent chain), then non-mesh draw-tier components
-    /// get their `draw()`. Public so tests and headless code can drive
-    /// frames without a window.
+    /// One frame's draw pass: the scene opens with the camera and every
+    /// light component gathered at its entity's WORLD transform (gold's
+    /// draw passes the lights list), every renderable component
+    /// contributes its geometry at its entity's WORLD transform (composed
+    /// down the parent chain), then non-mesh draw-tier components get
+    /// their `draw()`. Public so tests and headless code can drive frames
+    /// without a window.
     pub fn draw(&mut self) {
         let order = self.update_order();
-        let Self { renderer, entities, camera, .. } = self;
+        let Self {
+            renderer,
+            entities,
+            camera,
+            ..
+        } = self;
+
+        // the scene's lights: light components at their entity's world
+        // transform (gold gathers these per draw call; the engine gathers
+        // once for the frame)
+        let lights: Vec<SceneLight> = order
+            .iter()
+            .filter_map(|(_, path)| {
+                let owner_path = &path[..path.len() - 1];
+                let world = world_transform_at(entities, owner_path);
+                let [first, rest @ ..] = owner_path else {
+                    return None;
+                };
+                let entity = walk(entities, *first, rest)?;
+                let slot = entity.slot_at(&[path[path.len() - 1]])?;
+                let light = slot.component.as_light()?;
+                Some(SceneLight::from_component(light, &world))
+            })
+            .collect();
 
         if let Some(renderer) = renderer.as_mut() {
-            renderer.begin_scene(camera);
+            renderer.begin_scene(camera, &lights);
         }
 
         for (priority, path) in order {
@@ -240,23 +282,36 @@ impl Engine {
             // world transform of the owning entity (composed down the chain)
             let world = world_transform_at(entities, owner_path);
             let last = *path.last().unwrap();
-            let mut quad = None;
+            let mut geometry = None;
             {
                 let entity = walk_mut(entities, *owner_path.first().unwrap(), &owner_path[1..]);
                 let Some(entity) = entity else { continue };
                 let slot = entity.slot_at_mut(&[last]);
                 if let Some(renderable) = slot.component.as_renderable() {
-                    quad = Some(renderable.quad(&world));
+                    geometry = Some(renderable.geometry(&world));
                 } else if is_draw_tier {
                     slot.component.draw();
                 }
             }
 
-            if let Some(quad) = quad {
-                if let Some(renderer) = renderer.as_mut() {
-                    renderer.push_quad(quad);
+            if let (Some(geometry), Some(renderer)) = (geometry, renderer.as_mut()) {
+                match geometry {
+                    super::render::Geometry::Quad(quad) => renderer.push_quad(quad),
+                    super::render::Geometry::Model { model, color } => {
+                        renderer.push_model(&world, &model, color)
+                    }
                 }
             }
+        }
+    }
+
+    /// One frame's render: the backend draws the scene [`draw`](Self::draw)
+    /// collected — offscreen or into a window — and publishes it (gold's
+    /// `gfx.renderFrame`). Public with [`update`](Self::update) and
+    /// [`draw`](Self::draw) so custom pumps can script the frame's phases.
+    pub fn render(&mut self) {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.render_frame();
         }
     }
 
@@ -289,25 +344,35 @@ impl Engine {
             return;
         }
         let paths = self.all_slot_paths();
-        let Self { physics, entities, .. } = self;
+        let Self {
+            physics, entities, ..
+        } = self;
         let Some(physics) = physics else { return };
 
         // materialize bodies that joined since the last frame — gold's
         // physicsBody spawns at its ENTITY's transform
         for path in &paths {
             let entity_path = &path[..path.len() - 1];
-            let [first, rest @ ..] = entity_path else { continue };
-            let Some(entity) = walk_mut(entities, *first, rest) else { continue };
+            let [first, rest @ ..] = entity_path else {
+                continue;
+            };
+            let Some(entity) = walk_mut(entities, *first, rest) else {
+                continue;
+            };
             let last = *path.last().unwrap();
             let pose = *entity.transform();
             let slot = entity.slot_at_mut(&[last]);
             let Some(body) = slot.component.as_any_mut().downcast_mut::<PhysicsBody>() else {
-                    continue;
+                continue;
             };
             if !body.materialized {
                 physics.add_body(
-                    &body.name, &body.shape, body.body_type,
-                    pose.position, pose.rotation, body.gravity_scale,
+                    &body.name,
+                    &body.shape,
+                    body.body_type,
+                    pose.position,
+                    pose.rotation,
+                    body.gravity_scale,
                 );
                 body.materialized = true;
             }
@@ -325,11 +390,15 @@ impl Engine {
                 }
             };
             let Some((position, rotation)) = physics.body_pose(&name) else {
-                    continue;
+                continue;
             };
             let entity_path = &path[..path.len() - 1];
-            let [first, rest @ ..] = entity_path else { continue };
-            let Some(entity) = walk_mut(entities, *first, rest) else { continue };
+            let [first, rest @ ..] = entity_path else {
+                continue;
+            };
+            let Some(entity) = walk_mut(entities, *first, rest) else {
+                continue;
+            };
             entity.transform_mut().position = position;
             entity.transform_mut().rotation = rotation;
         }
@@ -350,12 +419,17 @@ impl Engine {
     }
 }
 
+/// Walk an entity tree immutably: top-level index, then child indices.
+fn walk<'a>(entities: &'a [Entity], top: usize, rest: &[usize]) -> Option<&'a Entity> {
+    let mut entity = entities.get(top)?;
+    for idx in rest {
+        entity = entity.children().get(*idx)?;
+    }
+    Some(entity)
+}
+
 /// Walk an entity tree: top-level index, then child indices.
-fn walk_mut<'a>(
-    entities: &'a mut [Entity],
-    top: usize,
-    rest: &[usize],
-) -> Option<&'a mut Entity> {
+fn walk_mut<'a>(entities: &'a mut [Entity], top: usize, rest: &[usize]) -> Option<&'a mut Entity> {
     let mut entity = entities.get_mut(top)?;
     for idx in rest {
         entity = entity.child_mut(*idx)?;
@@ -374,7 +448,9 @@ fn world_transform_at(entities: &[Entity], owner_path: &[usize]) -> Transform {
     };
     let mut world = *entity.transform();
     for idx in rest {
-        let Some(child) = entity.children().get(*idx) else { break };
+        let Some(child) = entity.children().get(*idx) else {
+            break;
+        };
         world = child.transform().compose(&world);
         entity = child;
     }

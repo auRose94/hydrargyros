@@ -32,16 +32,24 @@ pub struct Camera {
     pub position: Vec3,
     /// Half width/height of the view, in world units. Match the aspect of
     /// the target surface for square pixels (16:9 surface → 16:10 vs 16:9
-    /// half-extents ratio, e.g. `(8.89, 5.0)`).
+    /// half-extents ratio, e.g. `(8.89, 5.0)`). The `z` component is the
+    /// **depth window** for meshes: they render between
+    /// `position.z − z` (far) and `position.z + z` (near), and anything
+    /// outside clips against those planes. Quads ignore it. Rotating
+    /// models sweep corners through z — keep the window wider than the
+    /// sweep (the default is generous for exactly that reason).
     pub half_extents: Vec3,
 }
 
 impl Default for Camera {
-    /// A 16:9 view centered at world (0, 4) — y ∈ [-1, 9].
+    /// A 16:9 view centered at world (0, 4) — y ∈ [-1, 9] — with a
+    /// generous depth window (±64): meshes clip only when they truly
+    /// leave the view, not because a rotating corner crossed a tight
+    /// near plane.
     fn default() -> Self {
         Camera {
             position: Vec3::new(0.0, 4.0, 0.0),
-            half_extents: Vec3::new(8.89, 5.0, 1.0),
+            half_extents: Vec3::new(8.89, 5.0, 64.0),
         }
     }
 }

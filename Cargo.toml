@@ -41,6 +41,10 @@ tray-icon = { version = "0.26", features = ["libappindicator"], optional = true 
 gtk = { version = "0.18", optional = true }
 # blocking on wgpu adapter/device futures for offscreen setup
 pollster = { version = "0.4", optional = true }
+# glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
+gltf = { version = "1", optional = true }
+# texture image decoding (the `image` feature): Texture::from_file for PNGs
+image = { version = "0.25", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
@@ -60,6 +64,10 @@ winit = ["dep:winit"]
 tray = ["dep:tray-icon", "dep:gtk"]
 # stream: the webapp windowing backend (canvas page over the render buffer)
 stream = ["dep:axum", "dep:tokio", "dep:futures-util"]
+# gltf: load triangle meshes from .gltf/.glb model files
+gltf = ["dep:gltf"]
+# image: decode texture image files (PNG/JPEG/...) into textures
+image = ["dep:image"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -93,3 +101,7 @@ required-features = ["physics", "wgpu", "stream"]
 [[example]]
 name = "game_window"
 required-features = ["physics", "wgpu", "winit"]
+
+[[example]]
+name = "game_gltf"
+required-features = ["wgpu", "stream", "gltf"]

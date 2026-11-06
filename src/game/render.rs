@@ -4,6 +4,23 @@
 //! surface needed — so frames can be pixel-tested and screenshotted
 //! headlessly, exactly like gold's `{"screenshot", path}` debug aid.
 
+use crate::game::light::SceneLight;
+use crate::game::model::Model;
+use crate::game::transform::Transform;
+
+/// The geometry one renderable contributes to a scene: a solid quad (the
+/// 2D shape path, rendered in list order) or a model — one or more
+/// triangle-mesh parts with optional textures, drawn at its entity's
+/// world transform, depth-tested against other models and shaded.
+#[derive(Clone)]
+pub enum Geometry {
+    Quad(Quad),
+    Model {
+        model: std::sync::Arc<Model>,
+        color: [f32; 4],
+    },
+}
+
 /// The silhouette of a quad: a rectangle, or a circle inscribed in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuadShape {
@@ -36,12 +53,22 @@ pub struct Quad {
 impl Quad {
     /// A rectangular quad.
     pub fn rect(pos: [f32; 2], size: [f32; 2], color: [f32; 4]) -> Self {
-        Quad { pos, size, color, shape: QuadShape::Rect }
+        Quad {
+            pos,
+            size,
+            color,
+            shape: QuadShape::Rect,
+        }
     }
 
     /// A circular quad (the circle is inscribed in the quad's bounds).
     pub fn circle(pos: [f32; 2], radius: [f32; 2], color: [f32; 4]) -> Self {
-        Quad { pos, size: radius, color, shape: QuadShape::Circle }
+        Quad {
+            pos,
+            size: radius,
+            color,
+            shape: QuadShape::Circle,
+        }
     }
 }
 
@@ -68,7 +95,9 @@ struct Inner {
 }
 
 impl FrameSink {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Publish a frame (bumps the generation).
     pub fn publish(&self, width: u32, height: u32, rgba: Vec<u8>) {
@@ -83,7 +112,9 @@ impl FrameSink {
     }
 
     /// The newest frame, if any.
-    pub fn latest(&self) -> Option<Frame> { self.0.lock().unwrap().frame.clone() }
+    pub fn latest(&self) -> Option<Frame> {
+        self.0.lock().unwrap().frame.clone()
+    }
 
     /// The newest frame whose generation is greater than `seen`.
     pub fn latest_since(&self, seen: u64) -> Option<Frame> {
@@ -104,12 +135,20 @@ pub trait RenderBackend: Send {
 
     /// Begin a camera-driven scene: clears the quad list; subsequent
     /// [`push_quad`](Self::push_quad) calls take WORLD-space positions and
-    /// are mapped through this camera.
-    fn begin_scene(&mut self, _camera: &crate::game::camera::Camera) {}
+    /// are mapped through this camera. `lights` is the scene's gathered
+    /// light list (gold's draw call passes the lights in; a scene with no
+    /// lights renders ambient-only).
+    fn begin_scene(&mut self, _camera: &crate::game::camera::Camera, _lights: &[SceneLight]) {}
 
     /// Append a quad to the current scene. Positions are world-space after
     /// [`begin_scene`](Self::begin_scene), clip-space otherwise.
     fn push_quad(&mut self, _quad: Quad) {}
+
+    /// Append a model at `world` — the entity's world transform (position,
+    /// rotation, scale all apply); `color` tints over the parts' vertex
+    /// colors and textures. Defaults to a no-op: backends that can't draw
+    /// models skip them.
+    fn push_model(&mut self, _world: &Transform, _model: &Model, _color: [f32; 4]) {}
 
     /// Draw the frame. Called after the engine's draw pass.
     fn render_frame(&mut self) {}

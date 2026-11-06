@@ -165,14 +165,30 @@ Ported from gold's `game` module, headless first (gold ships a
   **offscreen wgpu renderer**: no window, no surface — frames render to a
   texture, get read back, and can be saved as PNGs (gold's screenshot debug
   aid), so tests assert actual pixels. The scene is camera-driven: a
-  `Camera` (position + half-extents, world → clip) and a `MeshRenderer`
-  component (rect/circle silhouettes, SDF-clipped in the shader) — entities
-  render themselves through the draw pass at their composed world
-  transforms. Meshes with real geometry, textures/sprites and lights are
-  the next rungs.
+  `Camera` (position + half-extents, world → clip; z is the depth window)
+  and `MeshRenderer` components — entities render themselves through the
+  draw pass at their composed world transforms. Two pipelines share the
+  frame: the quad scene (rect/circle silhouettes, SDF-clipped, list order)
+  and the **mesh scene** — models (procedural cube/sphere/quad, or glTF
+  files via the `gltf` feature: node transforms and material base colors
+  baked into vertices, one part per base-color texture) drawn depth-tested
+  with back-face culling, model matrices built from the entity transform
+  (`T·R·S`). Textures sample at the vertex UVs (glTF's top-left uv origin)
+  with a 1×1-white fallback for untextured parts; `MeshRenderer::textured`
+  over `Mesh::quad` is the sprite path (images decode via the `image`
+  feature). **Lights** are gold's `light` component —
+  `point`/`directional`/`spot` at entity transforms (position = world
+  origin, direction = world forward), gold's prototype defaults
+  (white point at intensity 1, cone `(1, 1)`), packed per light in gold's
+  four uniform rows (`dir+range / color+intensity / pos+innerCos /
+  outerCos+type`) and shaded per-fragment with the KHR punctual math gold's
+  PBR shader ships (range attenuation `(1 − (d/r)⁴)⁺/d²`, smoothstep spot
+  cones) over a fixed ambient floor. The draw pass gathers light
+  components into the scene's light list; a scene with none renders
+  ambient-only (gold's zeroed light contributes nothing). Gold shipped
+  `LIGHT_COUNT=1`; this port spends the bank on eight.
 
-Next: meshes/renderables/cameras on the renderer, then the interpreter seam
-so components can be scripted.
+Next: the interpreter seam so components can be scripted.
 
 ### Scripting layer (cross-cutting)
 
