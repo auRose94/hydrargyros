@@ -435,6 +435,7 @@ async fn mesh_geometry_beyond_the_depth_window_clips() {
 
 /// The checked-in glTF model renders through the full engine pump: baked
 /// material color × key-light shade on the front face.
+#[cfg(feature = "gltf")] // loads a glTF file (wgpu-only builds stay compilable)
 #[tokio::test]
 async fn gltf_model_renders_through_the_engine() {
     let sink = hydrargyros::game::FrameSink::new();
@@ -564,6 +565,7 @@ async fn sprite_samples_the_texture_upright() {
 /// The checker cube through the full engine pump: the +z face samples the
 /// texture at the primitive's UVs — light block left of center, orange
 /// block right of center, both under the key-light shade.
+#[cfg(feature = "gltf")] // loads a glTF file (wgpu-only builds stay compilable)
 #[tokio::test]
 async fn gltf_checker_cube_samples_its_texture() {
     let sink = hydrargyros::game::FrameSink::new();

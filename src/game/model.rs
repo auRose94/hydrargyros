@@ -9,6 +9,9 @@
 //! texture at draw time, glTF's `factor × texture` convention); the
 //! renderer's tint multiplies on top of everything.
 
+// glTF-gated: textures resolve once per image in `from_gltf*` (used only there)
+#[cfg(feature = "gltf")]
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::game::mesh::Mesh;
