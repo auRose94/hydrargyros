@@ -40,10 +40,7 @@ fn assert_close(got: [u8; 4], want: [u8; 4], what: &str) {
 /// center, view edges → edges.
 #[test]
 fn camera_maps_world_to_clip() {
-    let camera = Camera {
-        position: Vec3::new(0.0, 4.0, 0.0),
-        half_extents: Vec3::new(8.0, 4.5, 1.0),
-    };
+    let camera = Camera::ortho(Vec3::new(0.0, 4.0, 0.0), Vec3::new(8.0, 4.5, 1.0));
     let center = camera.world_to_clip(Vec3::new(0.0, 4.0, 0.0));
     assert_eq!(center, [0.0, 0.0]);
 
@@ -62,10 +59,7 @@ async fn world_space_quad_lands_where_the_camera_says() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: Vec3::new(0.0, 4.0, 0.0),
-            half_extents: Vec3::new(8.0, 4.5, 1.0),
-        },
+        &Camera::ortho(Vec3::new(0.0, 4.0, 0.0), Vec3::new(8.0, 4.5, 1.0)),
         &[], // quads are unlit: an empty light list is fine here
     );
     renderer.push_quad(hydrargyros::game::Quad::rect(
@@ -273,10 +267,7 @@ async fn mesh_cube_shades_at_its_entity_transform() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 2.0), // z is the depth window
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 2.0)), // z is the depth window
         &key_lights(),
     );
     renderer.push_model(
@@ -311,10 +302,7 @@ async fn mesh_transforms_follow_the_entity() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 2.0),
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 2.0)),
         &key_lights(),
     );
     renderer.push_model(
@@ -352,10 +340,7 @@ async fn meshes_depth_test_against_each_other() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 2.0),
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 2.0)),
         &key_lights(),
     );
     // far cube first, tinted green; near cube after, tinted red
@@ -393,10 +378,7 @@ async fn mesh_geometry_beyond_the_depth_window_clips() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 1.0), // tight depth window on purpose
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 1.0)), // tight depth window on purpose
         &key_lights(),
     );
     let cube = colored_cube([WHITE; 6]);
@@ -431,6 +413,257 @@ async fn mesh_geometry_beyond_the_depth_window_clips() {
     let inside = (240.0 + 5.0 / 8.89 * 240.0) as u32;
     let want = [srgb8(mesh_shade([0.0, 0.0, 1.0])), 0, 0, 255];
     assert_close(pixel(frame, 480, inside, 135), want, "inside the window");
+}
+
+// ---- camera 3D (perspective/look-at per gold's bx conventions) ----
+
+use hydrargyros::game::camera::Projection;
+
+/// Project a world point through the camera → NDC (x right, y up).
+fn project(camera: &Camera, p: V3) -> [f32; 2] {
+    let m = camera.view_projection();
+    let v = [p.x, p.y, p.z, 1.0];
+    let mut clip = [0.0f32; 4];
+    for (r, cell) in clip.iter_mut().enumerate() {
+        *cell = (0..4).map(|c| m[c][r] * v[c]).sum();
+    }
+    [clip[0] / clip[3], clip[1] / clip[3]]
+}
+
+/// NDC → pixel coordinates on a `w`×`h` canvas (+x right, +y up).
+fn ndc_px(w: u32, h: u32, ndc: [f32; 2]) -> (f64, f64) {
+    (
+        (ndc[0] + 1.0) as f64 / 2.0 * w as f64,
+        (1.0 - ndc[1]) as f64 / 2.0 * h as f64,
+    )
+}
+
+/// The 3D test rig: the eye 4 units in front of the origin (on −z) looking
+/// down +z at a cube sitting there — gold's fov 60 / near 0.1 / far 100 at
+/// the canvas's 16:9. Sees the cube's −z face; the key light can't reach
+/// it, so it shades to the 0.45 ambient floor.
+fn perspective_camera() -> Camera {
+    Camera {
+        position: V3::new(0.0, 0.0, -4.0),
+        target: V3::splat(0.0),
+        projection: Projection::Perspective {
+            fov_y_degrees: 60.0,
+            near: 0.1,
+            far: 100.0,
+            aspect: 480.0 / 270.0,
+        },
+    }
+}
+
+/// The model renders through the PERSPECTIVE camera: sample points come
+/// from projected world points — just inside the front face's projected
+/// edges the shaded face shows, just outside (and past the corner), clear.
+#[tokio::test]
+async fn perspective_scene_renders_the_model() {
+    let camera = perspective_camera();
+    let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
+        .expect("no wgpu adapter on this machine");
+    renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
+    renderer.begin_scene(&camera, &key_lights());
+    renderer.push_model(
+        &Transform {
+            position: V3::splat(0.0),
+            ..Default::default()
+        },
+        &colored_cube([WHITE; 6]),
+        RED,
+    );
+    renderer.render_frame();
+
+    // front face at z = −0.8 (view depth 3.2): the ±0.8 edges project to
+    // ndc ±scale·0.8/3.2 ≈ ±0.22 → columns ≈ 182..298, rows ≈ 77..193
+    // (the right-handed view mirrors x for this +z-looking rig, so sample
+    // by min/max of the projected edges, never by world side)
+    let want = [srgb8(mesh_shade([0.0, 0.0, -1.0])), 0, 0, 255];
+    let frame = renderer.screenshot();
+    let (ex0, row) = ndc_px(480, 270, project(&camera, V3::new(0.8, 0.0, -0.8)));
+    let (ex1, _) = ndc_px(480, 270, project(&camera, V3::new(-0.8, 0.0, -0.8)));
+    let (lo, hi) = (ex0.min(ex1), ex0.max(ex1));
+    let (_, top) = ndc_px(480, 270, project(&camera, V3::new(0.0, 0.8, -0.8)));
+    // just inside each projected edge: the face (edges, not centers — a
+    // scale bug grows/shrinks the projection and the samples miss)
+    assert_close(
+        pixel(frame, 480, hi as u32 - 4, row as u32),
+        want,
+        "inside right edge",
+    );
+    assert_close(
+        pixel(frame, 480, lo as u32 + 4, row as u32),
+        want,
+        "inside left edge",
+    );
+    assert_close(
+        pixel(frame, 480, 240, top as u32 + 4),
+        want,
+        "inside top edge",
+    );
+    // past the top corner of the projected face: clear
+    assert_close(
+        pixel(frame, 480, hi as u32 + 6, top as u32 - 6),
+        [0, 0, 0, 255],
+        "past the corner",
+    );
+}
+
+/// Foreshortening: two same-size cubes at different depths — the nearer
+/// face spans MORE pixels (its projected edges land farther apart), and
+/// each face shows its tint at the projected edge samples.
+#[tokio::test]
+async fn perspective_foreshortens_same_size_cubes() {
+    let camera = perspective_camera();
+    let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
+        .expect("no wgpu adapter on this machine");
+    renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
+    renderer.begin_scene(&camera, &key_lights());
+    // near cube left (front face at view depth 3.2), far cube right (7.2)
+    renderer.push_model(
+        &Transform {
+            position: V3::new(-0.9, 0.0, 0.0),
+            ..Default::default()
+        },
+        &colored_cube([WHITE; 6]),
+        RED,
+    );
+    renderer.push_model(
+        &Transform {
+            position: V3::new(1.8, 0.0, 4.0),
+            ..Default::default()
+        },
+        &colored_cube([WHITE; 6]),
+        GREEN,
+    );
+    renderer.render_frame();
+
+    let frame = renderer.screenshot();
+    let red = [srgb8(mesh_shade([0.0, 0.0, -1.0])), 0, 0, 255];
+    let green = [0, srgb8(mesh_shade([0.0, 0.0, -1.0])), 0, 255];
+    let (nx0, row) = ndc_px(480, 270, project(&camera, V3::new(-1.7, 0.0, -0.8)));
+    let (nx1, _) = ndc_px(480, 270, project(&camera, V3::new(-0.1, 0.0, -0.8)));
+    let (nlo, nhi) = (nx0.min(nx1), nx0.max(nx1));
+    let (fx0, _) = ndc_px(480, 270, project(&camera, V3::new(1.0, 0.0, 3.2)));
+    let (fx1, _) = ndc_px(480, 270, project(&camera, V3::new(2.6, 0.0, 3.2)));
+    let (flo, fhi) = (fx0.min(fx1), fx0.max(fx1));
+    // the spans, from the projected corners: nearer covers more pixels
+    let (near_span, far_span) = (nhi - nlo, fhi - flo);
+    assert!(
+        near_span > far_span,
+        "near {near_span}px vs far {far_span}px"
+    );
+    // edge samples: inside each face its tint, outside it clear
+    assert_close(
+        pixel(frame, 480, nhi as u32 - 4, row as u32),
+        red,
+        "near inside right",
+    );
+    assert_close(
+        pixel(frame, 480, nhi as u32 + 6, row as u32),
+        [0, 0, 0, 255],
+        "near outside right",
+    );
+    assert_close(
+        pixel(frame, 480, nlo as u32 + 4, row as u32),
+        red,
+        "near inside left",
+    );
+    assert_close(
+        pixel(frame, 480, nlo as u32 - 6, row as u32),
+        [0, 0, 0, 255],
+        "near outside left",
+    );
+    assert_close(
+        pixel(frame, 480, fhi as u32 - 4, row as u32),
+        green,
+        "far inside right",
+    );
+    // well past the far cube (clear of its visible side faces too)
+    assert_close(
+        pixel(frame, 480, fhi as u32 + 10, row as u32),
+        [0, 0, 0, 255],
+        "far outside right",
+    );
+    assert_close(
+        pixel(frame, 480, flo as u32 - 6, row as u32),
+        [0, 0, 0, 255],
+        "between cubes",
+    );
+}
+
+/// Beyond the far plane clips: a cube fully past `far` draws nothing (its
+/// would-be pixels stay clear), while a control cube inside the window
+/// renders beside it.
+#[tokio::test]
+async fn perspective_beyond_the_far_plane_clips() {
+    let camera = Camera {
+        position: V3::new(0.0, 0.0, -4.0),
+        target: V3::splat(0.0),
+        projection: Projection::Perspective {
+            fov_y_degrees: 60.0,
+            near: 0.1,
+            far: 20.0, // tight far plane on purpose
+            aspect: 480.0 / 270.0,
+        },
+    };
+    let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
+        .expect("no wgpu adapter on this machine");
+    renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
+    renderer.begin_scene(&camera, &key_lights());
+    // front face at view depth 21.5 (> far 20): every vertex is past the
+    // far plane, so the whole cube clips
+    renderer.push_model(
+        &Transform {
+            position: V3::new(0.0, 0.0, 17.0),
+            ..Default::default()
+        },
+        &colored_cube([WHITE; 6]),
+        RED,
+    );
+    // control: inside the window, off to the right → renders
+    renderer.push_model(
+        &Transform {
+            position: V3::new(2.0, 0.0, 0.0),
+            ..Default::default()
+        },
+        &colored_cube([WHITE; 6]),
+        GREEN,
+    );
+    renderer.render_frame();
+
+    let frame = renderer.screenshot();
+    // the far cube would project to a ~17px patch around the center
+    // (corners ±0.8 at depth 21.5 → ndc ±0.036): those pixels stay clear
+    let (gx0, row) = ndc_px(480, 270, project(&camera, V3::new(0.8, 0.0, 16.2)));
+    let (gx1, _) = ndc_px(480, 270, project(&camera, V3::new(-0.8, 0.0, 16.2)));
+    let (glo, ghi) = (gx0.min(gx1), gx0.max(gx1));
+    for x in [glo as u32 + 4, 240, ghi as u32 - 4] {
+        assert_close(
+            pixel(frame, 480, x, row as u32),
+            [0, 0, 0, 255],
+            "far-clipped",
+        );
+    }
+    // the control cube's front face spans ndc [scale·1.2/3.2, scale·2.8/3.2]
+    // (mirrored for this rig): just inside its outer edge, green; just
+    // outside it, clear (its −x side face fills the region beyond, so only
+    // the outer side is sampled)
+    let (cx0, _) = ndc_px(480, 270, project(&camera, V3::new(1.2, 0.0, -0.8)));
+    let (cx1, _) = ndc_px(480, 270, project(&camera, V3::new(2.8, 0.0, -0.8)));
+    let clo = cx0.min(cx1);
+    let green = [0, srgb8(mesh_shade([0.0, 0.0, -1.0])), 0, 255];
+    assert_close(
+        pixel(frame, 480, clo as u32 + 4, row as u32),
+        green,
+        "control inside",
+    );
+    assert_close(
+        pixel(frame, 480, clo as u32 - 6, row as u32),
+        [0, 0, 0, 255],
+        "control outside",
+    );
 }
 
 /// The checked-in glTF model renders through the full engine pump: baked
@@ -630,10 +863,7 @@ async fn no_lights_render_ambient_only() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 2.0),
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 2.0)),
         &[],
     );
     renderer.push_model(
@@ -664,10 +894,7 @@ async fn directional_light_direction_matters() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     renderer.begin_scene(
-        &Camera {
-            position: V3::new(0.0, 4.0, 0.0),
-            half_extents: V3::new(8.89, 5.0, 2.0),
-        },
+        &Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 2.0)),
         // shines toward -z, so the +z face gets nl = 1
         &[SceneLight {
             position: V3::splat(0.0),
@@ -714,10 +941,7 @@ async fn point_light_falls_off_with_range() {
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     // cube front face at z = 0.8; the light sits 5.0 units in front of it
-    let camera = Camera {
-        position: V3::new(0.0, 4.0, 0.0),
-        half_extents: V3::new(8.89, 5.0, 4.0),
-    };
+    let camera = Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 4.0));
     let cube_at = Transform {
         position: V3::new(0.0, 4.0, 0.0),
         ..Default::default()
@@ -780,10 +1004,7 @@ async fn spot_cone_gates_the_light() {
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-    let camera = Camera {
-        position: V3::new(0.0, 4.0, 0.0),
-        half_extents: V3::new(8.89, 5.0, 4.0),
-    };
+    let camera = Camera::ortho(V3::new(0.0, 4.0, 0.0), V3::new(8.89, 5.0, 4.0));
     let cube_at = Transform {
         position: V3::new(0.0, 4.0, 0.0),
         ..Default::default()

@@ -111,6 +111,47 @@ impl std::ops::Add for Vec3 {
     }
 }
 
+impl std::ops::Sub for Vec3 {
+    type Output = Vec3;
+    fn sub(self, other: Vec3) -> Vec3 {
+        Vec3 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+            z: self.z - other.z,
+        }
+    }
+}
+
+impl std::ops::SubAssign for Vec3 {
+    fn sub_assign(&mut self, other: Vec3) {
+        *self = *self - other;
+    }
+}
+
+impl Vec3 {
+    /// Euclidean length.
+    #[must_use]
+    pub fn length(self) -> f32 {
+        self.dot(self).sqrt()
+    }
+
+    /// This vector scaled to length 1 — the zero vector stays the zero
+    /// vector (no NaNs from a degenerate direction; camera look-at relies
+    /// on that guard).
+    #[must_use]
+    pub fn normalize(self) -> Vec3 {
+        let len = self.length();
+        if len == 0.0 {
+            return Vec3::splat(0.0);
+        }
+        Vec3 {
+            x: self.x / len,
+            y: self.y / len,
+            z: self.z / len,
+        }
+    }
+}
+
 /// A 4-component float vector.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vec4 {

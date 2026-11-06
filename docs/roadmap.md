@@ -165,9 +165,9 @@ Ported from gold's `game` module, headless first (gold ships a
   **offscreen wgpu renderer**: no window, no surface — frames render to a
   texture, get read back, and can be saved as PNGs (gold's screenshot debug
   aid), so tests assert actual pixels. The scene is camera-driven: a
-  `Camera` (position + half-extents, world → clip; z is the depth window)
-  and `MeshRenderer` components — entities render themselves through the
-  draw pass at their composed world transforms. Two pipelines share the
+  `Camera` (eye/center position + look-at target + projection, world →
+  clip) and `MeshRenderer` components — entities render themselves through
+  the draw pass at their composed world transforms. Two pipelines share the
   frame: the quad scene (rect/circle silhouettes, SDF-clipped, list order)
   and the **mesh scene** — models (procedural cube/sphere/quad, or glTF
   files via the `gltf` feature: node transforms and material base colors
@@ -188,8 +188,35 @@ Ported from gold's `game` module, headless first (gold ships a
   ambient-only (gold's zeroed light contributes nothing). Gold shipped
   `LIGHT_COUNT=1`; this port spends the bank on eight.
 
-Next: camera 3D — perspective/look-at projection with orbit controls, so the
-mesh scene renders a real third-person view.
+**Camera 3D** completes the scene: the `Camera` carries a projection — the
+v0 orthographic window (position + half-extents, z the mesh depth window)
+or gold's perspective (fov 60° y / near 0.1 / far 100, gold's prototype
+defaults; aspect = width/height — gold's `ratio`, set by the embedder;
+resize-aware aspect is a later refinement). The perspective matrix is
+gold's camera math (camera.cpp `setViewTransform`): bx's `mtxLookAt` +
+`mtxProj(…, homo=false)` — z ∈ [0, 1] after the divide, exactly WebGPU's
+clip z ∈ [0, w] convention, so `CompareFunction::Less` keeps meaning
+"closer wins" (the GL-style [−1, 1] mapping would clip the whole near
+half). One divergence, on purpose: gold's look-at is left-handed (bx's
+default, view-space +z toward the target), but the mesh pipeline's
+back-face winding was established by the v0 ortho camera (GL-style sight
+−z), so the perspective view uses bx's right-handed variant and ONE cull
+mode stays correct for both cameras — the left-handed one renders meshes
+inside-out (far faces pass cull instead of near ones; the pixel tests
+catch it). The quad scene stays an orthographic image of the world — a
+second divergence from gold, which projects everything through the one
+camera: under a perspective camera quads map through the ortho window
+derived at the target plane (`quad_window`: half_y = distance·tan(fov/2),
+half_x over the aspect), so flat scene furniture lines up at the target's
+depth. The `OrbitController` is Hydrargyros-native (gold has none — its
+camera rides the script seam): yaw/pitch/distance around a target, fed
+the unified mouse/wheel events (left-drag orbits — button 0 is left in
+both winit and the DOM, which diverge on right/middle; wheel zooms,
+negative delta zooms in), building the perspective camera each frame;
+`examples/game_gltf.rs` streams the checker cube through it as a real
+third-person view.
+
+Next: physics leftovers — joints/constraints, only if a port needs them.
 
 ### Scripting layer (cross-cutting) — done (v1, the interpreter seam)
 

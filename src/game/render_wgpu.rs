@@ -243,26 +243,12 @@ const MESH_GLOBALS_BYTES: usize = MAX_MESH_DRAWS * MESH_STRIDE;
 /// camera + model + color, in f32 words: 16 + 16 + 4 = 144 bytes.
 const MESH_GLOBALS_SIZE: usize = 144;
 
-/// World → clip for the mesh scene: x, y map exactly like
-/// [`Camera::world_to_clip`]; z maps the depth window `half_extents.z`
-/// into WebGPU's `[0, 1]` clip range — the nearest plane (toward the
-/// viewer, +z) at 0, the farthest at 1 — so `Less` is "closer wins".
-/// Column-major, WGSL's order.
+/// World → clip for the mesh scene — the camera's own matrix
+/// ([`Camera::view_projection`]): the v0 ortho window (x, y the view, z
+/// the depth window into WebGPU's `[0, 1]` — `Less` is "closer wins") or
+/// gold's perspective look-at. Column-major, WGSL's order.
 fn camera_matrix(camera: &Camera) -> [[f32; 4]; 4] {
-    let hx = camera.half_extents.x.max(1e-6);
-    let hy = camera.half_extents.y.max(1e-6);
-    let hz = camera.half_extents.z.max(1e-6);
-    [
-        [1.0 / hx, 0.0, 0.0, 0.0],
-        [0.0, 1.0 / hy, 0.0, 0.0],
-        [0.0, 0.0, -1.0 / (2.0 * hz), 0.0],
-        [
-            -camera.position.x / hx,
-            -camera.position.y / hy,
-            0.5 + camera.position.z / (2.0 * hz),
-            1.0,
-        ],
-    ]
+    camera.view_projection()
 }
 
 /// The entity transform as a model matrix: `T · R · S` — scale, then
@@ -1155,12 +1141,13 @@ impl super::render::RenderBackend for WgpuRenderer {
         }
         if let Some(camera) = &self.camera {
             // position AND size transform: half-extents divide by the view's
-            // half-extents, or every quad renders at the wrong scale
+            // half-extents, or every quad renders at the wrong scale. Quads
+            // stay an orthographic image of the world (the quad_window —
+            // under a perspective camera, the window derived at the target
+            // plane); the mesh scene gets the real projection.
+            let window = camera.quad_window();
             quad.pos = camera.world_to_clip(crate::var::Vec3::new(quad.pos[0], quad.pos[1], 0.0));
-            quad.size = [
-                quad.size[0] / camera.half_extents.x,
-                quad.size[1] / camera.half_extents.y,
-            ];
+            quad.size = [quad.size[0] / window.x, quad.size[1] / window.y];
         }
         self.scene.push(quad);
     }

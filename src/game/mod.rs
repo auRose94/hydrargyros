@@ -64,7 +64,7 @@ pub mod window;
 #[cfg(feature = "winit")]
 pub mod winit_window;
 
-pub use camera::Camera;
+pub use camera::{Camera, OrbitController, Projection};
 pub use component::{Component, Priority};
 pub use engine::Engine;
 pub use entity::Entity;
