@@ -50,6 +50,8 @@ pub mod render;
 #[cfg(feature = "wgpu")]
 pub mod render_wgpu;
 pub mod renderable;
+#[cfg(feature = "script")]
+pub mod scripted;
 #[cfg(feature = "stream")]
 pub mod stream_window;
 #[cfg(feature = "tray")]
@@ -77,6 +79,8 @@ pub use render::{Geometry, Quad, QuadShape, RenderBackend};
 #[cfg(feature = "wgpu")]
 pub use render_wgpu::WgpuRenderer;
 pub use renderable::{MeshGeometry, MeshRenderer, MeshShape, Renderable};
+#[cfg(feature = "script")]
+pub use scripted::{HookNames, ScriptedComponent};
 #[cfg(feature = "stream")]
 pub use stream_window::StreamingWindow;
 pub use texture::Texture;

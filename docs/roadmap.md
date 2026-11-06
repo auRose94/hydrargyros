@@ -46,7 +46,7 @@ The core is implemented and tested (`tests/ergonomics.rs`, `tests/serde.rs`,
 | `src/web/database.rs` | the `database` facade — config in, collection handles out |
 | `src/web/http/` | http layer (behind the `web` feature) — `Server` facade (verbs, `:param`/`*` patterns, `ws`, `mount`, `on_error`, `start`/`stop`), `Response`, request staging; `post_var`/`get_var` sugar; axum underneath |
 | `src/from_var.rs` + `derive/` | `FromVar` — the typed hot-path seam: `#[derive(FromVar)]` turns a `Var` object into a strict, path-tracked struct |
-| `src/game/` | game module — `Engine` (gold's pump), `Component` (priority tiers), `Entity`/`Transform` (scene tree), `WindowSystem` registry + `HeadlessWindow`, physics (`PhysicsWorldBackend` + `none`/rapier backends, `PhysicsBody` step-and-sync), `RenderBackend` + offscreen wgpu renderer |
+| `src/game/` | game module — `Engine` (gold's pump), `Component` (priority tiers), `Entity`/`Transform` (scene tree), `WindowSystem` registry + `HeadlessWindow`, physics (`PhysicsWorldBackend` + `none`/rapier backends, `PhysicsBody` step-and-sync), `RenderBackend` + offscreen wgpu renderer, `ScriptedComponent` (the `script` feature's interpreter seam) |
 
 Key design choices:
 
@@ -188,16 +188,59 @@ Ported from gold's `game` module, headless first (gold ships a
   ambient-only (gold's zeroed light contributes nothing). Gold shipped
   `LIGHT_COUNT=1`; this port spends the bank on eight.
 
-Next: the interpreter seam so components can be scripted.
+Next: camera 3D — perspective/look-at projection with orbit controls, so the
+mesh scene renders a real third-person view.
 
-### Scripting layer (cross-cutting)
+### Scripting layer (cross-cutting) — done (v1, the interpreter seam)
 
-- **DevYatsu's `script` crate** (a TypeScript-like interpreter) is the natural
-  scripting host — and DevYatsu also made an expressjs-like web lib, so it
-  pairs with the web module. Hydrargyros's `Var` is the bridge between native Rust
-  and scripts.
-- The ambition: write a prototype in `Var`/script ergonomics, then derive a
-  typed native path for the hot loop. That's gold's thesis, made Rust-native.
+- **The crate is v12** (DevYatsu's `v12`, git-only at a pinned rev — the
+  roadmap's "DevYatsu's script crate" name was wrong; the dependency is
+  `v12-api`, the engine's embedding facade). DevYatsu also made an
+  expressjs-like web lib, so it pairs with the web module. Hydrargyros's
+  `Var` is the bridge between native Rust and scripts, mirroring gold's
+  `script` facade (`include/lang/lang.hpp`): `Script::new({"source"})`,
+  `load`, `run`, `set_global`/`get_global`, `call`, `register` — behind the
+  `script` feature.
+- **A Send + Sync handle over a !Send engine.** v12's `Context` is
+  single-mutator (!Send + !Sync), while `Var` is `Send + Sync` and
+  `Component: Send` — and the winit pump runs on its own thread. So
+  `Script` is a lightweight handle (id + source + Send host closures) and
+  the `Context` lives in a **thread-local pool keyed by script id**,
+  materialized on first use per thread: all calls for one script happen on
+  one thread and state persists per (script, thread). Moving a script to
+  another thread rematerializes it there — the pool design is pinned by a
+  test that moves a handle into `thread::spawn`.
+- **The JSON bridge (v1).** v12's facade marshals only scalars, its
+  completion values are unwired (their ADR-004), and objects have no host
+  API — so values cross as JSON text over host-function calls: `serde_json`
+  on the `Var` side, `JSON.parse`/`JSON.stringify` on the script side, with
+  explicit fidelity checks (integers beyond 2^53 and non-finite floats are
+  errors, not silent degradations; a script function value crossing out is
+  an error too). The per-frame path stays scalar: `call_unit` drives hook
+  shims with a bare `f64` — no JSON, no recompile.
+- **`ScriptedComponent`** (gold's optional lifecycle): `initialize`/
+  `update(dt)`/`draw` dispatch to same-named script functions, missing ones
+  silently skipped, script throws fail loud. The transform seam: the
+  component carries the entity transform as a shared
+  `Arc<Mutex<Transform>>` handle the script sees as a `transform` global —
+  refreshed before each hook, written back after (the engine materializes
+  `PhysicsBody` poses itself; script writes go through the component's
+  handle, and an engine-side link like physics' is the natural next step).
+- Honest divergences: v12 compiles-and-runs in one step (gold splits
+  load/run), each eval's top-level `let`/`const` is lexical to that eval
+  (global-object state is what `get_global` reads), and object key order is
+  preserved through the bridge only because serialization streams the `Var`
+  directly. A `Var::Func` crossing in becomes a script-callable host closure;
+  the serde `{"__func__": id}` contract lets function handles ride data.
+- The ambition stands: write a prototype in `Var`/script ergonomics, then
+  derive a typed native path for the hot loop. That's gold's thesis, made
+  Rust-native.
+- Portability wart, upstream's: the pinned v12 tree carries a
+  `conformance/test262` gitlink with no `.gitmodules` mapping, so `cargo
+  fetch` of the dependency fails on a machine without a pre-seeded cargo git
+  checkout (this machine's is seeded — the submodule-update error is the
+  tell). Builds resolve fine once checked out; upstream dropping the gitlink
+  or adding the module mapping fixes it properly.
 
 ## What Hydrargyros will NOT do
 
@@ -207,7 +250,7 @@ Next: the interpreter seam so components can be scripted.
   strengths. Hydrargyros is the scripting/data layer; others may *choose* to bridge
   it to Bevy later, but Hydrargyros doesn't depend on or bend for Bevy.
 - **Not reinvent wheels.** serde (serialization), hyper (HTTP), wgpu (graphics),
-  tokio/futures (async), DevYatsu's script (interpreter) — each is the right
+  tokio/futures (async), DevYatsu's v12 (the interpreter) — each is the right
   existing tool. Hydrargyros's value is the `Var` seam and the ergonomics, not
   reimplementing the Rust ecosystem.
 

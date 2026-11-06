@@ -39,7 +39,9 @@ impl Priority {
 
 /// A behavior attached to an [`Entity`](crate::game::Entity) — gold's
 /// `component`, as a trait. Components are native Rust objects (the hot
-/// path); scripted components arrive later with the interpreter seam.
+/// path); scripted ones ([`ScriptedComponent`](super::scripted::ScriptedComponent),
+/// the `script` feature) ride this same trait — the interpreter seam drives
+/// them through a shared transform handle instead of entity access.
 pub trait Component: Send {
     /// Which tier of the frame this component updates in.
     fn priority(&self) -> Priority {

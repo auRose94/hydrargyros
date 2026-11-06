@@ -36,6 +36,8 @@ pub mod game;
 pub mod list;
 pub mod object;
 pub mod proxy;
+#[cfg(feature = "script")]
+pub mod script;
 pub mod sugar;
 pub mod var;
 pub mod web;

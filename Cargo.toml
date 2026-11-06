@@ -45,6 +45,9 @@ pollster = { version = "0.4", optional = true }
 gltf = { version = "1", optional = true }
 # texture image decoding (the `image` feature): Texture::from_file for PNGs
 image = { version = "0.25", optional = true }
+# script: the interpreter seam (gold's `script` facade) — DevYatsu's v12
+# JavaScript engine, git-only (not on crates.io), pinned to a rev
+v12-api = { git = "https://github.com/DevYatsu/v12", rev = "b24abaef5473ff39aa0d1719e631fc407cfd4b8", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
@@ -68,6 +71,8 @@ stream = ["dep:axum", "dep:tokio", "dep:futures-util"]
 gltf = ["dep:gltf"]
 # image: decode texture image files (PNG/JPEG/...) into textures
 image = ["dep:image"]
+# script: the v12 interpreter seam (gold's script facade; scripted components)
+script = ["dep:v12-api"]
 
 [dev-dependencies]
 serde_json = "1"

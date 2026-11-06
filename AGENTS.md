@@ -42,8 +42,9 @@ cargo clippy --all-targets
   diff — after running it, `git status` and revert anything outside your
   change set before committing.
 - Feature gates keep the core lean: `web`, `physics`, `wgpu`, `winit`, `tray`,
-  `stream`, `gltf`, `image`. New heavy dependencies go behind a feature, and
-  feature-gated examples need `[[example]] required-features` in Cargo.toml.
+  `stream`, `gltf`, `image`, `script`. New heavy dependencies go behind a
+  feature, and feature-gated examples need `[[example]] required-features` in
+  Cargo.toml.
 - `Cargo.lock` is untracked (library crate); `/public` is ignored.
 
 ## Architecture invariants (do not break)
@@ -52,8 +53,9 @@ cargo clippy --all-targets
   is `Send + Sync` (compile-time assertion in `src/lib.rs`); locks go through
   the poison-tolerant `crate::lock`. Never introduce `Rc`/`RefCell`.
 - **serde is the serialization layer** — one `Serialize`/`Deserialize` impl on
-  `Var`, so any serde format works for free. `Func` serializes as `null`
-  (closures don't round-trip).
+  `Var`, so any serde format works for free. `Func` serializes as the handle
+  `{"__func__": id}` and round-trips through the process-global id registry
+  (unknown ids degrade to `Null` — closures can't cross processes).
 - **Explicit reads/writes.** `.get()`/`.put()`/`.set()`, typed reads via
   `Into<…>`/`as_*()`, `Null` as a literal. Don't add implicit
   assignment-conversion — that's the gold footgun this design exists to
@@ -91,6 +93,14 @@ cargo clippy --all-targets
   mismatch.
 - When a change alters two things at once and the result confuses you, revert
   one to isolate (this pattern ended several multi-day debugging sagas).
+- The `script` feature's v12 git dep (DevYatsu/v12, pinned rev) cannot
+  `cargo fetch` on a clean machine — upstream's tree carries a `test262`
+  gitlink with no `.gitmodules` mapping, so cargo's submodule update fails.
+  This machine's cargo git checkout is pre-seeded; on a fresh clone, that
+  submodule error is the tell (upstream fix pending — see roadmap).
+- Clippy without the feature set lies about gated code: an import used only
+  under a feature reads as "unused" and removing it breaks `--all-features`.
+  Gate the import with `#[cfg(feature = …)]` instead of deleting it.
 
 ## Conventions
 
