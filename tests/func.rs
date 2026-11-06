@@ -84,10 +84,17 @@ fn func_into_var_and_object() {
 }
 
 #[test]
-fn func_still_serializes_as_null() {
-    // no registry yet: functions die at the serialization boundary
-    let v = Var::Func(func!(|| Var::Null));
-    assert_eq!(serde_json::to_string(&v).unwrap(), "null");
+fn func_serializes_as_id_handle() {
+    // the id→Func registry: a Func serializes as the one-key handle
+    // {"__func__": id} — formerly null, back when functions died at the
+    // serialization boundary
+    let f = func!(|| Var::Null);
+    let id = f.id();
+    let v = Var::Func(f);
+    assert_eq!(
+        serde_json::to_string(&v).unwrap(),
+        format!(r#"{{"__func__":{id}}}"#)
+    );
 }
 
 #[test]

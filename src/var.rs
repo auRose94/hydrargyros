@@ -9,10 +9,11 @@
 //! `Rc`/`RefCell`) makes the whole value graph `Send + Sync`: the same `Var`
 //! crosses threads, async tasks, and route handlers.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::list::List;
 use crate::object::Object;
@@ -189,6 +190,44 @@ impl Quat {
 /// only need to be distinct, never ordered.
 static FUNC_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+/// Process-global id → Func registry backing serde round-tripping: a `Func`
+/// serializes as the one-key map `{"__func__": id}`, and deserialization
+/// restores the handle by looking the id up here. Functions register in
+/// [`Func::new`] — the single creation choke point, so every `func!` expansion
+/// is covered automatically. Entries are never removed (no GC): every function
+/// simply lives for the life of the process, which is the acceptable shape for
+/// a prototyping framework — gold's lang registry worked the same way.
+static FUNC_REGISTRY: OnceLock<Mutex<HashMap<u64, Func>>> = OnceLock::new();
+
+fn func_registry() -> &'static Mutex<HashMap<u64, Func>> {
+    FUNC_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// The registry is shared state like everything else in the value graph —
+// extend lib.rs's Send + Sync proof to it.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<OnceLock<Mutex<HashMap<u64, Func>>>>();
+};
+
+/// Restore a `Func` handle from its serialized id (the value of
+/// `{"__func__": id}`). A live id returns a clone of the registered function;
+/// anything else — unknown id, non-integer — degrades to `Null` rather than
+/// erroring: the id is a *within-process* handle (closures can't cross
+/// processes), so an unregistered id can only come from another process or
+/// from data written before the registry existed, and `Null` keeps that data
+/// lenient the way the old all-functions-die behavior did.
+fn func_from_handle(id: &Var) -> Var {
+    let Some(id) = id.as_i64() else {
+        return Var::Null;
+    };
+    let registry = crate::lock(func_registry());
+    registry
+        .get(&(id as u64))
+        .map(|f| Var::Func(f.clone()))
+        .unwrap_or(Var::Null)
+}
+
 /// A function body: takes the argument list, produces a `Var`.
 type FuncBody = Arc<dyn Fn(&[Var]) -> Var + Send + Sync>;
 
@@ -199,6 +238,10 @@ type FuncBody = Arc<dyn Fn(&[Var]) -> Var + Send + Sync>;
 /// told apart (compared, shown in debug output) even though their bodies can't
 /// be compared. The body is shared through an `Arc`, so cloning a `Func` is a
 /// cheap pointer bump.
+///
+/// The id is also the serde handle: a `Func` serializes as the one-key map
+/// `{"__func__": id}`, and deserialization restores the handle from the
+/// process-global `FUNC_REGISTRY` (an unknown id restores as `Null`).
 pub struct Func {
     id: u64,
     body: FuncBody,
@@ -207,11 +250,18 @@ pub struct Func {
 impl Func {
     /// Wrap a closure, assigning it a fresh, process-unique id. The closure
     /// must be `Send + Sync` — functions cross threads like every other `Var`.
+    ///
+    /// This is the single creation choke point, so registration in
+    /// `FUNC_REGISTRY` happens here: every `func!` expansion lands here too.
+    /// Clones share the id (and the `Arc`'d body), so the registered clone
+    /// equals the original.
     pub fn new(f: impl Fn(&[Var]) -> Var + Send + Sync + 'static) -> Self {
-        Func {
+        let func = Func {
             id: FUNC_ID_COUNTER.fetch_add(1, Ordering::Relaxed),
             body: Arc::new(f),
-        }
+        };
+        crate::lock(func_registry()).insert(func.id, func.clone());
+        func
     }
 
     /// The stable id of this function.
@@ -659,10 +709,12 @@ impl From<Func> for Var {
 // ---- serde: one trait covers every serde format (JSON/BSON/CBOR/MsgPack/…) ----
 //
 // `Var` is the universal dynamic value, so it serializes to/from a serde data
-// model. The `Func` variant has no data-model representation — it serializes
-// as `null` (you can't round-trip a closure). With ids, a registry (id → Func
-// table) could emit `{"__func__": id}` and restore the handle on load; until
-// that registry exists, functions die at the serialization boundary.
+// model. A closure still has no data-model form, but `Func` carries a stable
+// id: it serializes as the one-key map `{"__func__": id}`, and deserialization
+// restores the handle from `FUNC_REGISTRY` (see `func_from_handle`). Unknown
+// ids degrade to `Null` — a within-process handle can't mean anything on the
+// far side of a process boundary, and `Null` keeps data written before the
+// registry existed lenient. A bare `null` still deserializes to `Null`.
 
 impl serde::Serialize for Var {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -694,8 +746,13 @@ impl serde::Serialize for Var {
             Var::Vec3(v) => serializer.serialize_some(v),
             Var::Vec4(v) => serializer.serialize_some(v),
             Var::Quat(v) => serializer.serialize_some(v),
-            // functions aren't a data-model value
-            Var::Func(_) => serializer.serialize_none(),
+            // the id-bearing handle: deserialization restores the function
+            // from FUNC_REGISTRY (unknown ids come back Null)
+            Var::Func(f) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("__func__", &f.id)?;
+                map.end()
+            }
         }
     }
 }
@@ -752,8 +809,20 @@ impl<'de> serde::Deserialize<'de> for Var {
                 Ok(Var::List(List::from_iter(items)))
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Var, A::Error> {
-                let o = Object::new();
+                // Buffer the entries first: the one-key map `{"__func__": id}`
+                // is a serialized `Func` handle (see `Serialize`) and must be
+                // intercepted before it turns into a plain object.
+                let mut entries: Vec<(String, Var)> = Vec::new();
                 while let Some((k, v)) = map.next_entry::<String, Var>()? {
+                    entries.push((k, v));
+                }
+                if let [(key, id)] = entries.as_slice() {
+                    if key.as_str() == "__func__" {
+                        return Ok(func_from_handle(id));
+                    }
+                }
+                let o = Object::new();
+                for (k, v) in entries {
                     o.set(k, v);
                 }
                 Ok(Var::Object(o))
