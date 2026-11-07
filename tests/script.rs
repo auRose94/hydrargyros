@@ -328,6 +328,57 @@ fn scripted_component_moves_its_transform_across_engine_frames() {
 }
 
 #[test]
+fn engine_syncs_the_scripted_transform_into_its_entity() {
+    // the engine-side link (Engine::script_sync): the script drives the
+    // shared handle and the engine writes it back into the ENTITY's
+    // transform after the component pass — the draw pass (and anything
+    // reading entity transforms) sees the scripted pose. The entity's
+    // spawn pose seeds the script (gold's physicsBody spawns at its entity
+    // transform), so incremental scripts start from where the entity was
+    // placed — not from the handle's default.
+    let script = Script::new(
+        "function update(dt) { \
+             transform.position.x += 2.0 * dt; \
+             transform.position.z -= dt; \
+         }",
+    )
+    .unwrap();
+    let component = ScriptedComponent::new(script).unwrap();
+
+    let mut entity = Entity::new("mover");
+    entity.transform_mut().position = hydrargyros::Vec3::new(10.0, 2.0, 5.0);
+    entity.transform_mut().scale = hydrargyros::Vec3::splat(2.0);
+    entity.add_component(Box::new(component));
+
+    let mut engine = Engine::new("acme", "scripted-sync");
+    engine.frame_time(0.0);
+    engine.add_entity(entity);
+
+    // four deterministic frames at dt = 0.5
+    for _ in 0..4 {
+        engine.update(0.5);
+    }
+
+    // read through the NORMAL entity/transform API — not the handle:
+    // x: 10 + 4 frames × 2.0 × 0.5 = 14.0 (seeded from the spawn pose)
+    let moved = engine.entities()[0].transform();
+    assert!(
+        (moved.position.x - 14.0).abs() < 1e-5,
+        "x was {}",
+        moved.position.x
+    );
+    assert!(
+        (moved.position.z - 3.0).abs() < 1e-5,
+        "z was {}",
+        moved.position.z
+    );
+    // y untouched by the script, preserved by the whole-transform round-trip
+    assert!((moved.position.y - 2.0).abs() < 1e-5);
+    // scale rides the seam untouched too (the script never sees it change)
+    assert_eq!(moved.scale, hydrargyros::Vec3::splat(2.0));
+}
+
+#[test]
 fn missing_script_hooks_are_silently_skipped() {
     // gold's optional lifecycle: a script that defines nothing still rides
     // every hook without a squeak

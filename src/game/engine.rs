@@ -15,6 +15,8 @@ use super::light::SceneLight;
 use super::physics::PhysicsWorld;
 use super::physics_body::PhysicsBody;
 use super::render::RenderBackend;
+#[cfg(feature = "script")]
+use super::scripted::ScriptedComponent;
 use super::transform::Transform;
 use super::window::{create_window_backend, WindowSystem};
 use crate::var::Var;
@@ -223,10 +225,13 @@ impl Engine {
     /// sync back into entity transforms (gold's step-and-sync), then
     /// components sort by priority (stable, every frame — priorities can
     /// change), initialize newcomers, and update with the frame's delta
-    /// time. Public so tests and headless code can drive frames without a
-    /// window.
+    /// time; finally scripted components' transforms write back into their
+    /// entities (the scripted seam, [`Self::script_sync`]). Public so tests
+    /// and headless code can drive frames without a window.
     pub fn update(&mut self, dt: f64) {
         self.physics_step_and_sync(dt as f32);
+        #[cfg(feature = "script")]
+        self.script_sync(true);
         for (_, path) in self.update_order() {
             let slot = self.slot_at_mut(&path);
             if !slot.initialized {
@@ -235,6 +240,8 @@ impl Engine {
             }
             slot.component.update(dt);
         }
+        #[cfg(feature = "script")]
+        self.script_sync(false);
     }
 
     /// One frame's draw pass: the scene opens with the camera and every
@@ -402,6 +409,59 @@ impl Engine {
             };
             entity.transform_mut().position = position;
             entity.transform_mut().rotation = rotation;
+        }
+    }
+
+    /// The scripted seam (behind the `script` feature) — the engine-side
+    /// link that makes scripted components actually move their entities,
+    /// the sibling of the physics sync above. Two writes per frame, one
+    /// direction each: before the component pass, a not-yet-initialized
+    /// scripted component takes its ENTITY's transform as the spawn pose
+    /// (gold's physicsBody spawns at its entity transform — the same
+    /// rule); after the pass, every scripted component's shared transform
+    /// handle writes back into its entity's transform, so the draw pass
+    /// (and anything reading entity transforms) sees the scripted pose.
+    ///
+    /// One mover per entity: physics XOR script. An entity carrying both a
+    /// `PhysicsBody` and a `ScriptedComponent` syncs in undefined order —
+    /// the physics sync writes its pose first, then the script's
+    /// write-back overwrites it (the rule is documented in both modules;
+    /// don't rely on either).
+    #[cfg(feature = "script")]
+    fn script_sync(&mut self, seed: bool) {
+        let paths = self.all_slot_paths();
+        let Self { entities, .. } = self;
+        for path in &paths {
+            let owner_path = &path[..path.len() - 1];
+            let [first, rest @ ..] = owner_path else {
+                continue;
+            };
+            let Some(entity) = walk_mut(entities, *first, rest) else {
+                continue;
+            };
+            let last = *path.last().unwrap();
+            let spawn = *entity.transform(); // the seed pose, copied out
+            let write_back = {
+                let slot = entity.slot_at_mut(&[last]);
+                let Some(scripted) = slot
+                    .component
+                    .as_any_mut()
+                    .downcast_mut::<ScriptedComponent>()
+                else {
+                    continue;
+                };
+                if seed {
+                    if !slot.initialized {
+                        scripted.set_transform(spawn);
+                    }
+                    None
+                } else {
+                    Some(scripted.transform())
+                }
+            };
+            if let Some(pose) = write_back {
+                *entity.transform_mut() = pose;
+            }
         }
     }
 

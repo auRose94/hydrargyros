@@ -16,9 +16,7 @@
 //! deliberately shape-of-a-callback), yet the whole point of a scripted
 //! component is `update(dt)` moving its entity — gold scripts mutate
 //! `entity.position` directly because gold entities ARE script objects. The
-//! engine materializes `PhysicsBody` poses back into entity transforms
-//! itself, but the engine is not in this change's seam, so the component
-//! carries the entity transform as a **shared handle**:
+//! component carries the entity transform as a **shared handle**:
 //! `Arc<Mutex<Transform>>`. The script sees it as a global object named
 //! `transform` — `{position: {x, y, z}, rotation: {x, y, z, w}, scale:
 //! {x, y, z}}` — refreshed from the handle before each hook and written
@@ -26,6 +24,16 @@
 //! does, at the component instead of in the pump). One `Script` drives one
 //! `ScriptedComponent`: the script's `transform` global IS the component's
 //! entity transform.
+//!
+//! The engine-side link is landed, and the handle is the only writer: after
+//! every component pass the engine syncs each scripted component's handle
+//! into its entity's transform (`Engine::script_sync`, the physics sync's
+//! sibling), and an unseeded component spawns at its ENTITY's transform —
+//! gold's physicsBody rule — so incremental scripts start from where the
+//! entity was placed. One mover per entity: physics XOR script — an entity
+//! carrying both a `PhysicsBody` and a `ScriptedComponent` syncs in
+//! undefined order (the physics pose lands first, the script's write-back
+//! overwrites it); don't rely on it.
 //!
 //! The bridge between hooks and script is a single compiled bootstrap (gold
 //! runs hooks straight from the pump; we compile the guard once and call it
