@@ -110,3 +110,7 @@ required-features = ["physics", "wgpu", "winit"]
 [[example]]
 name = "game_gltf"
 required-features = ["wgpu", "stream", "gltf"]
+
+[[example]]
+name = "game_sandbox"
+required-features = ["physics", "wgpu", "stream", "script"]

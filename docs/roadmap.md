@@ -160,7 +160,12 @@ Ported from gold's `game` module, headless first (gold ships a
   rigid bodies, gravity, stepping, raycasts that name the hit body. The
   engine materializes `PhysicsBody` components at their entity transforms
   and syncs poses back every frame (gold's step-and-sync). The pump takes a
-  fixed timestep for deterministic headless sims. Bodies carry gold's
+  fixed timestep for deterministic headless sims. `set_gravity` is a LIVE
+  knob — it wakes every body, because settled bodies sleep and a gravity
+  flip would otherwise silently no-op on any resting scene (the sandbox
+  demo's antigravity frame was identical to the settled one until this; a
+  divergence from gold, whose bullet backend only sets gravity at world
+  init). Bodies carry gold's
   `mass` proto knob: an explicit mass makes a dynamic body weigh exactly
   that (rapier derives the shape's inertia at the given mass — gold's
   `calculateLocalInertia`), mass 0 keeps the density-derived default, and
@@ -227,7 +232,11 @@ the unified mouse/wheel events (left-drag orbits — button 0 is left in
 both winit and the DOM, which diverge on right/middle; wheel zooms,
 negative delta zooms in), building the perspective camera each frame;
 `examples/game_gltf.rs` streams the checker cube through it as a real
-third-person view.
+third-person view, and `examples/game_sandbox.rs` combines every rung —
+rapier physics (gravity flips on space, `r` resets the stack), a
+v12-scripted patroller moving its entity through the engine-side link,
+lights, procedural meshes — into one orbit-driven sandbox streamed to the
+browser.
 
 Next: the rung queue is complete — new work branches from the roadmap
 sections above.
@@ -264,9 +273,12 @@ sections above.
   silently skipped, script throws fail loud. The transform seam: the
   component carries the entity transform as a shared
   `Arc<Mutex<Transform>>` handle the script sees as a `transform` global —
-  refreshed before each hook, written back after (the engine materializes
-  `PhysicsBody` poses itself; script writes go through the component's
-  handle, and an engine-side link like physics' is the natural next step).
+  refreshed before each hook, written back after, and the engine closes the
+  loop (`Engine::script_sync`, the physics sync's sibling): an unseeded
+  component spawns at its entity's transform (gold's physicsBody rule), and
+  after every component pass each handle writes back into its entity's
+  transform, so the draw pass sees the scripted pose. One mover per entity:
+  physics XOR script — an entity with both syncs in undefined order.
 - Honest divergences: v12 compiles-and-runs in one step (gold splits
   load/run), each eval's top-level `let`/`const` is lexical to that eval
   (global-object state is what `get_global` reads), and object key order is
