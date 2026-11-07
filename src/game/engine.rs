@@ -8,6 +8,8 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "audio")]
+use super::audio::AudioWorld;
 use super::camera::Camera;
 use super::component::Priority;
 use super::entity::Entity;
@@ -35,6 +37,10 @@ pub struct Engine {
     frame_time: f64,
     settings_root: PathBuf,
     physics: Option<PhysicsWorld>,
+    /// The audio world, if one is attached (gold's engine holds the
+    /// `audioSystem` too; the whole module rides the `audio` feature).
+    #[cfg(feature = "audio")]
+    audio: Option<AudioWorld>,
     renderer: Option<Box<dyn RenderBackend>>,
     camera: Camera,
     /// Fixed delta time for the pump (seconds). `None` = wall clock (gold's
@@ -54,6 +60,8 @@ impl Engine {
             frame_time: 16.0,
             settings_root: PathBuf::from("."),
             physics: None,
+            #[cfg(feature = "audio")]
+            audio: None,
             renderer: None,
             camera: Camera::default(),
             fixed_dt: None,
@@ -89,6 +97,19 @@ impl Engine {
     /// The physics world, if one is attached.
     pub fn physics_mut(&mut self) -> Option<&mut PhysicsWorld> {
         self.physics.as_mut()
+    }
+
+    /// Attach the audio world (gold's engine holds the `audioSystem`).
+    #[cfg(feature = "audio")]
+    pub fn set_audio(&mut self, audio: AudioWorld) -> &mut Self {
+        self.audio = Some(audio);
+        self
+    }
+
+    /// The audio world, if one is attached.
+    #[cfg(feature = "audio")]
+    pub fn audio_mut(&mut self) -> Option<&mut AudioWorld> {
+        self.audio.as_mut()
     }
 
     /// Attach a render backend (gold's `graphics` object).
