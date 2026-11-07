@@ -155,10 +155,14 @@ Ported from gold's `game` module, headless first (gold ships a
   `orientationchange`/viewport resizes, the page is phone-sized (viewport
   meta with `viewport-fit=cover`, `touch-action: none` on the canvas,
   44px-ish touch targets), and a ☿ toolbox menu carries the controls hints
-  plus a QR (`/qr`, an SVG from qrcodegen) encoding the LAN-reachable URL
-  (the UDP-connect trick names the interface IP; a loopback bind keeps the
-  QR harmless) for opening the stream on another device. The fullscreen
-  button hands desktop browsers off to the **native view**
+  plus the LAN-reachable URL (the UDP-connect trick names the interface IP;
+  a loopback bind keeps the QR harmless) for opening the stream on another
+  device — the page's centered symbol **is** that QR itself: the `/qr` SVG
+  (qrcodegen at ECC High) inlines into the template with the tray mark
+  riding a white plate in its center (`QR_LOGO_PLATE_FRACTION`, ~13% of the
+  code area — decode-verified back to its URL by the rqrr test in
+  tests/stream.rs), and hovering/tapping it shows the hand-off info. The
+  fullscreen button hands desktop browsers off to the **native view**
   (`native_view::NativeView`, behind `winit`+`wgpu`) — a
   borderless-fullscreen winit window whose mini blit renderer consumes the
   SAME `FrameSink`, a second consumer of the buffer; the pump never

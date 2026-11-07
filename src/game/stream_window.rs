@@ -7,9 +7,11 @@
 //! (or a test) can read the frame, click, and send keys without a GUI.
 //!
 //! The surface is mobile-ready and hand-off capable: fit mode upscales
-//! bilinearly and re-fits on rotation, a toolbox menu (☿) carries the
-//! controls hints plus a `/qr` SVG encoding the LAN-reachable URL (open the
-//! stream on another device), and the desktop fullscreen button hands the
+//! bilinearly and re-fits on rotation, the centered ☿ symbol **is** the QR
+//! — the `/qr` SVG (the mark riding a white plate in its center) is inlined
+//! into the page at build time and also served standalone, and hover/tap on
+//! it shows the hand-off info. A toolbox menu (☿) carries the controls
+//! hints plus the LAN URL, and the desktop fullscreen button hands the
 //! frames off to the **native view** (`native_view::NativeView` — the same
 //! buffer, a second consumer; the pump never restarts). An opt-in
 //! [`StreamingWindow::with_token`] gates the page and the WS upgrade behind
@@ -44,9 +46,24 @@ body { margin: 0; background: #14161a; color: #e8e6e3; font-family: system-ui, s
    every non-integer fit scale nearest-neighbor crunchy — `auto` keeps the
    stream smooth at any scale and changes nothing at 1:1 */
 canvas { image-rendering: auto; border: 1px solid #2a2e36; border-radius: 8px;
-         max-width: 96vw; max-height: 78vh; background: #000;
+         max-width: 96vw; max-height: 64vh; background: #000;
          touch-action: none; /* the canvas is a game surface: no double-tap zoom, no scroll */ }
-#glyph { margin: 0; font-size: 2rem; color: #dce0e8; font-weight: 400; }
+/* the centered symbol IS the QR now — the stream's max-height gives it
+   the top of the column (max-height: 64vh above) */
+#glyph-wrap { position: relative; }
+#glyph { margin: 0; cursor: pointer; }
+#glyph svg { display: block; width: min(26vh, 240px); height: auto; }
+#glyph:focus-visible { outline: 2px solid #4f6df5; outline-offset: 4px; border-radius: 8px; }
+/* the hover/tap popup: what this is, how to open it elsewhere, where the
+   controls live — same card look as the toolbox menu */
+#glyph-info { position: absolute; top: calc(100% + .5rem); left: 50%;
+              transform: translateX(-50%); width: min(17rem, 84vw);
+              background: #1c2027; border: 1px solid #2a2e36; border-radius: 10px;
+              padding: .7rem .9rem; box-shadow: 0 .5rem 1.5rem rgb(0 0 0 / .5);
+              z-index: 10; text-align: center; font-size: .8rem; color: #9aa3b2; }
+#glyph-info p { margin: .25rem 0; }
+#glyph-info .brand { color: #dce0e8; font-size: .9rem; }
+#glyph-info[hidden] { display: none; }
 /* object-fit: contain keeps the CSS fallback letterboxed too when the
    max-height clamp would otherwise distort the aspect */
 body.fit canvas { width: 96vw; height: auto; max-height: 82vh; object-fit: contain; }
@@ -63,14 +80,20 @@ button.secondary { background: #2a2e36; color: #e8e6e3; }
 #menu h3 { margin: .2rem 0 .4rem; font-size: .8rem; text-transform: uppercase;
            letter-spacing: .08em; color: #9aa3b2; }
 #menu ul { margin: 0 0 .8rem; padding-left: 1.1rem; font-size: .9rem; line-height: 1.5; }
-#menu img { display: block; width: min(11rem, 60vw); margin: 0 auto .5rem;
-            background: #fff; border-radius: 6px; padding: .3rem; box-sizing: border-box; }
-#handoff { display: block; font-size: .72rem; color: #b8c0cc; word-break: break-all;
-           user-select: all; cursor: text; }
+.handoff-url { display: block; font-size: .72rem; color: #b8c0cc; word-break: break-all;
+               user-select: all; cursor: text; }
 #menu[hidden] { display: none; }
 </style></head>
 <body>
-<h1 id="glyph" title="hydrargyros — Hg">☿</h1>
+<div id="glyph-wrap">
+  <h1 id="glyph" tabindex="0" aria-label="hydrargyros — scan to open this stream on another device" aria-expanded="false">__QR_SVG__</h1>
+  <div id="glyph-info" hidden>
+    <p class="brand">hydrargyros — Hg</p>
+    <p>scan the code to open this stream on another device, or copy the link:</p>
+    <code class="handoff-url" id="glyph-url">__HANDOFF_URL__</code>
+    <p>the ☿ toolbox (top right) has the controls</p>
+  </div>
+</div>
 <canvas id="screen" width="320" height="180"></canvas>
 <div class="row">
   <button id="quit">quit</button>
@@ -88,8 +111,8 @@ button.secondary { background: #2a2e36; color: #e8e6e3; }
       <li>keys go to the engine (the sandbox: space flips gravity, r resets)</li>
     </ul>
     <h3>open on another device</h3>
-    <img id="qr" src="/qr" alt="QR code linking to this stream">
-    <code id="handoff">__HANDOFF_URL__</code>
+    <!-- the QR itself is the centered ☿ symbol; the menu carries the URL -->
+    <code class="handoff-url" id="handoff">__HANDOFF_URL__</code>
   </div>
 </div>
 <script>
@@ -179,6 +202,33 @@ const toolboxBtn = document.getElementById("toolbox-btn");
 toolboxBtn.addEventListener("click", () => {
   menu.hidden = !menu.hidden;
   toolboxBtn.setAttribute("aria-expanded", menu.hidden ? "false" : "true");
+});
+// the centered QR doubles as the info affordance: hover (desktop) or tap
+// opens a small popup — what this is, how to open it elsewhere, where the
+// controls live
+const glyphWrap = document.getElementById("glyph-wrap");
+const glyph = document.getElementById("glyph");
+const glyphInfo = document.getElementById("glyph-info");
+function setInfo(open) {
+  glyphInfo.hidden = !open;
+  glyph.setAttribute("aria-expanded", open ? "true" : "false");
+}
+// hover only where hover exists (on touch, emulated mouseenter would fight
+// the tap toggle); a tap anywhere else closes it
+if (matchMedia("(hover: hover)").matches) {
+  glyphWrap.addEventListener("mouseenter", () => setInfo(true));
+  glyphWrap.addEventListener("mouseleave", () => setInfo(false));
+}
+let lastPointerType = "";
+addEventListener("pointerdown", (e) => {
+  lastPointerType = e.pointerType;
+  if (!glyphWrap.contains(e.target)) { setInfo(false); }
+}, true);
+glyph.addEventListener("click", () => {
+  if (lastPointerType === "touch") { setInfo(glyphInfo.hidden); } else { setInfo(true); }
+});
+glyph.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setInfo(true); }
 });
 </script>
 </body></html>"#;
@@ -366,7 +416,9 @@ impl WindowSystem for std::sync::Arc<StreamingWindow> {
 }
 
 /// The page route: token-gated when armed, with the hand-off URL injected
-/// for the toolbox's "open on another device" text.
+/// for the toolbox text and the popup, and the QR inlined as the centered
+/// symbol (the same SVG `/qr` serves — the glyph renders with zero
+/// fetches, like the rest of the template).
 async fn page(
     State(state): State<ServerState>,
     Query(query): Query<HashMap<String, String>>,
@@ -374,7 +426,15 @@ async fn page(
     if let Some(forbidden) = state.0.check_token(&query) {
         return forbidden;
     }
-    Html(PAGE.replace("__HANDOFF_URL__", &state.0.handoff_url())).into_response()
+    let url = state.0.handoff_url();
+    // a QR only fails on an URL past the spec's capacity (way past what the
+    // LAN base + token produce) — degrade to an empty symbol, never an error page
+    let svg = qr_svg(&url).unwrap_or_default();
+    Html(
+        PAGE.replace("__QR_SVG__", &svg)
+            .replace("__HANDOFF_URL__", &url),
+    )
+    .into_response()
 }
 
 /// The WebSocket upgrade route: state carries the sink and the event pipe.
@@ -442,25 +502,80 @@ async fn stream_socket(socket: WebSocket, sink: FrameSink, events: mpsc::Sender<
     }
 }
 
+/// The logo plate's side as a fraction of the grid side: 0.36² ≈ 13% of the
+/// code AREA — comfortably inside the ~30% of codewords ECC High can
+/// recover, and pinned by `qr_with_logo_still_decodes` in tests/stream.rs
+/// (the rqrr decode test IS the scannability contract for this ratio).
+pub const QR_LOGO_PLATE_FRACTION: f64 = 0.36;
+/// The ☿ glyph's height as a fraction of the plate side; the rest of the
+/// plate is the quiet white padding that keeps the mark decodable. Pinned
+/// by the same decode test.
+pub const QR_LOGO_GLYPH_FRACTION: f64 = 0.66;
+
+/// The mark's bounding box in the tray glyph's native 32×32 space
+/// (src/game/tray.rs anatomy): x 9.3..22.7, y 9..31.2 — the painter and the
+/// decode test scale from this center and height.
+const QR_GLYPH_CENTER: (f64, f64) = (16.0, 20.1);
+const QR_GLYPH_HEIGHT: f64 = 22.2;
+
 /// The QR as a standalone SVG: qrcodegen 1.8 generates the module matrix
 /// (its `to_svg_string` lives in the demo, not the library), the shape is
-/// ours — one `<rect>`-path square per dark module over a white field.
+/// ours — one `<rect>`-path square per dark module over a white field, with
+/// the ☿ mark resting on a white plate in the center. The mark is the tray
+/// glyph's anatomy (src/game/tray.rs — one glyph, three surfaces: tray,
+/// page, QR) ported to SVG shapes, in dark mercury-steel on the white plate
+/// (the tray's bright silver would vanish on white). ECC High because the
+/// plate erases modules: error correction recovers ~30% of the codeword
+/// area, the plate costs ~13% (`QR_LOGO_PLATE_FRACTION`), and the rqrr
+/// decode test in tests/stream.rs proves the result still scans. The SAME
+/// painter paints `/qr` and the page's centered symbol.
 fn qr_svg(text: &str) -> Result<String, String> {
-    let qr = qrcodegen::QrCode::encode_text(text, qrcodegen::QrCodeEcc::Medium)
+    let qr = qrcodegen::QrCode::encode_text(text, qrcodegen::QrCodeEcc::High)
         .map_err(|e| format!("qr encode: {e}"))?;
     let n = qr.size();
+    let grid = n as f64;
+
+    // the plate: a centered white rounded square the logo sits on — its
+    // quiet field keeps the mark's strokes from merging into modules
+    let plate = grid * QR_LOGO_PLATE_FRACTION;
+    let plate_xy = (grid - plate) / 2.0;
+    let plate_half = plate / 2.0;
+    // the mark, scaled from the tray's native 32×32 space into the plate
+    let scale = plate * QR_LOGO_GLYPH_FRACTION / QR_GLYPH_HEIGHT;
+    let (glyph_cx, glyph_cy) = QR_GLYPH_CENTER;
+    let tx = grid / 2.0 - glyph_cx * scale;
+    let ty = grid / 2.0 - glyph_cy * scale;
+
     let mut path = String::new();
     for y in 0..n {
         for x in 0..n {
-            if qr.get_module(x, y) {
-                path.push_str(&format!("M{x} {y}h1v1h-1z"));
+            if !qr.get_module(x, y) {
+                continue;
             }
+            // modules whose center falls inside the plate are cleared —
+            // that's the data ECC High spends on the logo
+            let (mx, my) = (x as f64 + 0.5, y as f64 + 0.5);
+            if (mx - grid / 2.0).abs() < plate_half && (my - grid / 2.0).abs() < plate_half {
+                continue;
+            }
+            path.push_str(&format!("M{x} {y}h1v1h-1z"));
         }
     }
     Ok(format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {n} {n}\" \
-         shape-rendering=\"crispEdges\"><rect width=\"{n}\" height=\"{n}\" fill=\"#fff\"/>\
-         <path d=\"{path}\" fill=\"#14161a\"/></svg>"
+         shape-rendering=\"crispEdges\">\
+         <rect width=\"{n}\" height=\"{n}\" fill=\"#fff\"/>\
+         <path d=\"{path}\" fill=\"#14161a\"/>\
+         <rect class=\"qr-plate\" x=\"{plate_xy}\" y=\"{plate_xy}\" width=\"{plate}\" \
+         height=\"{plate}\" rx=\"{}\" fill=\"#fff\"/>\
+         <g class=\"qr-glyph\" transform=\"translate({tx} {ty}) scale({scale})\" \
+         fill=\"none\" stroke=\"#262e3d\" stroke-linecap=\"butt\">\
+         <circle cx=\"16\" cy=\"19.5\" r=\"5.5\" stroke-width=\"2.4\"/>\
+         <path d=\"M12.5 9A3.5 3.5 0 0 0 19.5 9\" stroke-width=\"2.2\"/>\
+         <path d=\"M16 23.3V31.2\" stroke-width=\"2.4\"/>\
+         <path d=\"M11.3 28H20.7\" stroke-width=\"2.4\"/>\
+         </g></svg>",
+        plate * 0.18
     ))
 }
 
