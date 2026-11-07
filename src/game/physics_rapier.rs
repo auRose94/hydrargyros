@@ -76,6 +76,17 @@ impl PhysicsWorldBackend for RapierBackend {
 
     fn set_gravity(&mut self, gravity: Vec3) {
         self.world.gravity = Vector::new(gravity.x, gravity.y, gravity.z);
+        // the knob takes effect immediately: settled bodies are ASLEEP, and
+        // rapier only wakes a body on its own state changing — a gravity
+        // flip would silently no-op on any resting scene (a live demo caught
+        // this: the antigravity frame was identical to the settled one).
+        // gold's bullet backend only ever sets gravity at world init, so
+        // this wake-everything is the port's own semantic for a live knob.
+        for named in self.bodies_by_name.values() {
+            if let Some(body) = self.world.bodies.get_mut(named.body) {
+                body.wake_up(true);
+            }
+        }
     }
 
     fn step(&mut self, dt: f32) {

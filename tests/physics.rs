@@ -128,6 +128,40 @@ fn free_fall_is_mass_independent() {
     );
 }
 
+#[test]
+fn set_gravity_wakes_sleeping_bodies() {
+    // settled bodies are ASLEEP, and rapier doesn't wake them for a world
+    // gravity change — the backend's set_gravity wakes every body so the
+    // knob takes effect immediately (a live streaming demo caught this:
+    // the antigravity frame was identical to the settled one)
+    let mut world = PhysicsWorld::create("rapier", &Var::Null).unwrap();
+    let id = Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 };
+    world.add_body("floor", &Shape::Box(Vec3::new(10.0, 0.5, 10.0)), BodyType::Static, Vec3::new(0.0, 0.0, 0.0), id, 0.0, 0.0);
+    world.add_body("ball", &Shape::Sphere(0.5), BodyType::Dynamic, Vec3::new(0.0, 5.0, 0.0), id, 1.0, 0.0);
+
+    // 5 s of settling: the ball rests at y ≈ 1 and is long asleep
+    let dt = 1.0 / 60.0;
+    for _ in 0..300 {
+        world.step(dt);
+    }
+    let settled = world.body_pose("ball").unwrap().0;
+    assert!(
+        settled.y > 0.9 && settled.y < 1.2,
+        "ball should be at rest on the floor: {settled:?}"
+    );
+
+    // flip gravity: the knob is live — the asleep ball rises
+    world.set_gravity(Vec3::new(0.0, 9.81, 0.0));
+    for _ in 0..60 {
+        world.step(dt);
+    }
+    let risen = world.body_pose("ball").unwrap().0;
+    assert!(
+        risen.y > settled.y + 2.0,
+        "gravity flip must move a settled body: settled={settled:?} risen={risen:?}"
+    );
+}
+
 // ---- the none backend: gold's contract ----
 
 #[test]
