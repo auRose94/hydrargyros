@@ -13,6 +13,7 @@ pub struct PhysicsBody {
     pub(crate) shape: Shape,
     pub(crate) body_type: BodyType,
     pub(crate) gravity_scale: f32,
+    pub(crate) mass: f32,
     pub(crate) materialized: bool,
 }
 
@@ -23,6 +24,7 @@ impl PhysicsBody {
             shape,
             body_type: BodyType::Dynamic,
             gravity_scale: 1.0,
+            mass: 0.0,
             materialized: false,
         }
     }
@@ -36,6 +38,16 @@ impl PhysicsBody {
     /// 0 = immune to gravity, 2 = double.
     pub fn gravity_scale(mut self, scale: f32) -> Self {
         self.gravity_scale = scale;
+        self
+    }
+
+    /// gold's `mass` proto knob (default 0). Only affects DYNAMIC bodies:
+    /// 0 keeps the shape's density-derived mass, an explicit value becomes
+    /// the body's whole mass. Ignored on static bodies — a deliberate
+    /// divergence, since gold collapses static/dynamic into `mass != 0`
+    /// while the port keeps `BodyType` explicit (we have both knobs).
+    pub fn mass(mut self, mass: f32) -> Self {
+        self.mass = mass;
         self
     }
 

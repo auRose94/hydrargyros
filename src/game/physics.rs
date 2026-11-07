@@ -59,6 +59,14 @@ pub trait PhysicsWorldBackend: Send {
 
     /// Create a body; the backend owns its id. Re-registering a name
     /// replaces the old body (gold's replace semantics).
+    ///
+    /// `mass` is gold's `mass` proto knob, and only affects DYNAMIC bodies:
+    /// 0 (the default) keeps the shape's density-derived mass, an explicit
+    /// value becomes the body's whole mass. Ignored on static bodies — the
+    /// port keeps `BodyType` explicit rather than gold's `mass != 0`
+    /// dynamic collapse (we have both knobs).
+    // the whole body spec in one call — gold's createBody(comp, w)
+    #[allow(clippy::too_many_arguments)]
     fn add_body(
         &mut self,
         name: &str,
@@ -67,6 +75,7 @@ pub trait PhysicsWorldBackend: Send {
         position: Vec3,
         rotation: Quat,
         gravity_scale: f32,
+        mass: f32,
     );
 
     /// The body's current pose; `None` when the backend keeps no rigid
@@ -135,6 +144,7 @@ impl PhysicsWorldBackend for NoPhysicsBackend {
         _position: Vec3,
         _rotation: Quat,
         _gravity_scale: f32,
+        _mass: f32,
     ) {
     }
     fn body_pose(&self, _name: &str) -> Option<(Vec3, Quat)> { None }
@@ -169,6 +179,8 @@ impl PhysicsWorld {
         self.backend.set_gravity(gravity);
     }
 
+    // the whole body spec in one call — gold's createBody(comp, w)
+    #[allow(clippy::too_many_arguments)]
     pub fn add_body(
         &mut self,
         name: &str,
@@ -177,8 +189,9 @@ impl PhysicsWorld {
         position: Vec3,
         rotation: Quat,
         gravity_scale: f32,
+        mass: f32,
     ) {
-        self.backend.add_body(name, shape, body_type, position, rotation, gravity_scale);
+        self.backend.add_body(name, shape, body_type, position, rotation, gravity_scale, mass);
     }
 
     pub fn step(&mut self, dt: f32) {

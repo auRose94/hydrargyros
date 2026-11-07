@@ -160,7 +160,20 @@ Ported from gold's `game` module, headless first (gold ships a
   rigid bodies, gravity, stepping, raycasts that name the hit body. The
   engine materializes `PhysicsBody` components at their entity transforms
   and syncs poses back every frame (gold's step-and-sync). The pump takes a
-  fixed timestep for deterministic headless sims.
+  fixed timestep for deterministic headless sims. Bodies carry gold's
+  `mass` proto knob: an explicit mass makes a dynamic body weigh exactly
+  that (rapier derives the shape's inertia at the given mass — gold's
+  `calculateLocalInertia`), mass 0 keeps the density-derived default, and
+  mass on a static body is ignored — a deliberate divergence, since gold
+  collapses static/dynamic into `mass != 0` while the port keeps
+  `BodyType` explicit (we have both knobs). That closes the
+  physics-leftovers question honestly: gold's bullet backend never
+  constructs a constraint — no joint/constraint/force/impulse/kinematic/
+  collision-event surface exists anywhere in gold's src, include, or tests
+  — so there is nothing to port; porting it would be invention, not
+  porting. If a future port needs joints, rapier's `ImpulseJointSet` is
+  the designated slot. The one real gold surface deliberately not ported
+  is `debugDraw`/wireframe — render-coupled, and untested even in gold.
 - **Render** (behind the `wgpu` feature) — a `RenderBackend` trait and an
   **offscreen wgpu renderer**: no window, no surface — frames render to a
   texture, get read back, and can be saved as PNGs (gold's screenshot debug
@@ -216,7 +229,8 @@ negative delta zooms in), building the perspective camera each frame;
 `examples/game_gltf.rs` streams the checker cube through it as a real
 third-person view.
 
-Next: physics leftovers — joints/constraints, only if a port needs them.
+Next: the rung queue is complete — new work branches from the roadmap
+sections above.
 
 ### Scripting layer (cross-cutting) — done (v1, the interpreter seam)
 

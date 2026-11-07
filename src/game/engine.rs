@@ -373,6 +373,7 @@ impl Engine {
                     pose.position,
                     pose.rotation,
                     body.gravity_scale,
+                    body.mass,
                 );
                 body.materialized = true;
             }

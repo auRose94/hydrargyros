@@ -35,12 +35,20 @@ impl RapierBackend {
         }
     }
 
-    fn collider(shape: &Shape) -> Collider {
-        match shape {
+    /// The collider; an explicit mass rides it (rapier computes the shape's
+    /// inertia at that mass — gold's `calculateLocalInertia(mass, …)`):
+    /// dynamic bodies weigh the knob verbatim, everything else keeps the
+    /// density default (mass 0, or static bodies where mass is ignored).
+    fn collider(shape: &Shape, body_type: BodyType, mass: f32) -> Collider {
+        let builder = match shape {
             Shape::Box(half_extents) => {
-                ColliderBuilder::cuboid(half_extents.x, half_extents.y, half_extents.z).build()
+                ColliderBuilder::cuboid(half_extents.x, half_extents.y, half_extents.z)
             }
-            Shape::Sphere(radius) => ColliderBuilder::ball(*radius).build(),
+            Shape::Sphere(radius) => ColliderBuilder::ball(*radius),
+        };
+        match body_type {
+            BodyType::Dynamic if mass > 0.0 => builder.mass(mass).build(),
+            _ => builder.build(),
         }
     }
 }
@@ -83,6 +91,7 @@ impl PhysicsWorldBackend for RapierBackend {
         position: Vec3,
         rotation: Quat,
         gravity_scale: f32,
+        mass: f32,
     ) {
         // re-registering a name replaces the old body (gold's replace semantics)
         if let Some(old) = self.bodies_by_name.remove(name) {
@@ -106,7 +115,8 @@ impl PhysicsWorldBackend for RapierBackend {
         .rotation(Self::rotation_vector(rotation))
         .gravity_scale(gravity_scale)
         .build();
-        let (body_handle, collider_handle) = self.world.insert(rigid, Self::collider(shape));
+        let (body_handle, collider_handle) =
+            self.world.insert(rigid, Self::collider(shape, body_type, mass));
         self.collider_owner.insert(collider_handle, name.to_string());
         self.bodies_by_name
             .insert(name.to_string(), NamedBody { body: body_handle, collider: collider_handle });

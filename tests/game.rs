@@ -234,7 +234,8 @@ fn none_backend_keeps_transforms_under_script_control() {
     engine.set_physics(PhysicsWorld::none());
     let mut e = Entity::new("ghost");
     e.transform_mut().position = Vec3::new(1.0, 2.0, 3.0);
-    e.add_component(Box::new(PhysicsBody::new("ghost", Shape::Sphere(0.5))));
+    // mass rides the materialization seam; the none backend ignores it
+    e.add_component(Box::new(PhysicsBody::new("ghost", Shape::Sphere(0.5)).mass(50.0)));
     engine.add_entity(e);
 
     // several frames: the none backend never reports a pose, so the
@@ -258,7 +259,10 @@ fn rapier_world_syncs_falling_poses_into_transforms() {
     engine.set_physics(PhysicsWorld::create("rapier", &Var::Null).unwrap());
     let mut e = Entity::new("ball");
     e.transform_mut().position = Vec3::new(0.0, 10.0, 0.0);
-    e.add_component(Box::new(PhysicsBody::new("ball", Shape::Sphere(0.5))));
+    // the component's mass rides the materialization seam into the world;
+    // free fall is mass-independent (equivalence principle), so the fall is
+    // unchanged — the tight mass assertions live in tests/physics.rs
+    e.add_component(Box::new(PhysicsBody::new("ball", Shape::Sphere(0.5)).mass(2.0)));
     engine.add_entity(e);
 
     let dt = 1.0 / 60.0;
