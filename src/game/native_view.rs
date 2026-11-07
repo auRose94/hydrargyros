@@ -161,7 +161,12 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
     );
     let c = corners[i];
     var out: VsOut;
-    out.uv = c;
+    // orientation: the sink's rgba rows run top-down (row 0 = the image's
+    // top, which lands at texture v=0 on upload), while clip +y is the
+    // SCREEN's top — so screen-top corners (clip.y > 0) must sample
+    // v=0: flip v against the corner's clip y, or the view renders the
+    // frame upside down.
+    out.uv = vec2f(c.x, 1.0 - c.y);
     out.clip = vec4f((c * 2.0 - 1.0) * fit.xy, 0.0, 1.0);
     return out;
 }
