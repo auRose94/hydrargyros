@@ -42,6 +42,10 @@ pub mod entity;
 pub mod light;
 pub mod mesh;
 pub mod model;
+#[cfg(feature = "audio")]
+pub mod audio;
+#[cfg(feature = "winit")]
+pub mod native_view;
 pub mod physics;
 pub mod physics_body;
 #[cfg(feature = "physics")]
@@ -60,6 +64,7 @@ pub mod tray;
 pub use tray::spawn_tray_quit;
 pub mod texture;
 pub mod transform;
+pub mod tween;
 pub mod window;
 #[cfg(feature = "winit")]
 pub mod winit_window;
@@ -68,6 +73,11 @@ pub use camera::{Camera, OrbitController, Projection};
 pub use component::{Component, Priority};
 pub use engine::Engine;
 pub use entity::Entity;
+#[cfg(feature = "audio")]
+pub use audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
+#[cfg(feature = "winit")]
+pub use native_view::{NativeView, NativeViewHandle};
+pub use tween::{Easing, Timer, Tween};
 pub use light::{Light, LightKind, SceneLight};
 pub use mesh::{Mesh, MeshVertex};
 pub use model::{Model, ModelPart};

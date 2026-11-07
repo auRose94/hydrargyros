@@ -8,25 +8,36 @@
 //!   - **the perspective orbit camera**: left-drag orbits, wheel zooms
 //!     (gold's fov 60/near 0.1/far 100),
 //!   - **lights**: a directional key sun + a warm point lamp by the stack,
-//!   - **meshes**: procedural cubes/spheres, tinted, depth-tested, shaded.
+//!   - **meshes**: procedural cubes/spheres, tinted, depth-tested, shaded,
+//!   - **audio** (`audio` feature): gravity flips beep through the audio
+//!     backend (rodio on real devices; the no-op `none` recorder otherwise —
+//!     gold's `audioSystem` loadSound/play/setVolume lineage, tones instead
+//!     of sound files),
+//!   - **tweens** (feature-free): a beacon cube bobs on a SineInOut Tween
+//!     stepped by this pump (Hydrargyros-native — gold has no tween surface).
 //!
 //! Run:
-//!   cargo run --example game_sandbox --features physics,wgpu,stream,script
+//!   cargo run --example game_sandbox --features physics,wgpu,stream,script,audio
 //!
 //! The page opens automatically (http://127.0.0.1:8402); `--no-open` skips
 //! the auto-launch — paste the URL into any browser. Controls: left-drag =
 //! orbit, wheel = zoom, space (or " ") = flip gravity, `r` = reset the
-//! stack, the page's quit button = end the pump.
+//! stack, the page's quit button = end the pump. Fullscreen = the native
+//! window on desktop (Esc closes it — the stream page keeps running) /
+//! device fullscreen on phones; the page's ☿ toolbox has the same hints
+//! plus a QR to open the stream on another device.
 
 use std::sync::Arc;
 
+use hydrargyros::game::audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
 use hydrargyros::game::camera::OrbitController;
 use hydrargyros::game::light::{forward_quat, Light};
 use hydrargyros::game::physics::{BodyType, Shape as PhysShape};
 use hydrargyros::game::render::FrameSink;
 use hydrargyros::game::renderable::MeshRenderer;
 use hydrargyros::game::{
-    Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, ScriptedComponent, WgpuRenderer,
+    Easing, Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, ScriptedComponent, Tween,
+    WgpuRenderer,
 };
 use hydrargyros::script::Script;
 use hydrargyros::var::{Quat, Vec3};
@@ -39,6 +50,13 @@ fn main() {
     if let Some(physics) = engine.physics_mut() {
         physics.set_gravity(Vec3::new(0.0, -9.81, 0.0));
     }
+    // audio: gold's `audioSystem` lineage (loadSound/play/setVolume). Prefer
+    // the real device (rodio); a deviceless machine falls back to the no-op
+    // `none` recorder, which keeps the demo headless-safe.
+    let audio = AudioWorld::create("rodio", &Var::Null)
+        .or_else(|_| AudioWorld::create("none", &Var::Null))
+        .expect("an audio backend (rodio or none)");
+    engine.set_audio(audio);
 
     // the spawn table: every DYNAMIC body's initial pose — `r` re-registers
     // each at its spawn pose (gold's replace semantics) and the next
@@ -172,6 +190,20 @@ fn main() {
     )));
     engine.add_entity(patroller);
 
+    // the tweened beacon: a small cyan cube bobbing on a SineInOut Tween —
+    // Hydrargyros-native (gold has no tween surface), stepped by this pump
+    // and ping-ponged by swapping the endpoints each cycle
+    let mut beacon = Entity::new("beacon");
+    beacon.transform_mut().position = Vec3::new(-3.0, 0.8, -2.5);
+    beacon.add_component(Box::new(MeshRenderer::mesh(
+        Arc::new(Mesh::cube(Vec3::splat(0.25))),
+        [0.20, 0.85, 0.80, 1.0],
+    )));
+    engine.add_entity(beacon);
+
+    let (mut bob_lo, mut bob_hi) = (0.8f64, 2.2f64);
+    let mut bob = Tween::from_values(bob_lo, bob_hi, 1.6, Easing::SineInOut);
+
     // the sun: a directional light aimed like the classic key light (up,
     // right, toward the viewer), plus a warm point lamp hanging near the
     // stack — the scene shades with real depth, not flat
@@ -214,6 +246,12 @@ fn main() {
 
     // --no-open skips the auto-launch (paste the URL into any browser)
     let open_browser = !std::env::args().any(|a| a == "--no-open");
+    // the fullscreen hand-off consumes the same buffer through a second
+    // sink handle (the native view presents it in a real window)
+    #[cfg(feature = "winit")]
+    let native_sink = sink.clone();
+    #[cfg(feature = "winit")]
+    let mut native_view: Option<hydrargyros::game::native_view::NativeViewHandle> = None;
     let window = hydrargyros::game::StreamingWindow::new("127.0.0.1:8402", sink, open_browser)
         .expect("stream server");
     println!(
@@ -225,7 +263,10 @@ fn main() {
             " (paste into a browser)"
         }
     );
-    println!("controls: left-drag orbit · wheel zoom · space = flip gravity · r = reset stack");
+    println!(
+        "controls: left-drag orbit · wheel zoom · space = flip gravity · r = reset stack · \
+         fullscreen = native window on desktop (Esc closes) / device fullscreen on phone"
+    );
 
     // a custom pump: the same three public frame phases start_with runs —
     // events, update, draw, render — with the orbit pose and the key
@@ -238,6 +279,28 @@ fn main() {
         for event in window.drain() {
             if event.get("type").as_string().as_deref() == Some("quit") {
                 running = false;
+            }
+            // the fullscreen hand-off: the page's fullscreen button asks for
+            // the NATIVE view — a real borderless-fullscreen window
+            // presenting the SAME frames from the same sink (a second
+            // consumer; the pump never restarts). Live-guard: one view at a
+            // time — repeat presses are ignored while it's open, and Esc /
+            // closing it frees the slot (a press then re-opens it). The
+            // view exiting NEVER quits the app: this pump keeps running.
+            if event.get("type").as_string().as_deref() == Some("native_fullscreen") {
+                #[cfg(feature = "winit")]
+                if native_view.as_ref().is_none_or(|h| !h.is_open()) {
+                    match hydrargyros::game::native_view::NativeView::spawn(
+                        native_sink.clone(),
+                        "☿ sandbox — native view",
+                    ) {
+                        Ok(handle) => native_view = Some(handle),
+                        Err(e) => println!("native view unavailable: {e}"),
+                    }
+                }
+                #[cfg(not(feature = "winit"))]
+                println!("native view needs a build with the winit feature (--features winit)");
+                continue;
             }
             // left-drag orbits, wheel zooms (the unified mouse/wheel events)
             orbit.handle(&event);
@@ -258,6 +321,22 @@ fn main() {
                     let g = Vec3::new(0.0, if gravity_up { 9.81 } else { -9.81 }, 0.0);
                     if let Some(physics) = engine.physics_mut() {
                         physics.set_gravity(g);
+                    }
+                    // the flip beep — gold's audioSystem play() contract with
+                    // a synthesized tone instead of a loaded sound file
+                    // (asset-free); a failed play is non-fatal
+                    if let Some(audio) = engine.audio_mut() {
+                        let freq = if gravity_up { 520.0 } else { 330.0 };
+                        if let Err(e) = audio.play(
+                            &AudioSource::Tone {
+                                frequency: freq,
+                                duration: 0.15,
+                                shape: WaveShape::Sine,
+                            },
+                            &PlaySpec::default(),
+                        ) {
+                            println!("beep failed: {e}");
+                        }
                     }
                     println!(
                         "gravity → (0, {}, 0) — {}",
@@ -293,6 +372,16 @@ fn main() {
         }
         if !running {
             break;
+        }
+        // the beacon's bob: step the tween, ping-pong on finish, write the
+        // entity transform (the tween is a utility — the pump composes it)
+        bob.step(dt);
+        if bob.finished() {
+            std::mem::swap(&mut bob_lo, &mut bob_hi);
+            bob = Tween::from_values(bob_lo, bob_hi, 1.6, Easing::SineInOut);
+        }
+        if let Some(entity) = engine.entity_mut("beacon") {
+            entity.transform_mut().position.y = bob.value() as f32;
         }
         engine.set_camera(orbit.camera());
         engine.update(dt);

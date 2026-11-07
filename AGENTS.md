@@ -42,9 +42,9 @@ cargo clippy --all-targets
   diff — after running it, `git status` and revert anything outside your
   change set before committing.
 - Feature gates keep the core lean: `web`, `physics`, `wgpu`, `winit`, `tray`,
-  `stream`, `gltf`, `image`, `script`. New heavy dependencies go behind a
-  feature, and feature-gated examples need `[[example]] required-features` in
-  Cargo.toml.
+  `stream`, `gltf`, `image`, `script`, `audio`. New heavy dependencies go
+  behind a feature, and feature-gated examples need
+  `[[example]] required-features` in Cargo.toml.
 - `Cargo.lock` is untracked (library crate); `/public` is ignored.
 
 ## Architecture invariants (do not break)

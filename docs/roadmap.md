@@ -148,7 +148,27 @@ Ported from gold's `game` module, headless first (gold ships a
   paste the URL anywhere, e.g. an embedded browser), frames stream over
   WebSocket (`[w][h][rgba]` binary), and browser keys/mouse/wheel come back
   through `WindowSystem::poll` as `Var` events — the engine can't tell it
-  apart from SDL, and the whole loop is inspectable by an AI or a test. The
+  apart from SDL, and the whole loop is inspectable by an AI or a test.
+  The surface is rotation-aware and hand-off capable: fit mode upscales
+  bilinearly (`image-rendering: auto` — `pixelated` would crunch every
+  non-integer scale) with letterbox math recomputed on
+  `orientationchange`/viewport resizes, the page is phone-sized (viewport
+  meta with `viewport-fit=cover`, `touch-action: none` on the canvas,
+  44px-ish touch targets), and a ☿ toolbox menu carries the controls hints
+  plus a QR (`/qr`, an SVG from qrcodegen) encoding the LAN-reachable URL
+  (the UDP-connect trick names the interface IP; a loopback bind keeps the
+  QR harmless) for opening the stream on another device. The fullscreen
+  button hands desktop browsers off to the **native view**
+  (`native_view::NativeView`, behind `winit`+`wgpu`) — a
+  borderless-fullscreen winit window whose mini blit renderer consumes the
+  SAME `FrameSink`, a second consumer of the buffer; the pump never
+  restarts, Esc closes the view only (it has no path back into the
+  engine's event queue), and frames skip by generation so an unchanged
+  buffer is never re-presented. Phones instead do device fullscreen
+  (requestFullscreen + a best-effort orientation lock). An opt-in
+  `.with_token()` gates the page and the WS upgrade behind a random hex
+  `?t=` token (stdlib entropy, off by default — zero behavior change
+  without it). The
   **winit backend** (behind the `winit` feature) is the classic desktop
   window: the event loop runs on the main thread, the pump on another
   thread through the same seam, and the renderer presents to the surface
@@ -237,6 +257,37 @@ rapier physics (gravity flips on space, `r` resets the stack), a
 v12-scripted patroller moving its entity through the engine-side link,
 lights, procedural meshes — into one orbit-driven sandbox streamed to the
 browser.
+
+**App services** — two app-development fills beside gold's own surface:
+
+- **Timers/tweening** (`game::tween`, feature-free) — Hydrargyros-native
+  (gold has no tween/timer utility; its only easing is the UI style
+  system's CSS timing functions, style.cpp `easeValue`): an `Easing` enum
+  (linear/quad/cubic/sine/elastic curves, `ElasticOut` overshooting then
+  settling exactly onto 1), a `Tween` (`step(dt)` returns the current eased
+  value, clamped at the end so the last frame lands on `to`; durations
+  clamp to a `MIN_DURATION`, the OrbitController clamp pattern), and a
+  `Timer` (`step(dt)` true on tick — repeating timers re-arm carrying the
+  leftover, so ticks are a function of accumulated time only and frame
+  jitter can't drift the schedule; one-shots fire once). Pure data, no
+  engine wiring — v1 is a utility, components compose it in `update(dt)`.
+- **Audio** (`game::audio`, behind the `audio` feature) — gold DOES have an
+  `audioSystem` here (backends registered by name,
+  `loadSound(path)`→handle, `play(handle, loop)`, `stop()` everything,
+  `setVolume` master [0, 1] — SDL adapters as plugins), so the shape
+  mirrors it: an `AudioBackend` trait + register/create registry (gold's
+  factory map under a mutex), the real device being **rodio** (cpal — the
+  wheel gold loads SDL for), and the headless-first `none` recorder backend
+  (gold's registry has NO fallback — `createAudioSystem` returns nullptr on
+  a miss; the port ships one, the physics pattern, its play records
+  introspectable through `AudioWorld::none_plays` so contracts test without
+  a device). Divergences, on purpose: `play` takes the source directly —
+  gold's load-then-play two-step collapsed — and returns a per-play id, so
+  `stop(id)` names ONE sound where gold's `stop()` stops everything;
+  `AudioSource::Tone` synthesizes PCM in-memory (44.1 kHz mono i16, a
+  ~20-line stdlib WAV encoder) and the test decodes those bytes with
+  rodio's real Decoder, no device involved. The engine carries the world
+  like its physics world (`set_audio`/`audio_mut`).
 
 Next: the rung queue is complete — new work branches from the roadmap
 sections above.

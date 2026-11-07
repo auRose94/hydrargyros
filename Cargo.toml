@@ -48,6 +48,10 @@ image = { version = "0.25", optional = true }
 # script: the interpreter seam (gold's `script` facade) — DevYatsu's v12
 # JavaScript engine, git-only (not on crates.io), pinned to a rev
 v12-api = { git = "https://github.com/DevYatsu/v12", rev = "b24abaef5473ff39aa0d1719e631fc407cfd4b8", optional = true }
+# audio playback (the `audio` feature): rodio = the device playback wheel
+rodio = { version = "0.23", optional = true }
+# QR codes for the stream page's hand-off menu (dep-free, pure generation)
+qrcodegen = { version = "1.8", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
@@ -65,8 +69,11 @@ wgpu = ["dep:wgpu", "dep:pollster"]
 winit = ["dep:winit"]
 # tray: a system tray icon with a Quit menu (for headless windows)
 tray = ["dep:tray-icon", "dep:gtk"]
-# stream: the webapp windowing backend (canvas page over the render buffer)
-stream = ["dep:axum", "dep:tokio", "dep:futures-util"]
+# stream: the webapp windowing backend (canvas page over the render buffer;
+# the QR hand-off menu rides along)
+stream = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:qrcodegen"]
+# audio: playback (a no-op recorder backend ships without rodio touching a device)
+audio = ["dep:rodio"]
 # gltf: load triangle meshes from .gltf/.glb model files
 gltf = ["dep:gltf"]
 # image: decode texture image files (PNG/JPEG/...) into textures
@@ -113,4 +120,4 @@ required-features = ["wgpu", "stream", "gltf"]
 
 [[example]]
 name = "game_sandbox"
-required-features = ["physics", "wgpu", "stream", "script"]
+required-features = ["physics", "wgpu", "stream", "script", "audio"]
