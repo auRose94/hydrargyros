@@ -438,7 +438,7 @@ mod qr_contract {
         // the visual deliverable: keep the painted logo'd QR for a human
         // (or agent) to read — the tray glyph test dumps its PNG the same way
         paint_qr(&urls[0], true)
-            .save("/tmp/hyg_qr_logo.png")
+            .save(std::env::temp_dir().join("hyg_qr_logo.png"))
             .unwrap();
         for url in &urls {
             assert_eq!(decode(&paint_qr(url, false)), *url, "baseline, no logo");

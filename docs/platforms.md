@@ -25,7 +25,7 @@ through.
 | Native view (borderless fullscreen hand-off) | ✅ (X11 any-thread escape hatch) | ✅ expected (off-main loops allowed) | ❌ refused honestly | macOS requires the event loop on the main thread; the hand-off prints a clear refusal instead of panicking |
 | Streaming window (`stream`) | ✅ verified (WS traffic, QR decode) | ✅ expected | ✅ expected | Browser page + WebSocket — OS-neutral except `open_in_browser` |
 | `open_in_browser` | ✅ `xdg-open` | ✅ `cmd /c start` | ✅ `open` | All three wired |
-| Tray (`tray` feature) | ⚠ needs GTK (degrades gracefully without it) | ✅ expected (Win32) | ✅ expected | Linux: `gtk::init()` failure prints "tray unavailable" and continues — headless servers stay headless |
+| Tray (`tray` feature) | ⚠ needs GTK (degrades gracefully without it) | ✅ expected (native tray-icon) | ✅ expected (native tray-icon) | Deps are target-split in Cargo.toml — verified by resolution: on Windows/macOS targets the graph carries tray-icon's native backend and zero GTK; Linux wires tray-icon → libappindicator → GTK. `gtk::init()` failure prints "tray unavailable" and continues |
 
 Legend: ✅ verified on this machine / expected to work and cheap to verify ·
 ⚠ works with caveats · ❌ explicit, honest refusal.
@@ -35,19 +35,28 @@ Legend: ✅ verified on this machine / expected to work and cheap to verify ·
 Everything marked **verified** runs in this repo's test suite on Linux
 x86_64 — including real HTTP/WebSocket traffic, a real TLS handshake, real
 GPU pixels asserted from PNG readback, and the QR round-trip decode.
-Windows/macOS rows are **expected, not yet machine-verified**; the cheap
-first check is a cross-compile:
+Windows/macOS rows are **expected, not yet machine-verified**. Two checks
+already run without those machines:
+
+- **Dependency resolution per target** (no compilation needed):
+  `cargo tree --all-features --target x86_64-pc-windows-gnu -i gtk` is
+  empty and tray-icon resolves to its native backend — the tray dep split
+  is proven at the manifest level.
+- **cfg-gate audit**: platform peeks live in exactly three files
+  (`stream_window.rs` `open_in_browser`, `native_view.rs` main-thread
+  gates, `tray.rs` GTK init), all with honest degradation paths.
+
+The full compile check needs the target std installed (`rustup target
+add x86_64-pc-windows-msvc`, or the `rust-mingw` package on Arch), then:
 
 ```
-rustup target add x86_64-pc-windows-msvc
-cargo check  --all-features --target x86_64-pc-windows-msvc   # type/backends compile
-cargo check  --all-features --target aarch64-apple-darwin     # same idea for macOS
+cargo check --all-features --target x86_64-pc-windows-msvc   # type/backends compile
+cargo check --all-features --target aarch64-apple-darwin     # same idea for macOS
 ```
 
-(`cargo check` needs no linker for the target, so it validates cfg-gates and
-API usage without OS-specific toolchains.) Runtime verification wants a real
-machine or CI runners — the natural follow-up is a GitHub Actions matrix
-(linux/windows/macos, `cargo test` core + `cargo check` all-features).
+Runtime verification wants a real machine or CI runners — the natural
+follow-up is a GitHub Actions matrix (linux/windows/macos, `cargo test`
+core + `cargo check` all-features).
 
 ## Portability rules for new code
 

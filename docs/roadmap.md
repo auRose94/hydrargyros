@@ -334,9 +334,12 @@ The port rung queue is closed; new work branches from these items:
    suite is fully green in both modes; `List` (order, grows-with-nulls,
    self-extend snapshot, serde) and `Object::prepend` move-to-front
    contracts now pinned in tests.
-5. **Cross-platform**: audit Linux-only assumptions (paths, APIs, backend
-   availability), fix what's fixable, document a support matrix
-   ([platforms.md](platforms.md)).
+5. **Cross-platform** (done — structurally): hardcoded `/tmp` paths moved
+   to `env::temp_dir()`; the tray deps are target-split in Cargo.toml
+   (Linux GTK + libappindicator, Windows/macOS native tray-icon — proven
+   by per-target resolution); the support matrix and the rules for new
+   code live in [platforms.md](platforms.md). Machine verification for
+   Windows/macOS remains open (needs target std or CI runners).
 
 ## What hyg will NOT do
 

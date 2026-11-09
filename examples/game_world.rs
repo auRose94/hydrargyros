@@ -69,12 +69,12 @@ fn main() {
             Ok(mut renderer) => {
                 use hyg::game::RenderBackend;
                 renderer.render_frame();
-                let path = "/tmp/hyg_game_world.png";
+                let path = std::env::temp_dir().join("hyg_game_world.png");
                 let frame = renderer.screenshot();
                 let img: image::RgbaImage = image::ImageBuffer::from_raw(320, 180, frame.to_vec())
                     .expect("frame size mismatch");
-                img.save(path).unwrap();
-                println!("screenshot saved: {path}");
+                img.save(&path).unwrap();
+                println!("screenshot saved: {}", path.display());
             }
             Err(e) => println!("no renderer on this machine: {e}"),
         }

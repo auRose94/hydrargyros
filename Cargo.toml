@@ -37,8 +37,6 @@ futures-util = { version = "0.3", optional = true }
 rapier3d = { version = "0.36", optional = true }
 wgpu = { version = "30", optional = true }
 winit = { version = "0.30", optional = true }
-tray-icon = { version = "0.26", features = ["libappindicator"], optional = true }
-gtk = { version = "0.18", optional = true }
 # blocking on wgpu adapter/device futures for offscreen setup
 pollster = { version = "0.4", optional = true }
 # glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
@@ -55,6 +53,16 @@ qrcodegen = { version = "1.8", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
+
+# tray deps are target-split: Linux renders the glyph through GTK
+# (libappindicator), Windows/macOS use tray-icon's native backends. The
+# `tray` feature references both `dep:` names — cargo ignores the ones a
+# target doesn't carry.
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { version = "0.26", features = ["libappindicator"], optional = true }
+gtk = { version = "0.18", optional = true }
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.26", optional = true }
 
 [features]
 default = []

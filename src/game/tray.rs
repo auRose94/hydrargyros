@@ -155,6 +155,6 @@ mod tests {
                 ]));
             }
         }
-        img.save("/tmp/hyg_tray_glyph.png").unwrap();
+        img.save(std::env::temp_dir().join("hyg_tray_glyph.png")).unwrap();
     }
 }

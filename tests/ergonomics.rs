@@ -140,7 +140,7 @@ fn cow_sharing() {
 fn object_prepend_moves_key_to_front() {
     // insertion order is the invariant: prepend puts a key first, and
     // re-prepending an existing key MOVES it (no duplicate, value replaced)
-    let mut obj = o!{ "a": 1i64, "b": 2i64 };
+    let obj = o!{ "a": 1i64, "b": 2i64 };
     obj.prepend("c", Var::from(3i64));
     let keys: Vec<String> = obj.entries().into_iter().map(|(k, _)| k).collect();
     assert_eq!(keys, ["c", "a", "b"]);
