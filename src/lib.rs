@@ -31,6 +31,7 @@
 //! Payloads are `Arc<Mutex>`-shared, so the whole value graph is `Send +
 //! Sync`: the same `Var` crosses threads, async tasks, and web handlers.
 
+pub mod dynamic;
 pub mod from_var;
 pub mod game;
 pub mod list;

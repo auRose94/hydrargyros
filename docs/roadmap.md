@@ -351,7 +351,18 @@ The port rung queue is closed; new work branches from these items:
    The support matrix and the rules for new code live in
    [platforms.md](platforms.md); Windows runtime + macOS verification
    remain open (real machines or CI runners).
-6. **The `dynamic` module** (drafted): [dynamic-design.md](dynamic-design.md)
+6. **The `dynamic` module** — **M0 landed (2026-11-09): the engine
+   registry.** `hyg::dynamic::engine` is feature-free (the
+   `ScriptEngine` factory / `ScriptSession` traits, the register/create
+   registry with v12 pre-seeded, `ScriptError` as the shared error
+   type); the v12 JSON bridge moved intact into `hyg::dynamic::v12`; and
+   `Script` kept its exact public API — the script suite passes
+   unchanged (22/22). The registry's own contracts are tested
+   feature-free through a recording engine (the audio-`none` pattern).
+   The new tests caught the module's first real bug on day one: a
+   registry RwLock read-twice deadlock under parallel writer pressure.
+   Next rungs: M1 (abi_stable FFI plugins), M2 (the graph model). The
+   full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the
    script-engine registry (v12 first, `script` stays its first customer),

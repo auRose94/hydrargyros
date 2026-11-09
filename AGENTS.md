@@ -91,6 +91,12 @@ included. If something fails, it's yours: fix it or revert.
   mismatch.
 - When a change alters two things at once and the result confuses you, revert
   one to isolate (this pattern ended several multi-day debugging sagas).
+- **Re-reading a lock inside the same statement's error path deadlocks under
+  writer pressure** — temporaries live to the end of the statement, so a
+  `guard.read()….ok_or_else(|| other_lock.read())` self-deadlocks the
+  moment a parallel writer queues. Scope the guard first, then build the
+  error (this bit the dynamic registry on its first day; caught only by
+  parallel test runs — serial passes hide it).
 - The `script` feature's v12 git dep (DevYatsu/v12, pinned rev) cannot
   `cargo fetch` on a clean machine — upstream's tree carries a `test262`
   gitlink with no `.gitmodules` mapping, so cargo's submodule update fails.
