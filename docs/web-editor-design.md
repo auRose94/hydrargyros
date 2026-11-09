@@ -1,4 +1,7 @@
-# hyg Press — a WYSIWYG website & API developer editor
+# Hydrargyros Press — a WYSIWYG website & API developer editor
+
+**Short name: `hyg` Press** (Hydrargyros is the project; `hyg` is the
+namespace).
 
 **Status: draft for review — not a commitment.** This sketch describes what a
 WordPress/Ghost-style editor for the web module could look like while staying
@@ -41,8 +44,8 @@ serialize-the-tree, and hand-edited templates survive WYSIWYG edits).
 
 ```
 my_site/
-  site.hyg            # Var (JSON): server config (host/port, sslCert/sslKey),
-                      # theme selection, route table, admin token hash
+  site.json.hyg       # server config (host/port, sslCert/sslKey), theme
+                      # selection, route table, admin token hash
   content/            # store collections: posts, pages, tags, media meta
   themes/
     default/
@@ -52,10 +55,12 @@ my_site/
   assets/             # uploaded media (static mount)
 ```
 
-`site.hyg` is the single source of truth; everything else is content the
-editor reads and writes through the module's own APIs. A project directory
-is a deployable artifact: `hyg serve my_site/` with no editor attached runs
-the site alone (the editor is a mode, not a dependency).
+`site.json.hyg` is the single source of truth (a `.hyg` carrier file — the
+serde-format-suffix convention shared with Hydrargyros Studio,
+[game-editor-design.md](game-editor-design.md)); everything else is content
+the editor reads and writes through the module's own APIs. A project
+directory is a deployable artifact: `hyg serve my_site/` with no editor
+attached runs the site alone (the editor is a mode, not a dependency).
 
 ### The editor server
 
@@ -69,7 +74,7 @@ One `Server`, three route groups:
   record in a store collection.
 - `/api/*` — the content API: CRUD over store collections, media upload,
   theme/route file operations, and **editor control** (reload theme,
-  restart server with new `site.hyg`). This is also the programmatic API —
+  restart server with new `site.json.hyg`). This is also the programmatic API —
   a headless client (CI, an AI agent) can build and publish a site without
   the UI. The whole request/response surface is `Var`, so any scripting
   client talks to it natively.
@@ -131,7 +136,7 @@ takes the exact `Var` the API takes.
 
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
-| M0 | Project model | `site.hyg` + directory layout load/save; a project dir runs standalone under a plain `Server` |
+| M0 | Project model | `site.json.hyg` + directory layout load/save; a project dir runs standalone under a plain `Server` |
 | M1 | Admin shell | `/admin` served from the HTML builder, token auth, `/api` content CRUD over a real store — integration tests drive real HTTP |
 | M2 | Content & pages | Post/page editing (structured, not yet WYSIWYG), draft/publish states, template slotting |
 | M3 | WYSIWYG | contentEditable block editing with tree round-trip; lossless-edit test: edit → save → load → edit → save is tree-identical |
@@ -145,7 +150,7 @@ takes the exact `Var` the API takes.
   vanilla JS islands may hit a ceiling at the WYSIWYG stage; if it does,
   the fallback is a single pre-built bundle mounted as a static asset
   (still no Node in the project's dev loop).
-- **Concurrent editor + server state** — `site.hyg` edits need the same
+- **Concurrent editor + server state** — `site.json.hyg` edits need the same
   restart discipline the engine's `start()`/`stop()` has (no double-start;
   watch-based stop with grace drain). Probably: editor writes config,
   then performs the existing graceful restart.

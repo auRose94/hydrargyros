@@ -324,10 +324,15 @@ The port rung queue is closed; new work branches from these items:
 1. **Standalone identity** (done): crate renamed to `hyg`; the narrative is
    standalone-first (README, roadmap, code comments); the heritage record
    lives in [gold-lineage.md](gold-lineage.md).
-2. **Editor designs** (drafted): [game-editor-design.md](game-editor-design.md)
-   — a unified engine & editor for the game module;
-   [web-editor-design.md](web-editor-design.md) — a WYSIWYG website/API
-   editor for the web module. Drafts for review, not commitments.
+2. **Editor designs** (drafted): **Hydrargyros Studio**
+   ([game-editor-design.md](game-editor-design.md)) — a unified engine &
+   editor for the game module (`hyg` is its short name); **Hydrargyros
+   Press** ([web-editor-design.md](web-editor-design.md)) — a WYSIWYG
+   website/API editor for the web module. The **`.hyg` carrier type** is
+   established: a serialized `Var` whose terminal `.hyg` suffix is the file
+   type and whose preceding suffix names the serde format — `.json.hyg`
+   default, `.cbor.hyg`/`.bson.hyg` for dense scenes. Drafts for review,
+   not commitments.
 3. **Examples tour**: every feature area reachable from a runnable example,
    indexed in `examples/`.
 4. **Test hardening** (done): the four long-broken doctests fixed — the
@@ -336,10 +341,12 @@ The port rung queue is closed; new work branches from these items:
    contracts now pinned in tests.
 5. **Cross-platform** (done — structurally): hardcoded `/tmp` paths moved
    to `env::temp_dir()`; the tray deps are target-split in Cargo.toml
-   (Linux GTK + libappindicator, Windows/macOS native tray-icon — proven
-   by per-target resolution); the support matrix and the rules for new
-   code live in [platforms.md](platforms.md). Machine verification for
-   Windows/macOS remains open (needs target std or CI runners).
+   (Linux GTK + libappindicator, Windows/macOS native tray-icon). **Windows
+   x86_64 is compile-verified** — `cargo check --all-features --target
+   x86_64-pc-windows-gnu` passes under the mingw-w64-rust-bin toolchain.
+   The support matrix and the rules for new code live in
+   [platforms.md](platforms.md); Windows runtime + macOS verification
+   remain open (real machines or CI runners).
 
 ## What hyg will NOT do
 

@@ -1,4 +1,7 @@
-# hyg Studio — a unified game engine & editor
+# Hydrargyros Studio — a unified game engine & editor
+
+**Short name: `hyg` Studio** (the crate/namespace, pronounced however you
+like — high-g, hey-g, hedge, hegg).
 
 **Status: draft for review — not a commitment.** This sketch describes what a
 Godot/Unreal-style editor for the game module could look like while staying
@@ -29,6 +32,15 @@ the typed hot path.** The editor is where that loop lives — write a
 inspector live, then `#[derive(FromVar)]` the hot structs when the prototype
 hardens.
 
+**The pitch is accessibility.** Everything follows established game-
+development principles on industry-established specs, so nothing here is a
+bespoke format or an in-house language to learn: the scripting is JavaScript
+(v12), the primary data container is JSON (with binary serde upgrades where
+density matters — see the `.hyg` carrier type below), and the authoring loop
+is Unity-like — entities, components, an inspector, scene files. The
+potential is the most accessible engine to pick up *because* it reinvents
+the least.
+
 ## Non-goals
 
 - Not a DCC tool: no mesh editing, no texture painting (glTF import stays
@@ -45,11 +57,11 @@ hardens.
 
 ```
 my_project/
-  project.hyg        # Var (JSON): name, window/render/audio backend config,
-                     # physics settings, asset registry
+  project.json.hyg   # name, window/render/audio backend config, physics
+                     # settings, asset registry
   scenes/
-    menu.hyg         # serialized entity tree (see below)
-    level_1.hyg
+    menu.json.hyg    # serialized entity tree (see below)
+    level_1.json.hyg
   scripts/           # v12 script sources, one per ScriptedComponent
   assets/            # glTF, textures, audio — imported, content-addressed
   store/             # optional web-store data for hybrid projects
@@ -83,6 +95,27 @@ inspector UI generation, and gizmo behavior (a light shows its cone, a
 body shows its collider). User components are v12 scripts + a `Var` props
 object, so they get the same inspector for free — the props object is just
 a `Var` the inspector already knows how to edit.
+
+### The `.hyg` carrier type
+
+A `.hyg` file is a serialized `Var` — one file type for every structured
+hyg document (scenes, project configs, theme templates, exported stores).
+The **terminal `.hyg` suffix is the type** (one file association, one icon,
+one "Open with Studio"); the **preceding suffix names the serde carrier
+format**: `.json.hyg` is the default and the human-readable home for most
+files; `.cbor.hyg` / `.bson.hyg` are the dense form for heavy scenes, where
+binary containers parse faster and ship smaller. Anything serde can parse
+qualifies — that's the point of "one `Serialize`/`Deserialize` impl on
+`Var`, any format for free", surfaced as a naming convention instead of a
+hidden choice.
+
+Loading rule: strip `.hyg`, match the format suffix against the known
+serde formats, and sniff-fallback to JSON (a bare `.hyg` file is JSON —
+the accessible default). Writing rule: the writer picks the format from
+the requested filename, never from content type guesses. JSON stays the
+primary container (diffable, mergeable, greppable — scenes are code-adjacent
+data); the dense carriers are a per-file upgrade for size, not a project-wide
+leap of faith.
 
 ### The editor shell
 

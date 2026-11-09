@@ -27,36 +27,46 @@ through.
 | `open_in_browser` | ✅ `xdg-open` | ✅ `cmd /c start` | ✅ `open` | All three wired |
 | Tray (`tray` feature) | ⚠ needs GTK (degrades gracefully without it) | ✅ expected (native tray-icon) | ✅ expected (native tray-icon) | Deps are target-split in Cargo.toml — verified by resolution: on Windows/macOS targets the graph carries tray-icon's native backend and zero GTK; Linux wires tray-icon → libappindicator → GTK. `gtk::init()` failure prints "tray unavailable" and continues |
 
-Legend: ✅ verified on this machine / expected to work and cheap to verify ·
-⚠ works with caveats · ❌ explicit, honest refusal.
+Legend: ✅ verified · ⚠ works with caveats · ❌ explicit, honest refusal.
+Three verification tiers: **verified on Linux** (the test suite runs there),
+**compile-verified on Windows** (`cargo check --all-features` against
+`x86_64-pc-windows-gnu` — every cfg-gate, API use, and dependency resolves),
+and **expected** (macOS, and Windows runtime behavior).
 
 ## Verification status
 
 Everything marked **verified** runs in this repo's test suite on Linux
 x86_64 — including real HTTP/WebSocket traffic, a real TLS handshake, real
 GPU pixels asserted from PNG readback, and the QR round-trip decode.
-Windows/macOS rows are **expected, not yet machine-verified**. Two checks
-already run without those machines:
 
-- **Dependency resolution per target** (no compilation needed):
+**Windows x86_64 is compile-verified (2026-11-09):**
+`cargo check --all-features --target x86_64-pc-windows-gnu` passes — the
+whole graph builds for the target, including v12's interpreter stack,
+wgpu's Windows deps, rodio (WASAPI), rapier, axum/rustls, and tray-icon's
+native backend with zero GTK. The check runs under the
+**mingw-w64-rust-bin** toolchain (Arch AUR, `/opt/rust`, rust 1.96.1 —
+a separate sysroot; it cannot be mixed with the system rustc):
+
+```
+PATH=/opt/rust/bin:$PATH /opt/rust/bin/cargo check --all-features --target x86_64-pc-windows-gnu
+```
+
+Two honest boundaries: `cargo check` validates types, cfg-gates, and API
+usage — it does not link or run (linking wants `x86_64-w64-mingw32-gcc`,
+which is installed; running wants Windows or CI). And macOS stays
+**expected, not verified** — the `aarch64-apple-darwin` target std is not
+installed on this machine.
+
+- **Dependency resolution per target** (manifest-level proof):
   `cargo tree --all-features --target x86_64-pc-windows-gnu -i gtk` is
-  empty and tray-icon resolves to its native backend — the tray dep split
-  is proven at the manifest level.
+  empty and tray-icon resolves to its native backend.
 - **cfg-gate audit**: platform peeks live in exactly three files
   (`stream_window.rs` `open_in_browser`, `native_view.rs` main-thread
   gates, `tray.rs` GTK init), all with honest degradation paths.
 
-The full compile check needs the target std installed (`rustup target
-add x86_64-pc-windows-msvc`, or the `rust-mingw` package on Arch), then:
-
-```
-cargo check --all-features --target x86_64-pc-windows-msvc   # type/backends compile
-cargo check --all-features --target aarch64-apple-darwin     # same idea for macOS
-```
-
-Runtime verification wants a real machine or CI runners — the natural
+Runtime verification wants real machines or CI runners — the natural
 follow-up is a GitHub Actions matrix (linux/windows/macos, `cargo test`
-core + `cargo check` all-features).
+core + `cargo check` all-features per target).
 
 ## Portability rules for new code
 
