@@ -124,3 +124,19 @@ required-features = ["wgpu", "stream", "gltf"]
 [[example]]
 name = "game_sandbox"
 required-features = ["physics", "wgpu", "stream", "script", "audio"]
+
+[[example]]
+name = "script_seam"
+required-features = ["script"]
+
+[[example]]
+name = "game_lights"
+required-features = ["wgpu"]
+
+[[example]]
+name = "game_audio"
+required-features = ["audio"]
+
+[[example]]
+name = "game_tray"
+required-features = ["tray"]
