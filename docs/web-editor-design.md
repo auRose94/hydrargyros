@@ -32,8 +32,11 @@ serialize-the-tree, and hand-edited templates survive WYSIWYG edits).
 ## Non-goals (v1)
 
 - No multi-user real-time collaboration (single admin + token, later roles).
-- No plugin/marketplace ecosystem (WordPress's true moat — out of scope
-  until the core is loved).
+- No marketplace/publishing pipeline (that's a later release) — but the
+  **plugin seam arrives through the `dynamic` module**
+  ([dynamic-design.md](dynamic-design.md)): native FFI and sandboxed
+  graph/WASM plugins load, hot-reload on a live server, and every artifact
+  a future registry would index already has its shape.
 - No newsletters/email campaigns (Ghost territory).
 - No visual theme *drag-and-drop layout engine* — themes are CSS; the
   editor makes CSS structured, not magic.
@@ -123,6 +126,22 @@ Save = parse + validate + write + preview-reload event.
   traffic, not mocks — matching the test philosophy), show the staged
   `Var` request and the response with status/headers/body. Save the
   request as a regression snippet.
+
+### Route APIs as event graphs
+
+A route doesn't have to be code — it can be a **graph**. The same visual
+programming layer the game module gets
+([dynamic-design.md](dynamic-design.md)) renders route handlers as event
+graphs: `web/request` → flow nodes (branch on the request, loop over a
+collection, call a store query or a plugin function) → `web/respond`. It's
+the video-game-dev Blueprint experience applied to an API — design the
+request flow visually, because the carrier is the same `.hyg` graph
+document, the validators are the same, and **conversion IS validation**
+(errors land on the exact node and pin, with the flow chain walked back to
+the entry). The route table above stays the index: rows whose handler is a
+graph open the canvas instead of the script pane. Auth middleware, webhook
+pipelines, and whole API folders are graphs too; the test console drives
+real requests through the live graph, breakpoints and all.
 
 ### Data designer
 

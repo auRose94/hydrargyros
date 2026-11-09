@@ -21,7 +21,7 @@ through.
 | Game — headless loop + tween | ✅ verified | ✅ | ✅ | The whole pump runs windowless |
 | Audio (`audio` feature, rodio/cpal) | ✅ tests use the `none` recorder | ✅ expected (WASAPI) | ✅ expected (CoreAudio) | Contracts test without a device; real device plays where cpal does |
 | Scripting (`script` feature, v12) | ✅ verified | ✅ expected | ✅ expected | ⚠ the pinned v12 git dep needs a seeded cargo checkout on any OS (upstream `test262` gitlink wart — see roadmap) |
-| Window — `winit` backend | ✅ (X11/Wayland) | ✅ expected | ⚠ | winit runs its event loop on the main thread everywhere; hyg's pump is off-thread through the same seam |
+| Window — `winit` backend | ✅ (Wayland first, X11 second) | ✅ expected | ⚠ | winit runs its event loop on the main thread everywhere; hyg's pump is off-thread through the same seam. **Wayland is the preferred Linux backend** (winit picks it at runtime when a compositor is present) and **HDR is a Wayland-first rung** — it needs the compositor's color-management protocols; X11 is a dead end there. The seam is wgpu's surface `color_space` beyond the default Srgb |
 | Native view (borderless fullscreen hand-off) | ✅ (X11 any-thread escape hatch) | ✅ expected (off-main loops allowed) | ❌ refused honestly | macOS requires the event loop on the main thread; the hand-off prints a clear refusal instead of panicking |
 | Streaming window (`stream`) | ✅ verified (WS traffic, QR decode) | ✅ expected | ✅ expected | Browser page + WebSocket — OS-neutral except `open_in_browser` |
 | `open_in_browser` | ✅ `xdg-open` | ✅ `cmd /c start` | ✅ `open` | All three wired |

@@ -331,8 +331,12 @@ The port rung queue is closed; new work branches from these items:
    website/API editor for the web module. The **`.hyg` carrier type** is
    established: a serialized `Var` whose terminal `.hyg` suffix is the file
    type and whose preceding suffix names the serde format — `.json.hyg`
-   default, `.cbor.hyg`/`.bson.hyg` for dense scenes. Drafts for review,
-   not commitments.
+   default, `.cbor.hyg`/`.bson.hyg` for dense scenes. The Studio design
+   also specs **canvas scaling** for non-standard ratios (Fit / Expand /
+   Anchor with a derived 16:9 UI zone — ultrawide shows more world, not
+   black bars, without re-anchoring the GUI) and the **Wayland-first,
+   X11-second** windowing direction with **HDR** as the Wayland rung.
+   Drafts for review, not commitments.
 3. **Examples tour**: every feature area reachable from a runnable example,
    indexed in `examples/`.
 4. **Test hardening** (done): the four long-broken doctests fixed — the
@@ -347,6 +351,16 @@ The port rung queue is closed; new work branches from these items:
    The support matrix and the rules for new code live in
    [platforms.md](platforms.md); Windows runtime + macOS verification
    remain open (real machines or CI runners).
+6. **The `dynamic` module** (drafted): [dynamic-design.md](dynamic-design.md)
+   — the third application module, shared by web and game: FFI plugins
+   with hot reload for always-up processes (the trusted tier), the
+   script-engine registry (v12 first, `script` stays its first customer),
+   and Blueprint-style visual programming whose carrier is the `.hyg`
+   graph format with Rust/JS/WASM compilers where **conversion IS
+   validation** (errors carry node/pin coordinates and the flow chain —
+   the graph's stack trace). Debugger + inspector with doc links serve
+   both modules; route APIs as event graphs land in Hydrargyros Press.
+   Marketplace seams designed now, publishing built later.
 
 ## What hyg will NOT do
 

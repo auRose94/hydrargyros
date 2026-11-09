@@ -150,6 +150,40 @@ leap of faith.
   play is snapshotted (deep clone of the `Var` tree — scenes are small) and
   restored on exit, so play experiments never dirty the file.
 
+### Canvas scaling — non-standard aspect ratios
+
+The scene spec is 16:9; surfaces are anything (21:9 ultrawide, 32:9
+super-ultrawide, 16:10, portrait phones). The window layer carries a
+three-mode **canvas** setting (per project, `project.json.hyg`; Godot's
+stretch-mode thinking with hyg names):
+
+- **Fit** — render the 16:9 canvas centered, letterbox bars on the sides,
+  by choice. This is today's streaming-window behavior (bilinear upscale,
+  letterbox math recomputed on rotation/resize) promoted to a first-class
+  mode for every window backend. GUI untouched; bars come back on demand.
+- **Expand** — the ultrawide payoff: the **scene fills the real
+  resolution** and the camera adapts (perspective aspect = the real ratio;
+  ortho half-extents widen by the ratio — more world visible, not bigger
+  pixels), while the **UI layer constrains itself to the centered 16:9
+  "UI zone"** — a derived safe-area rect. Non-standard ratios need no GUI
+  re-anchoring or rescaling: the app presents like a 16:9 window sitting
+  in the middle, and the world extends honestly on both sides instead of
+  drawing black bars over real rendered scene.
+- **Anchor** — the canvas stays 16:9-spec'd (camera untouched, identical
+  world framing on every screen) and the **GUI re-anchors/rescales** to
+  the real resolution around it. For when the framing *is* the product
+  (fixed-camera game) and chrome should use the whole screen.
+
+Design notes: the **UI zone** is a derived `Rect` (16:9 fit inside the
+surface, centered) that the UI layer anchors into — it's the contract that
+makes Expand safe, and pixel tests pin the zone math at 21:9 / 32:9 / 16:10
+before any UI exists. Expand's ortho widening needs a project choice:
+`show_more_x` (width ratio scales half-extents.x — wider view) or `zoom`
+(height ratio scales it — same width, taller view). The streaming window's
+fit/bilinear implementation becomes Fit's engine-side implementation; its
+rotation-aware refit is the pattern Expand's ortho path must match. Anchor
+is the only mode that needs a separate UI pass on top of the canvas.
+
 ### Scripting UX
 
 The v12 seam is the authoring layer: attach a `ScriptedComponent`, edit
@@ -192,5 +226,13 @@ feel heavy, the design bends there before anything else.
   in the overlay pass needs a prototype.
 - **winit 0.30 + egui integration** on the same surface as the viewport —
   verify layering before M1.
+- **Windowing direction — Wayland first, X11 second, HDR on Wayland.**
+  winit already prefers Wayland at runtime when a compositor is present;
+  keep that ordering and build **HDR** on it — HDR needs the compositor's
+  color-management protocols, which makes Wayland the only real Linux path
+  (X11 is a dead end there). The seam is wgpu's surface configuration
+  (`color_space` beyond the default Srgb) plus the camera/tonemap story
+  for HDR values in shaders.
 - **Platform matrix** — the editor inherits the engine's platform support;
-  see [platforms.md](platforms.md) once the cross-platform audit lands.
+  see [platforms.md](platforms.md) (Linux suite-verified, Windows
+  compile-verified, macOS expected).
