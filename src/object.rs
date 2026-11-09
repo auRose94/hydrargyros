@@ -1,7 +1,7 @@
 //! `Object` — an ordered map of named `Var`, shared via `Arc<Mutex<…>>`, with
-//! prototype inheritance (gold's `setParent`/`inherits`).
+//! prototype inheritance (`set_parent`/`inherits`).
 //!
-//! Insertion order is preserved (gold's `object` is ordered), so we use
+//! Insertion order is preserved, so we use
 //! `indexmap::IndexMap` — the wheel for that, no hand-rolled ordered map. The
 //! payload is `Arc<Mutex<IndexMap>>` so the `VarRef` proxy can mutate the
 //! shared object in place — and so the whole value graph is `Send + Sync`.
@@ -104,7 +104,7 @@ impl Object {
         crate::lock(&self.entries).get(key).cloned()
     }
 
-    /// Value for `key`, walking the prototype chain on miss (gold's `getVar`).
+    /// Value for `key`, walking the prototype chain on miss.
     /// Returns `Null` on a miss — the JS `obj[k]` → `undefined` semantics.
     /// Locks one object at a time, so a chain walk never holds two locks.
     pub fn get(&self, key: &str) -> Var {
@@ -114,7 +114,7 @@ impl Object {
         self.parent.as_ref().map(|p| p.get(key)).unwrap_or(Var::Null)
     }
 
-    /// Proxy into `key` (gold's `obj["k"]`), for chained read/write.
+    /// Proxy into `key` (the `obj["k"]` slot), for chained read/write.
     pub fn at(&self, key: &str) -> crate::proxy::VarRef {
         crate::proxy::VarRef::object(Var::from(self.clone()), key)
     }
@@ -186,7 +186,7 @@ impl Object {
             .collect()
     }
 
-    /// Attach a prototype (gold's `setParent`).
+    /// Attach a prototype.
     pub fn set_parent(&mut self, parent: Object) {
         self.parent = Some(Arc::new(parent));
     }

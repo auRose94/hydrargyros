@@ -1,5 +1,5 @@
-//! Entities — gold's `entity`: a transform, components, and child entities,
-//! enable/disable included.
+//! Entities — the `Entity` scene node: a transform, components, and child
+//! entities, enable/disable included.
 
 use super::component::Component;
 use super::transform::Transform;
@@ -10,7 +10,7 @@ pub struct ComponentSlot {
     pub(crate) initialized: bool,
 }
 
-/// A node in the scene: transform, components, children (gold's `entity`).
+/// A node in the scene: transform, components, children.
 /// Disabled entities skip their components entirely (and their subtrees).
 pub struct Entity {
     name: String,
@@ -43,7 +43,7 @@ impl Entity {
         &mut self.transform
     }
 
-    /// Attach a component (gold's `entity += [entity, component]`).
+    /// Attach a component (appended; initialized on its first frame).
     pub fn add_component(&mut self, component: Box<dyn Component>) -> &mut Self {
         self.components.push(ComponentSlot {
             component,
@@ -52,7 +52,7 @@ impl Entity {
         self
     }
 
-    /// Attach a child entity (gold's `entity += [child, ...]`).
+    /// Attach a child entity (appended to the children list).
     pub fn add_child(&mut self, child: Entity) -> &mut Self {
         self.children.push(child);
         self
@@ -75,16 +75,16 @@ impl Entity {
         self.enabled = enabled;
     }
 
-    /// Typed component lookup (gold's `getComponent(prototype)`, as
-    /// downcasting): the first component of type `T` on this entity.
+    /// Typed component lookup (by downcasting): the first component of
+    /// type `T` on this entity.
     pub fn get_component<T: Component + 'static>(&self) -> Option<&T> {
         self.components
             .iter()
             .find_map(|slot| slot.component.as_any().downcast_ref::<T>())
     }
 
-    /// All components of type `T`, including children's (gold's
-    /// `getComponentsRecursive`).
+    /// All components of type `T`, including children's — recursive
+    /// down the whole subtree.
     pub fn get_components_recursive<T: Component + 'static>(&self) -> Vec<&T> {
         let mut found: Vec<&T> = self
             .components
@@ -116,7 +116,7 @@ impl Entity {
     }
 
     /// Collect `(priority, tree-path)` for every component in the subtree,
-    /// pre-order; the engine sorts the flat list (gold's `sortComponents`).
+    /// pre-order; the engine sorts the flat list by priority.
     pub(crate) fn collect_order(&self, path: &mut Vec<usize>, out: &mut Vec<(i64, Vec<usize>)>) {
         if !self.enabled {
             return;

@@ -1,4 +1,5 @@
-//! HTML builder + parser tests, ported from gold's webTest.cpp suite.
+//! HTML builder + parser tests: tree/attribute/entity/void-tag parsing,
+//! malformed-input survival, and the builder's escape/Var contracts.
 
 use hyg::web::html::{self as h, Node};
 use hyg::{a, o};
@@ -309,7 +310,7 @@ fn void_tags_serialize_without_end_tags() {
 }
 
 #[test]
-fn builder_to_var_is_gold_shaped_data() {
+fn builder_to_var_is_object_shaped_data() {
     let el = h::div([Node::text("x"), Node::attrs(o!{ "class": "c" })]);
     let v = el.to_var();
     assert_eq!(v.get("tag").as_str(), Some("div"));

@@ -1,4 +1,4 @@
-//! HTML5 rendering — gold's `HTML::iHTML` builder and `Parser`, as data.
+//! HTML5 rendering — the element builder and markup parser, as data.
 //!
 //! **Builder.** Elements are data: a `tag`, an attribute object, and a list
 //! of child nodes. Constructors take one list of children, text, and
@@ -93,7 +93,7 @@ impl Node {
     /// Remove the first structurally-equal child element.
     pub fn remove_element(&mut self, target: &Node) { self.element_mut().remove_element(target); }
 
-    /// The node as gold data (elements: `{ "tag", "attr", "items" }`).
+    /// The node as a `Var` (elements: `{ "tag", "attr", "items" }`).
     pub fn to_var(&self) -> Var {
         match self {
             Node::Element(e) => e.to_var(),
@@ -119,9 +119,9 @@ pub struct Element {
 }
 
 impl Element {
-    /// Build an element the way gold's element ctors do: child elements and
-    /// strings append to the children; attribute bundles merge key by key,
-    /// with an `items` key (a list) routing to the children instead.
+    /// Build an element: child elements and strings append to the children;
+    /// attribute bundles merge key by key, with an `items` key (a list)
+    /// routing to the children instead.
     pub fn new(tag: &str, nodes: impl IntoIterator<Item = Node>) -> Element {
         let mut el = Element { tag: tag.to_ascii_lowercase(), attr: Object::new(), items: Vec::new() };
         for node in nodes {
@@ -140,8 +140,8 @@ impl Element {
     /// The children.
     pub fn items(&self) -> &[Node] { &self.items }
 
-    /// Append a child (element/text) or merge an attribute bundle — gold's
-    /// `+=` / `addElements` / `setAttributes` behavior in one method.
+    /// Append a child (element/text) or merge an attribute bundle — child
+    /// append and attribute merge in one method.
     pub fn push(&mut self, node: Node) {
         match node {
             Node::Attrs(attrs) => self.merge_attrs(&attrs),
@@ -166,13 +166,12 @@ impl Element {
         }
     }
 
-    /// Remove the first structurally-equal child element (gold's
-    /// `removeElement`).
+    /// Remove the first structurally-equal child element.
     pub fn remove_element(&mut self, target: &Node) {
         self.items.retain(|n| n != target);
     }
 
-    /// The element as gold data: `{ "tag", "attr", "items" }`.
+    /// The element as a `Var`: `{ "tag", "attr", "items" }`.
     pub fn to_var(&self) -> Var {
         let items = crate::list::List::from_iter(self.items.iter().filter_map(|n| match n {
             Node::Element(e) => Some(e.to_var()),
@@ -226,9 +225,8 @@ impl fmt::Display for Element {
 
 // ---- tag constructors (the common set; use Element::new for the rest) ----
 //
-// Constructors return Node — the universal item, like gold's element ctors
-// returning vars — so children, text, and attribute bundles mix freely in
-// one list.
+// Constructors return Node — the universal item — so children, text, and
+// attribute bundles mix freely in one list.
 
 macro_rules! tags {
     ($($name:ident),* $(,)?) => {
@@ -261,7 +259,7 @@ pub fn meta(attrs: impl IntoIterator<Item = Node>) -> Node { Node::Element(Eleme
 /// `<link>` with attributes — void.
 pub fn link(attrs: impl IntoIterator<Item = Node>) -> Node { Node::Element(Element::new("link", attrs)) }
 
-// ---- escaping and entities (gold's Parser::escapeHTML / decodeEntities) ----
+// ---- escaping and entities (escape_html / decode_entities) ----
 
 /// Escape markup-significant characters; in attribute mode `"` becomes
 /// `&quot;` too.
@@ -356,7 +354,7 @@ fn decode_one(src: &str, at: usize) -> Option<(String, usize)> {
         .map(|(_, repl)| (repl.to_string(), semi + 1))
 }
 
-// ---- void tags (gold's Parser::voidTags / isVoidTag) ----
+// ---- void tags (VOID_TAGS / is_void_tag) ----
 
 /// Tags that never have children or end tags.
 pub const VOID_TAGS: &[&str] = &[
@@ -393,8 +391,8 @@ fn is_block_tag(tag: &str) -> bool {
 }
 
 /// An opening tag that implicitly closes `existing` (walking the stack) —
-/// gold's table, covering `<p>`, list items, definition lists, options,
-/// links, and the table elements.
+/// a table covering `<p>`, list items, definition lists, options, links,
+/// and the table elements.
 fn closes_tag(open: &str, existing: &str) -> bool {
     match existing {
         "p" => is_block_tag(open) || open == "p",
@@ -421,9 +419,8 @@ fn attach_el(stack: &mut [Element], roots: &mut Vec<Node>, el: Element) {
     attach(stack, roots, Node::Element(el));
 }
 
-/// Parse HTML into top-level nodes (elements and text, like gold's
-/// `Parser::parseHTML`). Malformed input never hangs or throws: everything
-/// degrades to ordinary content.
+/// Parse HTML into top-level nodes (elements and text). Malformed input
+/// never hangs or throws: everything degrades to ordinary content.
 pub fn parse(src: &str) -> Vec<Node> {
     let b = src.as_bytes();
     let mut roots: Vec<Node> = Vec::new();

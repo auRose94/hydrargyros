@@ -1,29 +1,33 @@
 # Hydrargyros ☿
 
-A Rust reimagining of [gold](https://github.com/) — a framework whose thesis is
-*high-level, JavaScript-like ergonomics for prototyping without sacrificing
-speed*. Hydrargyros carries that thesis forward in Rust, where the type system lets
-it be safer *and* friendlier.
+**hyg** is a Rust framework for high-level, JavaScript-like ergonomics for
+prototyping without sacrificing speed. Dynamic, prototype-based values with
+script-quality sugar on the surface; borrow-checked, multithreaded, serde
+native underneath.
 
-Hydrargyros is a standalone project. It is **not** a gold branch. Gold (the C++
-codebase) is untouched by this repo.
-
-> **Name:** gold is **Au**, hyg is the Greek name for mercury — **Hg**, the symbol ☿ — both chemical-element metals.
-> The pairing is a joke *and* a signal.
+The name: *hydrargyrum* — Greek, "water-silver" — the element mercury, **Hg**;
+the planet and the swift messenger god, fitting the fast-prototyping goal.
+The project is Hydrargyros; the crate and namespace are `hyg` (short, and
+distinct from `hg`, which is the Mercurial VCS binary).
 
 ## The idea
 
-gold's unique move was adding accessible, JS-like syntax on top of a fast core.
-Hydrargyros does the same, but honest about where Rust can and can't copy
-JavaScript:
-
-- **Faithful ports:** the `Var` value, prototype-based objects, ordered lists,
-  the `o!`/`a!` literal macros, template strings, array helpers.
-- **Rust-native replacements for what can't copy:** explicit `.get()`/`.put()`
-  instead of implicit assignment-conversion; typed reads via `Into<…>`; a `Null`
-  literal. These trade a footgun for borrow-checked safety.
-- **Better than gold:** serde serialization for free, and (planned) derive
-  macros that turn a `Var` into a typed struct for the hot path.
+- **Values like JavaScript.** `Var` is a COW dynamic value — objects
+  (insertion-ordered, prototype chains), ordered lists, template strings, the
+  `o!{}` / `a![]` literal macros, `each`/`map`/`filter`/`find`/`join`.
+- **Explicit where JavaScript is implicit.** Reads and writes go through
+  `.get()` / `.put()` / `.set()` — no assignment-conversion footgun; typed
+  reads via `Into<…>` / `as_*()`; `Null` as a literal. Borrow checking does
+  the work implicit casts papered over.
+- **Shared by default.** Payloads are `Arc<Mutex>`, so the whole value graph
+  is `Send + Sync`: the same `Var` crosses threads, async tasks, and web
+  handlers, and the `VarRef` proxy mutates the original in place.
+- **serde is the serialization layer.** One `Serialize`/`Deserialize` impl on
+  `Var` — JSON, CBOR, any serde format, for free. Function values ride as
+  `{"__func__": id}` handles through a process-global registry.
+- **Prototype fast, ship typed.** `#[derive(FromVar)]` turns a `Var` object
+  into a strict, path-tracked struct (`"user.stats.score": expected int,
+  found string`) for the hot loop.
 
 ## Quick start
 
@@ -38,7 +42,7 @@ let user = o! {
     "stats": o!{ "score": 9i64 },
 };
 
-// write through the shared object (gold's v["k"] = ... semantics)
+// write through the shared object
 user.at("stats").at("score").put(10i64);
 assert_eq!(user.get_path("stats.score").as_i64(), Some(10));
 
@@ -61,38 +65,62 @@ let json = serde_json::to_string(&v).unwrap();
 ## Modules
 
 - **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func` /
-  `#[derive(FromVar)]`. *Done.*
-- **Web** — gold's expressjs-like `Server`: all verbs, `:param`/`*` patterns,
-  WebSocket routes, static mounts, an error hook, streamed bodies, HTTPS,
-  graceful start/stop (axum + tokio, behind the `web` feature) — plus the
-  always-on `html` builder/parser, `css` parser, and file-backed `store`
-  with the `database` facade. *Done.*
-- **Game** — the engine core, headless-first: gold's pump + dispatch,
-  priority-tiered components, entity/transform scene tree, backend
-  registries, events as `Var`, a rapier3d physics world (behind the
-  `physics` feature) with step-and-sync, an offscreen wgpu renderer
-  with pixel-verified screenshots (behind the `wgpu` feature), and a
-  **streaming window** (behind the `stream` feature) that serves the
-  render buffer to a browser and turns browser events into engine events.
-  Triangle meshes render through a second pipeline (depth-tested, shaded):
-  procedural boxes/spheres/quads or glTF models loaded from `.gltf`/`.glb`
-  files (behind the `gltf` feature), drawn at their entity transforms.
-  glTF materials' base-color textures sample through the same pipeline
-  (behind the `image` feature), and `MeshRenderer::textured` turns a quad
-  into a sprite. Lights are gold's `light` component (`point`/`directional`/
-  `spot` at entity transforms, KHR punctual shading) gathered by the draw
-  pass and shaded per-fragment. The interpreter seam next.
+  `#[derive(FromVar)]` (the `hyg-derive` proc-macro crate). *Done.*
+- **Web** (`web` feature) — an expressjs-like `Server` on axum + tokio: all
+  verbs, `:param` and trailing-`*` patterns, WebSocket routes, static mounts
+  with mime detection, an `on_error` hook, streamed bodies (`Response::stream`,
+  `route_stream`), HTTPS via the `sslCert`/`sslKey` config pair, and graceful,
+  restartable `start()`/`stop()`. Always on (pure data, no feature gate): the
+  `html` HTML5 builder + parser, the `css` parser, and the file-backed
+  `store` with the `database` facade (`$set`/`$unset`/`$inc`, `$in` queries,
+  Mongo-shaped ids). *Done.*
+- **Game** — a headless-first engine: the pump frame (poll events → sort +
+  init → priority-ordered `update(dt)` → draw → frame cap), priority-tiered
+  components, the entity/transform scene tree, and registered window backends
+  — `headless` (built in), `winit` (classic desktop window), the **streaming
+  window** (`stream` feature: the render buffer becomes a browser page, and
+  browser keys/mouse/wheel come back as engine events), a borderless
+  fullscreen native view, and a tray glyph (`tray` feature). Physics runs on
+  rapier3d behind a `PhysicsWorldBackend` trait with a no-op `none` fallback
+  (`physics` feature). Rendering is an offscreen wgpu renderer whose pixel
+  tests assert actual PNGs (`wgpu` feature): quad + depth-tested mesh
+  pipelines, procedural or glTF models (`gltf` feature), textures
+  (`image` feature), eight lights shaded with the KHR punctual math, ortho +
+  perspective cameras, and an orbit controller. `game::tween` ships
+  easings/timers; audio runs on rodio behind an `AudioBackend` trait with a
+  recorder `none` backend (`audio` feature). Scripting goes through the v12
+  interpreter seam (`script` feature): `ScriptedComponent` dispatches
+  lifecycle hooks to script functions over a JSON bridge. *Done.*
+- **Derive** — `FromVar`, re-exported as `hyg::FromVar`. *Done.*
 
-See [docs/roadmap.md](docs/roadmap.md) for the full plan and the architecture
-decisions (why `Arc<Mutex>`, why serde, why not Bevy).
+## Examples
+
+`examples/` has a runnable tour — `headless_game` (engine loop, no window),
+`game_window` / `game_stream` / `game_world` (window, browser streaming,
+physics + camera), `game_sandbox` (everything at once: physics, lights,
+scripting, audio, tween, orbit camera), `game_gltf` (glTF through the
+perspective path), `web_demo` / `web_site` (routes, HTML builder, store,
+WebSockets). See the README table in `examples/` for the full index.
+
+## Documentation
+
+- [docs/roadmap.md](docs/roadmap.md) — the plan and the architecture-decision
+  record (why `Arc<Mutex>`, why serde, why not Bevy).
+- [docs/gold-lineage.md](docs/gold-lineage.md) — the heritage record: where
+  the design descended from and which contracts mirror it. Not needed to
+  learn hyg.
+- [docs/platforms.md](docs/platforms.md) — platform support matrix.
 
 ## Build & test
 
 ```
 cargo test                  # core tests
-cargo test --all-features   # + web layer
-cargo clippy --all-targets
+cargo test --all-features   # full suite: web, physics, wgpu, stream, gltf, winit, tray
+cargo clippy --all-targets --all-features
 ```
+
+Features: `web`, `physics`, `wgpu`, `winit`, `tray`, `stream`, `gltf`,
+`image`, `script`, `audio`. New heavy dependencies go behind a feature.
 
 ## License
 

@@ -2,13 +2,18 @@
 
 Instructions for AI coding agents working in this repository.
 
-Hydrargyros (crate `hyg`) is a Rust reimagining of **gold** — a C++20/26
-framework whose thesis is *high-level, JavaScript-like ergonomics for
-prototyping without sacrificing speed*. It is a standalone project, **not** a
-gold branch. The checkout directory is `/mnt/Matrix/Work/mercury` (kept from
-the pre-rename era; the project and all imports are Hydrargyros /
-`hyg::`). The repo is **public** — never commit secrets or
-machine-specific paths.
+**hyg** (project Hydrargyros ☿) is a standalone Rust framework whose thesis
+is *high-level, JavaScript-like ergonomics for prototyping without
+sacrificing speed*. The crate and all imports are `hyg::`. The checkout
+directory is `/mnt/Matrix/Work/mercury` (historical name, kept). The repo is
+**public** — never commit secrets or machine-specific paths.
+
+The project presents itself **standalone-first**: docs, README, and code
+comments assume no knowledge of any predecessor. hyg's design descends from
+an earlier C++ framework ("gold", local checkout `/mnt/Matrix/Work/gold`);
+the heritage record — what was mirrored, what diverged, why — lives in
+`docs/gold-lineage.md`. Read it only for archaeology (e.g. "why is this
+contract shaped this way?"); do not add gold references to new code or docs.
 
 ## Source of truth
 
@@ -17,23 +22,17 @@ record (why `Arc<Mutex>`, why serde, why not Bevy) and is updated in the same
 change that lands work. If your change completes a roadmap item, update its
 state there in the same commit.
 
-The original C++ being ported lives at `/mnt/Matrix/Work/gold` (core in
-`src/`, game module in `include/game/` + `src/game/`). When porting an API,
-check gold's version first — contracts are deliberately mirrored (pump order
-from `engine.cpp start()`, the physics backend split, the `none`-backend
-fallback).
-
 ## Build & verify
 
 ```
 cargo test                  # core (feature-free)
 cargo test --all-features   # full suite: web, physics, wgpu, stream, gltf, winit, tray
-cargo clippy --all-targets
+cargo clippy --all-targets --all-features
 ```
 
 - Known pre-existing failures: 4 doc tests (`web/store`, `web/database`,
-  `web/html`, `from_var`) — verified identical on pristine HEAD. Out of scope
-  unless your change touches web; don't chase them.
+  `web/html`, `from_var`) — identical in both modes, verified on pristine
+  HEAD. Out of scope unless your change touches web; don't chase them.
 - **Do not run `cargo fmt` across the repo** — it reformats ~40 unrelated
   files. Format only what you touch. `rustfmt` on a file with `mod`
   declarations (e.g. `src/game/mod.rs`) recursively formats every
@@ -58,8 +57,8 @@ cargo clippy --all-targets
   (unknown ids degrade to `Null` — closures can't cross processes).
 - **Explicit reads/writes.** `.get()`/`.put()`/`.set()`, typed reads via
   `Into<…>`/`as_*()`, `Null` as a literal. Don't add implicit
-  assignment-conversion — that's the gold footgun this design exists to
-  avoid. Objects are insertion-ordered (`indexmap`) with a prototype chain.
+  assignment-conversion — that's the footgun this design exists to avoid.
+  Objects are insertion-ordered (`indexmap`) with a prototype chain.
 - **Builders only where data is a tree** (HTML). No CSS builders (CSS is
   `o!{}` + the parser) and no JS builders (scripting comes through `func!` +
   the interpreter seam).
@@ -106,12 +105,13 @@ cargo clippy --all-targets
 
 - Conventional commits with module scope: `feat(game): …`, `fix(web): …`,
   `feat(core,game): …`.
-- Comments explain the gold lineage — when a piece mirrors gold, say so
-  ("gold's pump + dispatch", "gold's sslCert/sslKey"). Match that voice.
-- Fix stale `mercury::` references in docs/prose when you touch them.
-- Tests are integration-style in `tests/`, one file per area (ported from
-  gold's tests where applicable), and drive real behavior: real HTTP and
-  WebSocket traffic, real TLS handshakes, real pixels. Time-bound every test
-  `await`.
+- Comments describe hyg standalone — describe the behavior and the reason,
+  not the ancestry. Don't reference gold in new comments; when historical
+  context genuinely matters, point at `docs/gold-lineage.md` instead.
+- Fix stale `mercury::` / `hydrargyros::` references in docs/prose when you
+  touch them.
+- Tests are integration-style in `tests/`, one file per area, and drive real
+  behavior: real HTTP and WebSocket traffic, real TLS handshakes, real
+  pixels. Time-bound every test `await`.
 - Visual deliverables (streaming page, tray glyph, camera framing) are
   user-reviewed: render them and verify visually, don't just assert success.

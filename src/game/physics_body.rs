@@ -1,11 +1,11 @@
-//! The physics body component — gold's `physicsBody`: config on an entity,
+//! The physics body component: config on an entity,
 //! materialized into the engine's world on its initialize frame, pose
 //! synced back to the entity transform every step.
 
 use super::component::{Component, Priority};
 use super::physics::{BodyType, Shape};
 /// A rigid body attached to an entity. The engine registers it with the
-/// physics world (gold's `physicsPriority` tier) and, after every step,
+/// physics world (the `Priority::Physics` tier) and, after every step,
 /// writes the body's pose back into the entity's transform — except under
 /// the `none` backend, where transforms stay under script control.
 pub struct PhysicsBody {
@@ -41,11 +41,11 @@ impl PhysicsBody {
         self
     }
 
-    /// gold's `mass` proto knob (default 0). Only affects DYNAMIC bodies:
+    /// The mass knob (default 0). Only affects DYNAMIC bodies:
     /// 0 keeps the shape's density-derived mass, an explicit value becomes
-    /// the body's whole mass. Ignored on static bodies — a deliberate
-    /// divergence, since gold collapses static/dynamic into `mass != 0`
-    /// while the port keeps `BodyType` explicit (we have both knobs).
+    /// the body's whole mass. Ignored on static bodies — `BodyType` stays
+    /// explicit rather than overloading `mass != 0` to mean dynamic
+    /// (we have both knobs).
     pub fn mass(mut self, mass: f32) -> Self {
         self.mass = mass;
         self

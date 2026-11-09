@@ -1,8 +1,8 @@
-//! Render backends — gold's `gfxBackend` seam: the engine calls `pre_frame`
-//! before the update pass and `render_frame` after the draw pass. The wgpu
-//! backend (behind the `wgpu` feature) renders offscreen — no window or
-//! surface needed — so frames can be pixel-tested and screenshotted
-//! headlessly, exactly like gold's `{"screenshot", path}` debug aid.
+//! Render backends: the engine calls `pre_frame` before the update pass
+//! and `render_frame` after the draw pass. The wgpu backend (behind the
+//! `wgpu` feature) renders offscreen — no window or surface needed — so
+//! frames can be pixel-tested and screenshotted headlessly (the
+//! `{"screenshot", path}` debug aid).
 
 use crate::game::light::SceneLight;
 use crate::game::model::Model;
@@ -126,7 +126,7 @@ impl FrameSink {
     }
 }
 
-/// A rendering backend (gold's `renderBackend`), as a trait.
+/// A rendering backend, as a trait.
 pub trait RenderBackend: Send {
     fn name(&self) -> &str;
 
@@ -136,8 +136,8 @@ pub trait RenderBackend: Send {
     /// Begin a camera-driven scene: clears the quad list; subsequent
     /// [`push_quad`](Self::push_quad) calls take WORLD-space positions and
     /// are mapped through this camera. `lights` is the scene's gathered
-    /// light list (gold's draw call passes the lights in; a scene with no
-    /// lights renders ambient-only).
+    /// light list (passed in with the draw call; a scene with no lights
+    /// renders ambient-only).
     fn begin_scene(&mut self, _camera: &crate::game::camera::Camera, _lights: &[SceneLight]) {}
 
     /// Append a quad to the current scene. Positions are world-space after

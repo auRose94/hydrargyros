@@ -1,12 +1,12 @@
 //! Scripted components — the interpreter seam meeting the game loop.
 //!
 //! A [`ScriptedComponent`] wraps a [`Script`](crate::script::Script) handle
-//! (the `script` feature, v12 underneath) and dispatches gold's optional
+//! (the `script` feature, v12 underneath) and dispatches the optional
 //! component lifecycle to script functions: `initialize()` →
 //! `script.initialize()`, `update(dt)` → `script.update(dt)`, `draw()` →
-//! `script.draw()`. Missing script functions are silently skipped — gold's
+//! `script.draw()`. Missing script functions are silently skipped —
 //! optional-lifecycle semantics (a component that only draws defines only
-//! `draw`). A script that *throws* fails loud: gold's pump would surface an
+//! `draw`). A script that *throws* fails loud: the pump would surface an
 //! uncaught throw, and a Rust `Component` has no error channel, so the error
 //! panics with the script error attached.
 //!
@@ -14,8 +14,8 @@
 //!
 //! `Component::update(&mut self, dt)` gets no entity access (the trait is
 //! deliberately shape-of-a-callback), yet the whole point of a scripted
-//! component is `update(dt)` moving its entity — gold scripts mutate
-//! `entity.position` directly because gold entities ARE script objects. The
+//! component is `update(dt)` moving its entity — and script code cannot
+//! reach the entity directly, because entities are not script objects. The
 //! component carries the entity transform as a **shared handle**:
 //! `Arc<Mutex<Transform>>`. The script sees it as a global object named
 //! `transform` — `{position: {x, y, z}, rotation: {x, y, z, w}, scale:
@@ -29,15 +29,15 @@
 //! every component pass the engine syncs each scripted component's handle
 //! into its entity's transform (`Engine::script_sync`, the physics sync's
 //! sibling), and an unseeded component spawns at its ENTITY's transform —
-//! gold's physicsBody rule — so incremental scripts start from where the
+//! the physics-body rule — so incremental scripts start from where the
 //! entity was placed. One mover per entity: physics XOR script — an entity
 //! carrying both a `PhysicsBody` and a `ScriptedComponent` syncs in
 //! undefined order (the physics pose lands first, the script's write-back
 //! overwrites it); don't rely on it.
 //!
-//! The bridge between hooks and script is a single compiled bootstrap (gold
-//! runs hooks straight from the pump; we compile the guard once and call it
-//! per frame through [`Script::call_unit`]'s scalar fast path — no JSON
+//! The bridge between hooks and script is a single compiled bootstrap —
+//! the guard is compiled once and called per frame through
+//! [`Script::call_unit`]'s scalar fast path (no JSON
 //! round-trip on the hot path, no recompile per frame):
 //!
 //! ```js
@@ -63,8 +63,8 @@ use crate::lock;
 use crate::script::{Script, ScriptError};
 use crate::var::{Quat, Var, Vec3};
 
-/// The script function names the lifecycle dispatches to — gold's hook
-/// names by default, renamable so two scripted components can share one
+/// The script function names the lifecycle dispatches to — the standard
+/// hook names by default, renamable so two scripted components can share one
 /// script's functions (e.g. `"tick"` instead of `"update"`).
 #[derive(Debug, Clone)]
 pub struct HookNames {
@@ -86,7 +86,7 @@ impl Default for HookNames {
     }
 }
 
-/// A component driven by a v12 script (gold's script-facade components).
+/// A component driven by a v12 script.
 /// One script per component: the script's `transform` global is this
 /// component's shared entity transform. Send + Sync through and through —
 /// the `Script` is a handle; the `!Send` context lives in the script
@@ -101,7 +101,7 @@ pub struct ScriptedComponent {
 }
 
 impl ScriptedComponent {
-    /// A scripted component with gold's default hook names
+    /// A scripted component with the default hook names
     /// (`initialize`/`update`/`draw`) and a default transform.
     ///
     /// # Errors
@@ -137,7 +137,7 @@ impl ScriptedComponent {
         Ok(component)
     }
 
-    /// Start in a custom priority tier (default: gold's `generic`).
+    /// Start in a custom priority tier (default: `Priority::Generic`).
     #[must_use]
     pub fn with_priority(mut self, priority: Priority) -> Self {
         self.priority = priority;
@@ -251,7 +251,7 @@ impl ScriptedComponent {
     }
 
     /// Drive one lifecycle hook through the scalar fast path, failing loud
-    /// on a script error (gold's uncaught throw reaching the pump; a Rust
+    /// on a script error (an uncaught throw reaching the pump; a Rust
     /// `Component` has no error channel).
     fn drive(&mut self, shim: &str, hook: &str, dt: f64) {
         if let Err(e) = self.script.call_unit(shim, &[dt]) {

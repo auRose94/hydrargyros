@@ -1,5 +1,5 @@
-//! Feel-the-ergonomics tests: do the gold sugar port faithfully, and where
-//! does Rust change the shape?
+//! Feel-the-ergonomics tests: does the sugar layer deliver its intended
+//! feel, and where does Rust change the shape?
 
 use hyg::sugar::{each, filter, find, join, map};
 use hyg::{a, func, o, Null, tpl, Var};

@@ -1,15 +1,15 @@
-//! Physics — gold's `world`/`physicsBackend` split: a
+//! Physics — a `world`/backend split: a
 //! [`PhysicsWorldBackend`] trait with register/create registries, the
 //! built-in no-op `none` backend (worlds initialize, bodies no-op,
-//! transforms stay under script control — gold ships the same fallback),
-//! and the real simulation behind the `physics` feature: **rapier3d**, the
-//! maintained pure-Rust rigid-body engine (gravity, stepping, raycasts —
-//! the wheel gold loads Bullet for).
+//! transforms stay under script control), and the real simulation behind
+//! the `physics` feature: **rapier3d**, the maintained pure-Rust
+//! rigid-body engine (gravity, stepping, raycasts — simulation delegated
+//! to the crate, not hand-rolled).
 //!
 //! The [`PhysicsWorld`] facade is what entities and tests talk to: bodies
 //! are named (the script-facing shape), the [`PhysicsBody`](crate::game::PhysicsBody)
 //! component materializes into it, and the engine syncs body poses back to
-//! entity transforms every frame — gold's step-and-sync.
+//! entity transforms every frame — step-and-sync.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
@@ -17,7 +17,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::var::{Quat, Vec3};
 use crate::var::Var;
 
-/// A collision shape (gold's `boxShape`/`sphereShape` kinds).
+/// A collision shape (box and sphere kinds).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Shape {
     /// Half-extents on each axis.
@@ -26,7 +26,7 @@ pub enum Shape {
     Sphere(f32),
 }
 
-/// How a body responds to the simulation (gold's body kinds).
+/// How a body responds to the simulation (dynamic vs static kinds).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BodyType {
     /// Driven by gravity and impulses.
@@ -47,8 +47,7 @@ pub struct RayHit {
 }
 
 /// A per-world physics simulation behind the facade. One trait object per
-/// world — gold's `physicsBackend::createWorld` flattened into the natural
-/// Rust shape.
+/// world — the backend factory flattened into the natural Rust shape.
 pub trait PhysicsWorldBackend: Send {
     fn name(&self) -> &str;
 
@@ -58,14 +57,14 @@ pub trait PhysicsWorldBackend: Send {
     fn step(&mut self, dt: f32);
 
     /// Create a body; the backend owns its id. Re-registering a name
-    /// replaces the old body (gold's replace semantics).
+    /// replaces the old body (replace semantics).
     ///
-    /// `mass` is gold's `mass` proto knob, and only affects DYNAMIC bodies:
+    /// `mass` is the mass knob, and only affects DYNAMIC bodies:
     /// 0 (the default) keeps the shape's density-derived mass, an explicit
-    /// value becomes the body's whole mass. Ignored on static bodies — the
-    /// port keeps `BodyType` explicit rather than gold's `mass != 0`
-    /// dynamic collapse (we have both knobs).
-    // the whole body spec in one call — gold's createBody(comp, w)
+    /// value becomes the body's whole mass. Ignored on static bodies —
+    /// `BodyType` stays explicit rather than overloading `mass != 0` to
+    /// mean dynamic (we have both knobs).
+    // the whole body spec handed over in one call
     #[allow(clippy::too_many_arguments)]
     fn add_body(
         &mut self,
@@ -104,7 +103,7 @@ fn backends() -> &'static RwLock<BackendMap> {
     })
 }
 
-/// Register a physics backend under a name (gold's plugin registration).
+/// Register a physics backend under a name (plugin-style registration).
 pub fn register_physics_backend(name: &str, factory: PhysicsFactory) {
     backends().write().unwrap().insert(name.to_string(), factory);
 }
@@ -126,7 +125,7 @@ pub fn create_physics_backend(
     factory(config)
 }
 
-/// The built-in no-op backend (gold's "none"): worlds initialize, bodies
+/// The built-in no-op backend ("none"): worlds initialize, bodies
 /// register, nothing simulates, raycasts miss — and entity transforms stay
 /// under script control.
 #[derive(Default)]
@@ -153,7 +152,7 @@ impl PhysicsWorldBackend for NoPhysicsBackend {
     }
 }
 
-/// The world facade (gold's `world`): named bodies, gravity, stepping,
+/// The world facade: named bodies, gravity, stepping,
 /// raycasts — over whichever backend it was created with.
 pub struct PhysicsWorld {
     backend: Box<dyn PhysicsWorldBackend>,
@@ -179,7 +178,7 @@ impl PhysicsWorld {
         self.backend.set_gravity(gravity);
     }
 
-    // the whole body spec in one call — gold's createBody(comp, w)
+    // the whole body spec handed over in one call
     #[allow(clippy::too_many_arguments)]
     pub fn add_body(
         &mut self,

@@ -1,13 +1,13 @@
 //! # Hydrargyros ☿
 //!
-//! A Rust reimagining of **gold** — Hydrargyros, the Greek name for mercury (Hg) — a framework whose thesis is *high-level,
+//! Hydrargyros — the Greek name for mercury (Hg) — a framework whose thesis is *high-level,
 //! JavaScript-like ergonomics for prototyping without sacrificing speed*.
 //!
-//! Mercury ports gold's core (`var`/`object`/`list` with prototype
-//! inheritance) and its sugar (`o!`, `a!`, `tpl!`, array helpers), and
-//! improves on it where Rust lets us: explicit typed reads are borrow-checked
+//! The core is a dynamic value graph (`var`/`object`/`list` with prototype
+//! inheritance) plus sugar (`o!`, `a!`, `tpl!`, array helpers). Explicit
+//! typed reads are borrow-checked
 //! and footgun-free, and the shared-data model makes the `VarRef` proxy
-//! mutate through handles the way gold does.
+//! mutate through handles.
 //!
 //! ```
 //! use hyg::{o, Var};
@@ -19,7 +19,7 @@
 //!     "stats": o!{ "score": 9i64 },
 //! };
 //!
-//! // write through the shared object (gold's v["k"] = ... semantics)
+//! // write through the shared object (in-place, v["k"] = ... semantics)
 //! user.at("stats").at("score").put(10i64);
 //! assert_eq!(user.get_path("stats.score").as_i64(), Some(10));
 //!

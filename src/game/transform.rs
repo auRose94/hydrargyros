@@ -1,4 +1,4 @@
-//! Transforms — gold's `transform`: position, rotation, scale, composed
+//! Transforms — position, rotation, scale, composed
 //! down the entity hierarchy.
 
 use crate::var::{Quat, Vec3};

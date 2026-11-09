@@ -1,6 +1,6 @@
 //! The wgpu render backend: an offscreen renderer — no window, no surface,
 //! no display needed. Frames render to a texture, get read back into RAM,
-//! and can be saved as PNGs (gold's screenshot debug aid). Tests assert
+//! and can be saved as PNGs (the screenshot debug aid). Tests assert
 //! actual pixels; a window-presenting backend is a later rung.
 //!
 //! Two pipelines share each frame: the quad scene (2D shapes, drawn in
@@ -78,11 +78,11 @@ fn fs(in: VsOut) -> @location(0) vec4f {
 /// dynamic uniform offset and the scene's lights by a second uniform
 /// (group 0), its texture by a per-draw bind group (group 1 — untextured
 /// draws bind a 1×1 white fallback, so one pipeline serves both). Normals
-/// rotate with the model. Lighting is gold's contract: the KHR
-/// punctual-light row layout (`dir+range / color+intensity / pos+innerCos
-/// / outerCos+type`), KHR range attenuation and smoothstep spot cones,
-/// shaded per-fragment over a fixed 0.45 ambient (gold's IBL is its own
-/// rung). A scene with no lights renders ambient-only.
+/// rotate with the model. Lighting follows the KHR punctual-light
+/// contract: the uniform row layout (`dir+range / color+intensity /
+/// pos+innerCos / outerCos+type`), KHR range attenuation and smoothstep
+/// spot cones, shaded per-fragment over a fixed 0.45 ambient (IBL is its
+/// own rung). A scene with no lights renders ambient-only.
 const WGSL_MESH: &str = r#"
 struct Globals {
     camera: mat4x4<f32>,   // world → clip (x, y = the 2D view; z = depth window)
@@ -90,7 +90,7 @@ struct Globals {
     color: vec4<f32>,      // tint over the vertex colors
 };
 
-// gold's u_Lights row layout (meshRenderer.cpp → uniforms.sh):
+// the u_Lights row layout (KHR punctual packing):
 // row0 dir.xyz + range, row1 color.rgb + intensity,
 // row2 pos.xyz + innerConeCos, row3 outerConeCos + type.
 struct Light {
@@ -140,8 +140,8 @@ fn vs(
 
 // KHR_lights_punctual range attenuation (punctual.sh): range ≤ 0 is
 // unlimited, else (1 − (d/r)⁴)⁺ / d². Distance clamps to a hair above
-// zero so a surface exactly at the light can't poison NaNs (gold's
-// dead-light direction hack guards the same hazard).
+// zero so a surface exactly at the light can't poison NaNs (a dead
+// light must not divide by zero either).
 fn range_attenuation(range: f32, dist: f32) -> f32 {
     if (range <= 0.0) {
         return 1.0;
@@ -167,7 +167,7 @@ fn light_contribution(n: vec3<f32>, world_pos: vec3<f32>, L: Light) -> vec3<f32>
             var att = range_attenuation(L.dir_range.w, dist);
             if (kind == 2u) {
                 // spot: smoothstep between the outer/inner cone cosines;
-                // dir is where the light shines (gold's getSpotAttenuation)
+                // dir is where the light shines (KHR spot-attenuation shape)
                 let actual_cos = dot(normalize(L.dir_range.xyz), normalize(-to_light));
                 var spot = 0.0;
                 if (actual_cos > L.outer_type.x) {
@@ -188,7 +188,7 @@ fn light_contribution(n: vec3<f32>, world_pos: vec3<f32>, L: Light) -> vec3<f32>
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let tex = textureSample(base_tex, base_samp, in.uv).rgb;
-    // fixed ambient floor (gold's IBL/envMap is a later rung)
+    // fixed ambient floor (IBL/envMap is a later rung)
     var light = vec3<f32>(0.45, 0.45, 0.45);
     for (var i = 0u; i < lighting.count; i = i + 1u) {
         light = light + light_contribution(in.world_normal, in.world_pos, lighting.lights[i]);
@@ -246,7 +246,7 @@ const MESH_GLOBALS_SIZE: usize = 144;
 /// World → clip for the mesh scene — the camera's own matrix
 /// ([`Camera::view_projection`]): the v0 ortho window (x, y the view, z
 /// the depth window into WebGPU's `[0, 1]` — `Less` is "closer wins") or
-/// gold's perspective look-at. Column-major, WGSL's order.
+/// the perspective look-at. Column-major, WGSL's order.
 fn camera_matrix(camera: &Camera) -> [[f32; 4]; 4] {
     camera.view_projection()
 }
@@ -299,16 +299,16 @@ fn mesh_globals_bytes(camera: &Camera, draws: &[MeshDraw]) -> Vec<u8> {
     out
 }
 
-/// Lights per scene (gold shipped LIGHT_COUNT=1 — the first light; this
-/// port spends a whole uniform bank on eight).
+/// Lights per scene — a whole uniform bank of eight slots.
 const MAX_LIGHTS: usize = 8;
-/// One light = gold's four uniform rows: 64 bytes.
+/// One light = four uniform rows: 64 bytes.
 const LIGHT_BYTES: usize = 64;
 const LIGHTING_BYTES: usize = 16 + MAX_LIGHTS * LIGHT_BYTES;
 
-/// Pack the scene's lights in gold's row layout (see WGSL_MESH): header
-/// count, then `dir+range / color+intensity / pos+innerCos / outerCos+type`
-/// per light. Lights past MAX_LIGHTS drop (documented capacity).
+/// Pack the scene's lights in the uniform row layout (see WGSL_MESH):
+/// header count, then `dir+range / color+intensity / pos+innerCos /
+/// outerCos+type` per light. Lights past MAX_LIGHTS drop (documented
+/// capacity).
 fn lighting_bytes(lights: &[SceneLight]) -> Vec<u8> {
     let mut out = vec![0u8; LIGHTING_BYTES];
     let count = lights.len().min(MAX_LIGHTS) as u32;

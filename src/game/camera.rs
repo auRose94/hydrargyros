@@ -1,38 +1,34 @@
-//! The camera — gold's `camera`: the world → clip transform for a view.
+//! The camera: the world → clip transform for a view.
 //!
-//! gold's camera is perspective-only: prototype defaults `fov` 60
+//! The perspective camera carries the 3D view: prototype defaults `fov` 60
 //! (degrees, y axis), `near` 0.1, `far` 100, with `size` set from the
 //! window → `ratio = width/height`; every frame it looks along its
 //! transform's +z (`eye = world·(0,0,0,1)`, `at = world·(0,0,1,1)`) and
-//! uploads `lookAt(eye, at)` + `projection(fov, ratio, near, far,
-//! homo=false)` (camera.cpp `setViewTransform`). The bx math is row-major;
-//! this port is column-major for WGSL — the transpose duality gold's own
-//! meshRenderer comment notes. One divergence, on purpose: gold's look-at
-//! is left-handed (bx's default, view-space +z toward the target), but the
-//! mesh pipeline's back-face winding was established by the v0 ortho
-//! camera, whose sight is GL-style −z — so the perspective view uses bx's
-//! **right-handed** variant (view-space −z toward the target) and ONE cull
-//! mode stays correct for both cameras. `homo=false` is kept either way:
+//! uploads the look-at + projection matrices. The row-major formulation
+//! is written column-major for WGSL — the two are transposes of each
+//! other. The look-at is **right-handed** (view-space −z toward the
+//! target): the mesh pipeline's back-face winding was established by the
+//! v0 ortho camera, whose sight is GL-style −z, so the right-handed
+//! variant keeps ONE cull mode correct for both cameras (a left-handed
+//! look-at renders meshes inside-out). Both cameras map depth to
 //! z ∈ [0, 1] after the divide — exactly WebGPU's clip z ∈ [0, w]
 //! convention, so `CompareFunction::Less` keeps meaning "closer wins".
 //!
 //! Hydrargyros keeps the v0 orthographic window (the original 2D camera)
-//! as a second mode: quads stay an orthographic image of the world — a
-//! deliberate divergence from gold, which projects everything through the
-//! one camera. Under a perspective camera the quad scene uses the window
+//! as a second mode: quads stay an orthographic image of the world even
+//! under a perspective camera — the quad scene then uses the window
 //! derived at the target plane ([`Camera::quad_window`]), so flat scene
 //! furniture lines up with the 3D view at the target's depth.
 //!
-//! [`OrbitController`] is Hydrargyros-native (gold has no orbit controls —
-//! its camera rides the script seam): yaw/pitch/distance around a target,
-//! fed the unified mouse/wheel `Var` events, building the perspective
-//! [`Camera`] each frame.
+//! [`OrbitController`] is Hydrargyros-native: yaw/pitch/distance around a
+//! target, fed the unified mouse/wheel `Var` events, building the
+//! perspective [`Camera`] each frame.
 //!
 //! ```
 //! use hyg::game::camera::{Camera, Projection};
 //! use hyg::var::Vec3;
 //!
-//! // gold's defaults: fov 60° (y), near 0.1, far 100, 16:9
+//! // defaults: fov 60° (y), near 0.1, far 100, 16:9
 //! let camera = Camera {
 //!     position: Vec3::new(0.0, 0.0, -4.0),
 //!     target: Vec3::splat(0.0),
@@ -55,9 +51,8 @@
 
 use crate::var::Vec3;
 
-/// The projection mode (gold's camera is perspective-only; the
-/// orthographic arm is Hydrargyros's v0 2D window, kept for the quad
-/// scene).
+/// The projection mode: the perspective 3D camera, or the orthographic
+/// v0 2D window kept for the quad scene.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Projection {
     /// v0: the orthographic window (the original `Camera` semantics, moved
@@ -71,17 +66,17 @@ pub enum Projection {
         /// `(8.89, 5.0)`).
         half_extents: Vec3,
     },
-    /// gold's camera: fov in degrees (y axis) — gold's defaults 60/0.1/100
-    /// — and aspect = width/height (gold's `ratio`, set by the embedder;
+    /// The perspective camera: fov in degrees (y axis) — defaults
+    /// 60/0.1/100 — and aspect = width/height (set by the embedder;
     /// resize-aware aspect is a later refinement).
     Perspective {
-        /// Vertical field of view in degrees (gold's `fov`).
+        /// Vertical field of view in degrees.
         fov_y_degrees: f32,
-        /// Near clip distance (gold's `near`).
+        /// Near clip distance.
         near: f32,
-        /// Far clip distance (gold's `far`).
+        /// Far clip distance.
         far: f32,
-        /// Viewport width/height (gold's `ratio`).
+        /// Viewport width/height.
         aspect: f32,
     },
 }
@@ -144,11 +139,10 @@ impl Camera {
     /// the mode's half-extents (x, y the view, z the mesh depth window).
     /// Perspective → a derived window at the target plane: half_y =
     /// |target − position|·tan(fov/2), half_x = half_y·aspect, z a
-    /// generous depth window (far·2). Divergence from gold, on purpose:
-    /// gold projects everything through the one camera; here the 2D quad
-    /// scene stays an orthographic image of the world, sized to line up
-    /// with the perspective view at the target's depth (quads at other
-    /// depths won't match — they're flat scene furniture, not geometry).
+    /// generous depth window (far·2). By design the 2D quad scene stays an
+    /// orthographic image of the world, sized to line up with the
+    /// perspective view at the target's depth (quads at other depths won't
+    /// match — they're flat scene furniture, not geometry).
     #[must_use]
     pub fn quad_window(&self) -> Vec3 {
         match self.projection {
@@ -166,15 +160,14 @@ impl Camera {
         }
     }
 
-    /// The full world → clip matrix, column-major (WGSL's order — gold's
-    /// bx matrices are row-major; the transpose duality gold's meshRenderer
-    /// comment notes). Orthographic → the v0 window mapping (the matrix
-    /// `render_wgpu`'s `camera_matrix` always built). Perspective → gold's
-    /// camera: `lookAt(eye, at)` with the eye at `position` looking at
-    /// `target` (up (0,1,0), right-handed — view-space −z toward the
-    /// target; see the module doc for the handedness divergence), then bx's
-    /// `mtxProj(fov, aspect, near, far, homo=false)` — z ∈ [0, 1] after the
-    /// divide, WebGPU's clip z ∈ [0, w] convention.
+    /// The full world → clip matrix, column-major (WGSL's order; the
+    /// equivalent row-major formulation is its transpose). Orthographic →
+    /// the v0 window mapping (the matrix `render_wgpu`'s `camera_matrix`
+    /// always built). Perspective → look-at with the eye at `position`
+    /// looking at `target` (up (0,1,0), right-handed — view-space −z
+    /// toward the target; see the module doc), then a perspective
+    /// projection mapping the depth window to z ∈ [0, 1] after the
+    /// divide — WebGPU's clip z ∈ [0, w] convention.
     #[must_use]
     pub fn view_projection(&self) -> [[f32; 4]; 4] {
         match self.projection {
@@ -200,19 +193,19 @@ impl Camera {
                 far,
                 aspect,
             } => {
-                // bx mtxLookAt with Handedness::Right: view =
-                // normalize(eye − at) — view-space −z points at the target
-                // (GL-style). gold's camera is left-handed (bx's default),
-                // but the mesh pipeline's winding was established by the v0
-                // ortho camera, whose sight is −z too: the right-handed
-                // variant keeps ONE cull mode correct for both cameras (the
-                // left-handed one renders meshes inside-out — far faces
-                // pass cull instead of near ones; pixel tests catch it).
+                // right-handed look-at: view = normalize(eye − at) —
+                // view-space −z points at the target (GL-style), matching
+                // the v0 ortho camera whose sight is −z and whose winding
+                // the mesh pipeline inherited: the right-handed variant
+                // keeps ONE cull mode correct for both cameras (a
+                // left-handed look-at renders meshes inside-out — far
+                // faces pass cull instead of near ones; pixel tests catch
+                // it).
                 let eye = self.position;
                 let view = (eye - self.target).normalize();
                 let up = Vec3::new(0.0, 1.0, 0.0);
-                // Looking straight down the up axis is degenerate — bx
-                // pins right to (1, 0, 0) for the right-handed look.
+                // Looking straight down the up axis is degenerate — pin
+                // right to (1, 0, 0) for the right-handed look.
                 let uxv = up.cross(view);
                 let right = if uxv.dot(uxv) == 0.0 {
                     Vec3::new(1.0, 0.0, 0.0)
@@ -220,7 +213,7 @@ impl Camera {
                     uxv.normalize()
                 };
                 let up = view.cross(right);
-                // bx's rows [right; up; view; translation], transposed into
+                // rows [right; up; view; translation], transposed into
                 // column-major
                 let view_m = [
                     [right.x, up.x, view.x, 0.0],
@@ -228,11 +221,11 @@ impl Camera {
                     [right.z, up.z, view.z, 0.0],
                     [-right.dot(eye), -up.dot(eye), -view.dot(eye), 1.0],
                 ];
-                // bx mtxProj(fovy, aspect, near, far, homo=false),
-                // right-handed: [11] = −1 puts clip.w = −view.z (positive
-                // in front) and z ∈ [0, 1] after the divide — WebGPU's clip
-                // z ∈ [0, w] convention (a GL-style [−1, 1] mapping would
-                // clip the entire near half instead)
+                // perspective projection, right-handed: [11] = −1 puts
+                // clip.w = −view.z (positive in front) and z ∈ [0, 1] after
+                // the divide — WebGPU's clip z ∈ [0, w] convention (a
+                // GL-style [−1, 1] mapping would clip the entire near half
+                // instead)
                 let height = 1.0 / (fov_y_degrees.to_radians() * 0.5).tan();
                 let width = height / aspect;
                 let aa = far / (far - near);
@@ -261,10 +254,10 @@ fn mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     out
 }
 
-/// Hydrargyros-native orbit controls (gold has none — its camera rides the
-/// script seam): yaw/pitch/distance around a target, fed the unified
-/// window events (`WindowSystem::poll` `Var`s), building the perspective
-/// [`Camera`] each frame. Angles are degrees (gold's fov is degrees too).
+/// Hydrargyros-native orbit controls: yaw/pitch/distance around a target,
+/// fed the unified window events (`WindowSystem::poll` `Var`s), building
+/// the perspective [`Camera`] each frame. Angles are degrees (the fov is
+/// degrees too).
 ///
 /// Drag = left button (button 0 — winit and the DOM agree left is 0; they
 /// diverge on right/middle: winit Right=1/Middle=2, DOM 1=middle/2=right —
@@ -289,8 +282,7 @@ pub struct OrbitController {
     /// Fraction of `distance` added per unit of wheel delta (DOM deltas
     /// run ~±100 per notch, winit's ~±10).
     pub zoom_speed: f32,
-    /// Viewport width/height for the projection (gold's `ratio`, set by
-    /// the embedder).
+    /// Viewport width/height for the projection (set by the embedder).
     pub aspect: f32,
     /// True between left-button down and up (a drag is in progress).
     armed: bool,
@@ -299,7 +291,7 @@ pub struct OrbitController {
 }
 
 impl OrbitController {
-    /// gold's camera prototype defaults (fov 60° y, near 0.1, far 100).
+    /// The camera prototype defaults (fov 60° y, near 0.1, far 100).
     pub const FOV_Y_DEGREES: f32 = 60.0;
     pub const NEAR: f32 = 0.1;
     pub const FAR: f32 = 100.0;
@@ -309,7 +301,7 @@ impl OrbitController {
     pub const MAX_PITCH: f32 = 89.0;
 
     /// A third-person angle on the target: yaw 30°, pitch 20°, distance 4
-    /// — gold's fov/near/far, 16:9 aspect.
+    /// — the fov/near/far defaults, 16:9 aspect.
     #[must_use]
     pub fn new(target: Vec3) -> Self {
         OrbitController {
@@ -359,7 +351,7 @@ impl OrbitController {
     /// The perspective camera at this orbit's pose: the eye on the sphere
     /// `target + distance·(cos(pitch)·sin(yaw), sin(pitch),
     /// cos(pitch)·cos(yaw))` — yaw 0 puts the eye on the target's +z, pitch
-    /// raises it — looking at the target, gold's fov/near/far defaults.
+    /// raises it — looking at the target, the fov/near/far defaults.
     #[must_use]
     pub fn camera(&self) -> Camera {
         let (yaw, pitch) = (self.yaw.to_radians(), self.pitch.to_radians());

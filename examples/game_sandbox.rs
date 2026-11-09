@@ -1,20 +1,20 @@
 //! The streaming-page showcase: an orbit-driven physics sandbox combining
 //! every rung in one browser page —
 //!   - **rapier physics**: a 9-box stack and two balls on a static floor
-//!     (gravity flips on space; two boxes carry gold's `mass` knob),
+//!     (gravity flips on space; two boxes carry an explicit `mass`),
 //!   - **v12-scripted components**: a patroller cube whose `update(dt)`
 //!     script moves its ENTITY through the engine-side transform sync —
 //!     one mover per entity, no `PhysicsBody` on it,
 //!   - **the perspective orbit camera**: left-drag orbits, wheel zooms
-//!     (gold's fov 60/near 0.1/far 100),
+//!     (fov 60/near 0.1/far 100),
 //!   - **lights**: a directional key sun + a warm point lamp by the stack,
 //!   - **meshes**: procedural cubes/spheres, tinted, depth-tested, shaded,
 //!   - **audio** (`audio` feature): gravity flips beep through the audio
 //!     backend (rodio on real devices; the no-op `none` recorder otherwise —
-//!     gold's `audioSystem` loadSound/play/setVolume lineage, tones instead
-//!     of sound files),
+//!     a play/setVolume surface over `AudioSource`, tones instead of
+//!     sound files),
 //!   - **tweens** (feature-free): a beacon cube bobs on a SineInOut Tween
-//!     stepped by this pump (Hydrargyros-native — gold has no tween surface).
+//!     stepped by this pump (Hydrargyros-native).
 //!
 //! Run:
 //!   cargo run --example game_sandbox --features physics,wgpu,stream,script,audio
@@ -50,17 +50,17 @@ fn main() {
     if let Some(physics) = engine.physics_mut() {
         physics.set_gravity(Vec3::new(0.0, -9.81, 0.0));
     }
-    // audio: gold's `audioSystem` lineage (loadSound/play/setVolume). Prefer
-    // the real device (rodio); a deviceless machine falls back to the no-op
-    // `none` recorder, which keeps the demo headless-safe.
+    // audio: the play/volume surface over `AudioSource` (tones or files).
+    // Prefer the real device (rodio); a deviceless machine falls back to the
+    // no-op `none` recorder, which keeps the demo headless-safe.
     let audio = AudioWorld::create("rodio", &Var::Null)
         .or_else(|_| AudioWorld::create("none", &Var::Null))
         .expect("an audio backend (rodio or none)");
     engine.set_audio(audio);
 
     // the spawn table: every DYNAMIC body's initial pose — `r` re-registers
-    // each at its spawn pose (gold's replace semantics) and the next
-    // frame's physics sync-back restores the entity transforms. The
+    // each at its spawn pose (re-adding a name replaces the body) and the
+    // next frame's physics sync-back restores the entity transforms. The
     // patroller is NOT in the table: it has no PhysicsBody (one mover per
     // entity), so the script keeps driving it through resets.
     let mut spawns: Vec<(String, PhysShape, f32, Vec3)> = Vec::new();
@@ -79,7 +79,7 @@ fn main() {
 
     // the stack: 4 + 3 + 2 half-unit cubes in a pyramid on the ground top —
     // each its own entity and dynamic body, all sharing ONE cube mesh (the
-    // tint colors it). Two carry gold's `mass` knob: an explicit mass
+    // tint colors it). Two carry the `mass` knob: an explicit mass
     // weighs the body exactly that (0 keeps the density-derived default).
     let stack: [(f32, f32); 9] = [
         (-0.5, -0.5),
@@ -191,7 +191,7 @@ fn main() {
     engine.add_entity(patroller);
 
     // the tweened beacon: a small cyan cube bobbing on a SineInOut Tween —
-    // Hydrargyros-native (gold has no tween surface), stepped by this pump
+    // a Hydrargyros-native surface, stepped by this pump
     // and ping-ponged by swapping the endpoints each cycle
     let mut beacon = Entity::new("beacon");
     beacon.transform_mut().position = Vec3::new(-3.0, 0.8, -2.5);
@@ -229,7 +229,7 @@ fn main() {
     renderer.attach_sink(sink.clone());
     engine.set_renderer(Box::new(renderer));
 
-    // third-person orbit around the stack: gold's fov 60°/near 0.1/far
+    // third-person orbit around the stack: fov 60°/near 0.1/far
     // 100, 16:9 like the canvas. The subject is the patroller's orbit —
     // radius 3 plus the 0.3 cube ≈ 3.3 world units — which at distance 12
     // subtends atan(3.3/12) ≈ 15° half-angle, ~31° of the 60° vertical
@@ -322,7 +322,7 @@ fn main() {
                     if let Some(physics) = engine.physics_mut() {
                         physics.set_gravity(g);
                     }
-                    // the flip beep — gold's audioSystem play() contract with
+                    // the flip beep — the audio backend's play() contract with
                     // a synthesized tone instead of a loaded sound file
                     // (asset-free); a failed play is non-fatal
                     if let Some(audio) = engine.audio_mut() {
@@ -349,8 +349,8 @@ fn main() {
                     );
                 }
                 // r: re-register every dynamic body at its spawn pose
-                // (gold's replace semantics); the next frame's physics
-                // sync-back restores the entity transforms
+                // (re-adding a name replaces the body); the next frame's
+                // physics sync-back restores the entity transforms
                 Some("r") | Some("R") => {
                     if let Some(physics) = engine.physics_mut() {
                         for (name, shape, mass, position) in &spawns {

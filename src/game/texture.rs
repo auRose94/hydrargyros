@@ -1,5 +1,5 @@
-//! Textures — pixel images the mesh pipeline samples (gold has no texture
-//! rung; this is the bridge to glTF's `baseColorTexture` and 2D sprites).
+//! Textures — pixel images the mesh pipeline samples (the bridge to glTF's
+//! `baseColorTexture` and 2D sprites).
 //!
 //! A [`Texture`] is CPU-owned RGBA8 that renderers upload once and cache by
 //! id, exactly like [`Mesh`](crate::game::mesh::Mesh). Sample mapping

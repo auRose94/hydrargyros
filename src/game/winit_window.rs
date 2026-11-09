@@ -1,5 +1,5 @@
-//! The winit window backend — gold's `windowSystemSDL` slot: a real
-//! desktop window. The winit event loop runs on the calling (main) thread
+//! The winit window backend — a real desktop window. The winit event loop
+//! runs on the calling (main) thread
 //! — a macOS requirement — while the engine pump runs on any thread
 //! through the ordinary [`WindowSystem`] seam: the loop forwards winit
 //! events as `Var` objects into the queue the pump drains.
@@ -46,7 +46,7 @@ struct Inner {
     size: (u32, u32),
 }
 
-/// A real desktop window (gold's `windowSystem`), winit-backed.
+/// A real desktop window, winit-backed.
 ///
 /// Must be created on the main thread (macOS); `run()` blocks that thread
 /// until a `quit` event (close button) or [`request_close`](Self::request_close).

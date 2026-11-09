@@ -142,7 +142,7 @@ async fn entity_meshrenderer_renders_through_camera() {
     assert_close(edge, [srgb8(1.0), 0, 0, 255], "quad edge");
 }
 
-/// A child entity renders at its COMPOSED world transform — gold's
+/// A child entity renders at its COMPOSED world transform — the
 /// transform hierarchy reaches the pixels.
 #[tokio::test]
 async fn child_entities_render_at_world_transforms() {
@@ -415,7 +415,7 @@ async fn mesh_geometry_beyond_the_depth_window_clips() {
     assert_close(pixel(frame, 480, inside, 135), want, "inside the window");
 }
 
-// ---- camera 3D (perspective/look-at per gold's bx conventions) ----
+// ---- camera 3D (perspective/look-at, WebGPU z conventions) ----
 
 use hyg::game::camera::Projection;
 
@@ -439,8 +439,8 @@ fn ndc_px(w: u32, h: u32, ndc: [f32; 2]) -> (f64, f64) {
 }
 
 /// The 3D test rig: the eye 4 units in front of the origin (on −z) looking
-/// down +z at a cube sitting there — gold's fov 60 / near 0.1 / far 100 at
-/// the canvas's 16:9. Sees the cube's −z face; the key light can't reach
+/// down +z at a cube sitting there — fov 60 / near 0.1 / far 100 at the
+/// canvas's 16:9. Sees the cube's −z face; the key light can't reach
 /// it, so it shades to the 0.45 ambient floor.
 fn perspective_camera() -> Camera {
     Camera {
@@ -853,9 +853,9 @@ async fn gltf_checker_cube_samples_its_texture() {
     );
 }
 
-// ---- lights (gold's light component, KHR punctual shading) ----
+// ---- lights (the light component, KHR punctual shading) ----
 
-/// A scene with no lights renders ambient-only (gold's zeroed light
+/// A scene with no lights renders ambient-only (a zeroed light
 /// contributes nothing): the front face lands exactly on the 0.45 floor.
 #[tokio::test]
 async fn no_lights_render_ambient_only() {
@@ -997,7 +997,7 @@ async fn point_light_falls_off_with_range() {
     );
 }
 
-/// Spots gate by cone: gold's default cone (1, 1) collapses to nothing,
+/// Spots gate by cone: the default cone (1, 1) collapses to nothing,
 /// and a real cone lights what's inside it (on-axis here → full term).
 #[tokio::test]
 async fn spot_cone_gates_the_light() {
@@ -1010,7 +1010,7 @@ async fn spot_cone_gates_the_light() {
         ..Default::default()
     };
 
-    // gold's default cone (1, 1): actualCos can never exceed 1 → dark
+    // the default cone (1, 1): actualCos can never exceed 1 → dark
     renderer.begin_scene(
         &camera,
         &[SceneLight {

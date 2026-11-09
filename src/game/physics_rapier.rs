@@ -1,4 +1,4 @@
-//! The rapier3d physics backend (gold's libgoldBullet slot): rigid bodies
+//! The rapier3d physics backend (the full-simulation slot): rigid bodies
 //! with box/sphere colliders, gravity, stepping, and raycasts, over
 //! rapier's aggregate `PhysicsWorld`.
 
@@ -36,7 +36,7 @@ impl RapierBackend {
     }
 
     /// The collider; an explicit mass rides it (rapier computes the shape's
-    /// inertia at that mass — gold's `calculateLocalInertia(mass, …)`):
+    /// inertia at that mass, matching a local-inertia computation):
     /// dynamic bodies weigh the knob verbatim, everything else keeps the
     /// density default (mass 0, or static bodies where mass is ignored).
     fn collider(shape: &Shape, body_type: BodyType, mass: f32) -> Collider {
@@ -58,7 +58,7 @@ impl Default for RapierBackend {
 }
 
 impl RapierBackend {
-    /// Mercury's quaternion → rapier's rotation vector (axis × angle).
+    /// hyg's quaternion → rapier's rotation vector (axis × angle).
     fn rotation_vector(rotation: Quat) -> Vector {
         let w = rotation.w.clamp(-1.0, 1.0);
         let angle = 2.0 * w.acos();
@@ -80,8 +80,8 @@ impl PhysicsWorldBackend for RapierBackend {
         // rapier only wakes a body on its own state changing — a gravity
         // flip would silently no-op on any resting scene (a live demo caught
         // this: the antigravity frame was identical to the settled one).
-        // gold's bullet backend only ever sets gravity at world init, so
-        // this wake-everything is the port's own semantic for a live knob.
+        // wake-everything on every set is hyg's semantic for a live knob,
+        // not a write-once-at-world-init gravity.
         for named in self.bodies_by_name.values() {
             if let Some(body) = self.world.bodies.get_mut(named.body) {
                 body.wake_up(true);
@@ -104,7 +104,7 @@ impl PhysicsWorldBackend for RapierBackend {
         gravity_scale: f32,
         mass: f32,
     ) {
-        // re-registering a name replaces the old body (gold's replace semantics)
+        // re-registering a name replaces the old body (replace semantics)
         if let Some(old) = self.bodies_by_name.remove(name) {
             self.collider_owner.remove(&old.collider);
             let Self { world, .. } = self;

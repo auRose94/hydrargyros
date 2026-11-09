@@ -7,7 +7,7 @@
 //! differently, and the depth buffer keeps the near faces in front.
 //!
 //! The camera is an [`OrbitController`] around the cube's center
-//! (Hydrargyros-native — gold has no orbit controls): left-drag orbits,
+//! (Hydrargyros-native): left-drag orbits,
 //! wheel zooms, and each frame feeds its pose to `engine.set_camera`.
 //!
 //! Run:
@@ -56,7 +56,7 @@ fn main() {
     renderer.attach_sink(sink.clone());
     engine.set_renderer(Box::new(renderer));
 
-    // third-person orbit around the cube: gold's fov 60/near 0.1/far 100,
+    // third-person orbit around the cube: fov 60/near 0.1/far 100,
     // 16:9 like the canvas. The cube spans ±1.28 world units at distance
     // 4 — it subtends ~36° of the 60° view, comfortably framed.
     let mut orbit = OrbitController::new(Vec3::new(0.0, 4.0, 0.0));
@@ -78,8 +78,8 @@ fn main() {
 
     // a custom pump: the same three public frame phases start_with runs —
     // events, update, draw, render — with a spin and the orbit pose
-    // scripted in between. This is the gold-script pattern
-    // (`engine.entities[0].transform.rotation.y += …`) through Rust's
+    // scripted in between. This is the script-engine pattern
+    // (`transform.rotation.y += …` per frame) through Rust's
     // entity_mut seam.
     let mut running = true;
     let mut angle = 0.0f32;

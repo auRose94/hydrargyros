@@ -1,7 +1,6 @@
 //! `List` — an ordered dynamic array of `Var`, shared via `Arc<Mutex<…>>`.
 //!
-//! gold's `list` is a `vector<var>` behind a shared_ptr with per-op locking.
-//! We keep the ordered-array shape, and use `Arc<Mutex<Vec>>` for the
+//! The ordered-array shape, with `Arc<Mutex<Vec>>` for the
 //! payload: cheap copy-by-pointer (shared-mutable) and interior mutability,
 //! which is what lets the `VarRef` proxy mutate the original list in place
 //! through one handle. `Arc`/`Mutex` (rather than `Rc`/`RefCell`) is what

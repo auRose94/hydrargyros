@@ -171,7 +171,8 @@ async fn wildcard_mount_and_error_fallthrough() {
     assert_eq!(body, "body{color:red}");
     assert!(head.to_ascii_lowercase().contains("content-type: text/css"));
 
-    // a mount miss falls through to the error hook (gold's ordering)
+    // a mount miss falls through to the error hook (mounts route first,
+    // then the error hook fires)
     let (st, _, body) = http(&addr, &get("/static/nope.css")).await;
     assert_eq!((st, body.as_str()), (404, "404:/static/nope.css"));
 
@@ -254,7 +255,7 @@ async fn response_status_headers_and_types() {
     );
 }
 
-// ---- WebSockets (gold's ws + wsSocket) ----
+// ---- WebSockets (ws routes + WsHandlers) ----
 
 #[tokio::test(flavor = "multi_thread")]
 async fn websocket_echo() {
@@ -296,7 +297,7 @@ async fn websocket_echo() {
     ws.close(None).await.unwrap();
 }
 
-// ---- streaming (gold's onData / write) ----
+// ---- streaming (streamed request/response bodies) ----
 
 #[tokio::test(flavor = "multi_thread")]
 async fn request_streaming_route() {
@@ -343,7 +344,7 @@ async fn response_streaming_chunks() {
     assert!(head.to_ascii_lowercase().contains("text/plain"), "{}", head);
 }
 
-// ---- lifecycle: graceful stop, restart (gold's restartable server) ----
+// ---- lifecycle: graceful stop, restart (the server is restartable) ----
 
 #[tokio::test(flavor = "multi_thread")]
 async fn graceful_stop_and_restart() {
@@ -369,7 +370,7 @@ async fn graceful_stop_and_restart() {
         .unwrap();
     assert!(!serv.stop());
 
-    // restart in the same process — gold's server loop story. local_addr may
+    // restart in the same process — one Server, a fresh loop. local_addr may
     // briefly still show the OLD bind, so poll tolerantly until THIS server
     // answers, then pin the addr for the strict request.
     let s = serv.clone();

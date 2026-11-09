@@ -44,7 +44,7 @@ fn scalar_args_and_results_round_trip() {
     );
     // null → JS null → Null
     assert_eq!(script.call("echo", &[Var::Null]).unwrap(), Var::Null);
-    // no return → undefined → Null (gold's call returns null the same way)
+    // no return → undefined → Null (an undefined result maps to Null, not an error)
     let mut script = Script::new("function nothing() {}").unwrap();
     assert_eq!(script.call("nothing", &[]).unwrap(), Var::Null);
 }
@@ -64,7 +64,7 @@ fn scalar_set_get_global_round_trips() {
     );
     assert_eq!(script.get_global("ratio").unwrap(), Var::F64(0.5));
 
-    // the script reads what the host set (gold's shared-globals surface)
+    // the script reads what the host set (host and script share globals)
     let mut script = Script::new("function read() { return answer + 1; }").unwrap();
     script.set_global("answer", &Var::from(41i64)).unwrap();
     assert_eq!(script.call("read", &[]).unwrap(), Var::I64(42));
@@ -89,7 +89,7 @@ fn missing_globals_and_functions_are_explicit_errors() {
 }
 
 #[test]
-fn compile_errors_surface_at_construction_like_golds_load() {
+fn compile_errors_surface_at_construction() {
     let err = Script::new("let x = ;").unwrap_err();
     assert!(matches!(err, ScriptError::Engine(_)), "got {err:?}");
     // v12's Compile errors carry the front-end message
@@ -267,8 +267,8 @@ fn objects_and_lists_cross_both_ways() {
 #[test]
 fn vec_shapes_cross_as_plain_json_objects() {
     // Vec3/Quat serialize as {x,y,z(,w)} — plain JSON objects, and they come
-    // back as plain objects too: the JSON bridge is untyped (documented
-    // divergence from gold, whose scripts share typed host objects).
+    // back as plain objects too: the JSON bridge is untyped (scripts see
+    // data, not typed host handles).
     let mut script = Script::new("function read(v) { return v.x + v.y + v.z; }").unwrap();
     let v = hyg::Vec3::new(1.0, 2.0, 3.0);
     assert_eq!(script.call("read", &[Var::from(v)]).unwrap(), Var::I64(6));
@@ -333,7 +333,7 @@ fn engine_syncs_the_scripted_transform_into_its_entity() {
     // shared handle and the engine writes it back into the ENTITY's
     // transform after the component pass — the draw pass (and anything
     // reading entity transforms) sees the scripted pose. The entity's
-    // spawn pose seeds the script (gold's physicsBody spawns at its entity
+    // spawn pose seeds the script (the component spawns at its entity's
     // transform), so incremental scripts start from where the entity was
     // placed — not from the handle's default.
     let script = Script::new(
@@ -380,8 +380,8 @@ fn engine_syncs_the_scripted_transform_into_its_entity() {
 
 #[test]
 fn missing_script_hooks_are_silently_skipped() {
-    // gold's optional lifecycle: a script that defines nothing still rides
-    // every hook without a squeak
+    // the lifecycle hooks are optional: a script that defines nothing still
+    // rides every hook without a squeak
     let script = Script::new("var idle = true;").unwrap();
     let mut component = ScriptedComponent::new(script).unwrap();
     component.initialize();
@@ -466,7 +466,7 @@ fn host_closures_follow_the_script_across_threads() {
     });
 
     // per-(script, thread) state: globals set on the main thread stay here —
-    // the new thread sets its own (gold's load semantics, per thread)
+    // the new thread sets its own (script state loads per thread)
     let result = thread::spawn(move || {
         script.set_global("offset", &Var::from(3i64)).unwrap();
         script.call("go", &[Var::from(20i64)]).unwrap()

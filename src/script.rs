@@ -1,12 +1,12 @@
-//! The interpreter seam — gold's `script` facade, driven by the **v12**
+//! The interpreter seam — a `script` facade driven by the **v12**
 //! JavaScript engine (DevYatsu/v12, a git dependency — the roadmap's
 //! "DevYatsu's script crate" name was wrong; the crate is `v12-api`).
 //!
-//! gold's `script` object (`include/lang/lang.hpp`) is "a configurable,
-//! embeddable script": `script({"source", ...})` loads, then `run()`,
-//! `setGlobal`/`getGlobal`, `call({"fn", args})` — and scripts share the
-//! host's value objects directly. Hydrargyros mirrors that surface with
-//! [`Script`], and `Var` is the bridge between native Rust and scripts.
+//! The facade is "a configurable, embeddable script": the source loads
+//! (at construction or via [`Script::load`]), then `run()`,
+//! `set_global`/`get_global`, `call(name, args)` — and host and script
+//! share values through the bridge. [`Script`] is that surface, and
+//! `Var` is the bridge between native Rust and scripts.
 //!
 //! # The thread-local pool (why the handle is Send + Sync)
 //!
@@ -54,12 +54,12 @@
 //!
 //! Host functions registered with [`Script::register`] become real JS
 //! globals (a JSON-marshalling wrapper around a v12 host fn); a `Var::Func`
-//! crossing IN through `set_global` becomes one the same way — gold's
-//! "scripts share the host" read/write surface.
+//! crossing IN through `set_global` becomes one the same way — scripts
+//! and host read and write each other through that shared surface.
 //!
 //! One v12-fidelity note the facade makes honest: each eval's top-level
 //! `let`/`const` bindings are **lexical to that eval** (a v12 divergence
-//! from spec — and from gold, whose scopes are prototype chains). They
+//! from spec). They
 //! persist for the script's own functions (same-eval closures keep state
 //! across calls — the update-loop shape), but the bridge's later evals
 //! cannot see them, so `get_global`/`call` resolve **global-object** state:
@@ -244,9 +244,9 @@ fn with_entry<T>(
 }
 
 /// Materialize a fresh context for `script` on the calling thread: bridge
-/// plumbing, every registered host closure, then the source (gold's
-/// `script({"source"})` compiles up front — v12 has no compile/run split, so
-/// "compile" happens with execution, once per (script, thread)), then the
+/// plumbing, every registered host closure, then the source (v12 has no
+/// compile/run split, so "compile" happens with execution, once per
+/// (script, thread)), then the
 /// bootstraps (hook shims that must see the script's own declarations).
 fn materialize(script: &Script) -> Result<PoolEntry, ScriptError> {
     let mut ctx = Context::new();
@@ -495,8 +495,8 @@ fn eval_with_args(
     out.map_err(ScriptError::from)
 }
 
-/// gold's `script` facade (`include/lang/lang.hpp`): a configurable,
-/// embeddable script whose runtime shares the host's values. A `Script` is a
+/// A configurable, embeddable script whose bridge shares values with the
+/// host. A `Script` is a
 /// lightweight `Send + Sync` HANDLE — the `!Send` v12 `Context` lives in the
 /// thread-local pool (see the module docs). Methods take `&mut self`: the
 /// single-mutator model means a script call mutates the context.
@@ -535,9 +535,9 @@ impl fmt::Debug for Script {
 }
 
 impl Script {
-    /// A script from its source — gold's `script({"source", ...})`. The
+    /// A script from its source. The
     /// source is evaluated immediately on the calling thread (v12 has no
-    /// compile/run split, so gold's parse errors surface here, at
+    /// compile/run split, so parse errors surface here, at
     /// construction, as [`ScriptError::Engine`]).
     ///
     /// # Errors
@@ -559,9 +559,9 @@ impl Script {
         self.id
     }
 
-    /// Replace the source and reset the script — gold's
-    /// `s.load({"source", "..."})` (parse + compile fresh). Script state
-    /// starts over; registered host closures and bootstraps are re-bound.
+    /// Replace the source and reset the script — parse + compile fresh.
+    /// Script state starts over; registered host closures and bootstraps
+    /// are re-bound.
     ///
     /// # Errors
     /// Compile errors, or a throw from top-level script code.
@@ -570,11 +570,11 @@ impl Script {
         self.rematerialize()
     }
 
-    /// (Re-)execute the loaded source — gold's `s.run()`. Unlike gold, v12
+    /// (Re-)execute the loaded source. v12
     /// has no compile/run split (and its completion values are unwired,
     /// ADR-004), so this returns `Null`: scripts deliver values through
     /// [`call`](Self::call). Top-level `let`/`const` redeclare resets that
-    /// state — gold's REPL semantics.
+    /// state — REPL semantics.
     ///
     /// # Errors
     /// Compile errors, or a throw from top-level script code.
@@ -585,13 +585,12 @@ impl Script {
         })
     }
 
-    /// Set a global — gold's `s.setGlobal({"name", value})`. Like gold
-    /// (whose `setGlobal` can return an error var), this is fallible:
+    /// Set a global — fallible on purpose:
     /// non-JSON-representable values (non-finite floats, integers beyond
     /// 2^53) are rejected instead of silently degraded.
     ///
-    /// A `Var::Func` becomes a callable in the script — gold's "scripts
-    /// share the host" — via the same host-fn path as
+    /// A `Var::Func` becomes a callable in the script — the host and
+    /// script sharing one value space — via the same host-fn path as
     /// [`register`](Self::register).
     ///
     /// # Errors
@@ -615,7 +614,7 @@ impl Script {
         with_entry(self, |entry| eval_with_args(entry, Some(json), &install))
     }
 
-    /// Read a global — gold's `s.getGlobal({"name"})`. A missing global is
+    /// Read a global. A missing global is
     /// an error (explicit reads; no silent nulls), and a function value is
     /// an error (functions cannot cross out of scripts).
     ///
@@ -625,8 +624,8 @@ impl Script {
     /// v12-lexical (each eval's lexical scope is its own — see
     /// [`run`](Self::run)): the script's own functions see them across calls
     /// (same-eval closures), but a later eval — this probe — cannot. That is
-    /// a v12 divergence from spec (and from gold, whose scopes are prototype
-    /// chains); surface such state through a script accessor instead. A
+    /// a v12 divergence from spec; surface such state through a script
+    /// accessor instead. A
     /// global holding `undefined` reads as not defined (JS `null` reads as
     /// [`Var::Null`]).
     ///
@@ -654,8 +653,8 @@ impl Script {
         decode_response(&response, &format!("global '{name}'"))
     }
 
-    /// Call a global function with `Var` args — gold's
-    /// `s.call({"fn", args})`. Values cross through the JSON bridge; a
+    /// Call a global function with `Var` args. Values cross through the
+    /// JSON bridge; a
     /// missing function is a [`ScriptError::Type`], a script throw is a
     /// [`ScriptError::Engine`]. Resolution is global-object state (see
     /// [`get_global`](Self::get_global)): declare hooks with `function` so
@@ -690,7 +689,7 @@ impl Script {
     /// The per-frame fast path: call `name` with scalar `f64` args and
     /// discard the result, straight through v12's `ToValue` — no JSON
     /// round-trip, no recompile. This is the scripted-component pump shape
-    /// (gold's optional lifecycle hooks return nothing).
+    /// (lifecycle hooks return nothing).
     ///
     /// # Errors
     /// Missing function (the hook shims guard with `typeof`, so the
@@ -773,7 +772,7 @@ impl Script {
     }
 
     /// Drop this thread's context (if any) and materialize a fresh one —
-    /// gold's load: parse + compile from scratch.
+    /// parse + compile from scratch.
     fn rematerialize(&mut self) -> Result<(), ScriptError> {
         POOL.with(|pool| {
             pool.borrow_mut().remove(&self.id);

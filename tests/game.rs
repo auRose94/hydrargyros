@@ -1,6 +1,6 @@
 //! Game-module tests: the pump, priority ordering, entity hierarchies, the
-//! backend registry, and the Var event seam — all headless, like gold's
-//! `windowSystemHeadless`.
+//! backend registry, and the Var event seam — all headless, no window or
+//! GPU required.
 
 use std::sync::{Arc, Mutex};
 
@@ -72,7 +72,7 @@ fn initialize_runs_once_per_component() {
 
 #[test]
 fn headless_pump_runs_scripted_events_then_quits() {
-    // gold's frame: events first, quit stops the loop after the in-flight
+    // the pump order: events first, quit stops the loop after the in-flight
     // frame completes
     let log = Arc::new(Mutex::new(Vec::new()));
     let mut engine = Engine::new("acme", "pump-test");
@@ -166,7 +166,7 @@ fn transform_composes_parent_first() {
 
 #[test]
 fn window_backend_registry() {
-    // headless is pre-registered (gold ships a headless window system too)
+    // headless is pre-registered (the built-in no-window backend)
     let mut window = create_window_backend("headless", &Var::Null).unwrap();
     assert!(window.poll().is_empty());
 

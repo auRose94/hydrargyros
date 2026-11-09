@@ -1,4 +1,4 @@
-//! The file-backed document store — gold's `dataStore` ("file" backend).
+//! The file-backed document store ("file" backend).
 //!
 //! A [`Store`] is a directory of collections; a collection is a directory of
 //! JSON documents named by their `_id` (24 hex chars, Mongo-shaped).

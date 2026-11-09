@@ -1,4 +1,5 @@
-//! File dataStore tests, ported from gold's webTest.cpp suite.
+//! File dataStore tests: CRUD, update operators, metadata files, and
+//! empty-query behavior against a real temp-dir store.
 
 use hyg::web::store::Store;
 use hyg::{a, o};

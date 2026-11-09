@@ -1,4 +1,4 @@
-//! Renderables — gold's `renderable`/`meshRenderer`: components the
+//! Renderables — components the
 //! engine's draw pass turns into geometry. A `MeshRenderer` draws either a
 //! solid shape (rect or circle, the quad path) or a model (mesh parts with
 //! optional textures) at its entity's world transform; the camera maps it
@@ -60,8 +60,8 @@ impl std::fmt::Debug for MeshGeometry {
     }
 }
 
-/// A solid shape or model at the entity's transform (gold's
-/// `meshRenderer`; v0: lights are a fixed key light). Draw tier — rendered
+/// A solid shape or model at the entity's transform
+/// (v0: lights are a fixed key light). Draw tier — rendered
 /// after all updates. The entity's world position is the shape's center;
 /// `half_size` is in world units. A model is scaled/rotated by the
 /// entity's transform, and `color` tints it (multiplied over the parts'

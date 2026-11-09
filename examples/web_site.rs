@@ -1,4 +1,4 @@
-//! A multi-page homage to gold's `myWebProject` example: shared state,
+//! A multi-page demo site: shared state,
 //! pages built with the HTML builder, form handling, a JSON API, path
 //! params, query strings, WebSocket chat, static assets, and styled 404s —
 //! all over `Var`.
@@ -104,8 +104,8 @@ async fn main() {
                 "home",
                 "/",
                 h::div([
-                    h::h1([Node::text("Mercury web")]),
-                    h::p([Node::text("Gold's expressjs-like server, in Rust: routes are Var closures.")]),
+                    h::h1([Node::text("hyg web")]),
+                    h::p([Node::text("An expressjs-like server, in Rust: routes are Var closures.")]),
                     h::ul([
                         h::li([Node::text(format!("{n} registered users"))]),
                         h::li([Node::text("try "), h::code([Node::text("/hello/hyg?shout=1")])]),
@@ -127,7 +127,7 @@ async fn main() {
                 "/",
                 h::div([
                     h::h1([Node::text(format!("Hi {name}!"))]),
-                    h::p([Node::text("Form handling, gold-style.")]),
+                    h::p([Node::text("Form handling, express-style.")]),
                 ]),
             )
         })
@@ -206,7 +206,7 @@ document.body.addEventListener("click", () => { const m = prompt("message"); if 
         })
         // static files: ./public served under /assets
         .mount("/assets", "public")
-        // styled 404 — gold's setErrorHandler hook
+        // styled 404 — the on_error error hook
         .on_error(|req| {
             let path = req.get("path").as_string().unwrap_or_default();
             page(

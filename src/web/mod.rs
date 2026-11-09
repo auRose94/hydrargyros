@@ -1,6 +1,6 @@
-//! The web module — gold's `gold::web`, rebuilt for Rust.
+//! The web module — HTML, CSS, storage, and HTTP.
 //!
-//! Four siblings, mirroring gold's module split:
+//! Four siblings:
 //!
 //! - **[`html`]** — the HTML5 builder and parser (elements as data, escaping,
 //!   entity decoding, malformed-input recovery). Feeds this module *and* the

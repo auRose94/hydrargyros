@@ -1,23 +1,22 @@
-//! Lights — gold's `light` component (gold's prototype: `type: "point"`,
-//! `color: 0xffffffff`, `intensity: 1.0`, `cone: vec2f(1, 1)`), shading
-//! with the KHR_lights_punctual math gold's PBR shader ships.
+//! Lights — the `light` component: prototype defaults `type: "point"`,
+//! `color: 0xffffffff`, `intensity: 1.0`, `cone: vec2f(1, 1)`; shading
+//! with the KHR_lights_punctual math.
 //!
 //! A light hangs off an entity: its **position** is the entity's world
 //! origin and its **direction** is the entity's world forward (the
 //! rotation applied to +z — the direction the light *shines*, KHR
 //! convention). The engine gathers light components each draw pass and
 //! hands them to the render backend; a scene with no lights renders
-//! ambient-only (gold's zeroed light contributes nothing). The type
-//! strings are gold's: `"point"` (default), `"directional"`, `"spot"`;
-//! `"area"` is a stub in gold and unported here. `cone` holds inner/outer
-//! cosines exactly like gold — the default `(1, 1)` collapses a spot to
-//! nothing, so spots need real angles.
+//! ambient-only (a zeroed light contributes nothing). The type strings:
+//! `"point"` (default), `"directional"`, `"spot"` — `"area"` is not
+//! supported. `cone` holds inner/outer cosines — the default `(1, 1)`
+//! collapses a spot to nothing, so spots need real angles.
 
 use super::component::{Component, Priority};
 use super::transform::Transform;
 use crate::var::Vec3;
 
-/// What kind of light this is (gold's `type` string, as the renderer
+/// What kind of light this is (the `type` string, as the renderer
 /// encodes it: directional = 0, point = 1, spot = 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LightKind {
@@ -27,7 +26,7 @@ pub enum LightKind {
 }
 
 impl LightKind {
-    /// The uniform encoding (gold's float constants).
+    /// The uniform encoding (float constants in the light uniform).
     pub fn as_u32(self) -> u32 {
         match self {
             LightKind::Directional => 0,
@@ -37,26 +36,26 @@ impl LightKind {
     }
 }
 
-/// A light component (gold's `light`): color, intensity, cone, type. The
+/// A light component: color, intensity, cone, type. The
 /// position/direction come from the owning entity's transform at draw
 /// time, so lights move with entities like everything else.
 #[derive(Debug, Clone)]
 pub struct Light {
     pub kind: LightKind,
-    /// Linear RGB, 0–1 per channel (gold packs `0xRRGGBB` as a uint32;
-    /// this port takes the channels directly).
+    /// Linear RGB, 0–1 per channel (each channel set directly, not
+    /// packed).
     pub color: [f32; 3],
     pub intensity: f32,
-    /// Inner/outer cone cosines for spots (gold's `cone` vec2f) —
-    /// `(1.0, 1.0)` by default, which collapses the cone to nothing.
+    /// Inner/outer cone cosines for spots — `(1.0, 1.0)` by default,
+    /// which collapses the cone to nothing.
     pub cone: [f32; 2],
     /// Distance falloff range for point/spot lights; `0.0` = unlimited
-    /// (gold's uniform row comment: "range — 0 means unlimited").
+    /// (the uniform row contract: "range — 0 means unlimited").
     pub range: f32,
 }
 
 impl Default for Light {
-    /// Gold's prototype defaults: a white point light at intensity 1.
+    /// The prototype defaults: a white point light at intensity 1.
     fn default() -> Self {
         Light {
             kind: LightKind::Point,
@@ -73,7 +72,7 @@ impl Light {
         Light::default()
     }
 
-    /// A directional light (gold's `setType("directional")`).
+    /// A directional light (`type: "directional"`).
     pub fn directional() -> Self {
         Light {
             kind: LightKind::Directional,
@@ -81,7 +80,7 @@ impl Light {
         }
     }
 
-    /// A spot light (gold's `setType("spot")`) — set real
+    /// A spot light (`type: "spot"`) — set real
     /// [`cone`](Self::cone) angles or it lights nothing.
     pub fn spot() -> Self {
         Light {
@@ -134,8 +133,8 @@ impl Component for Light {
 }
 
 /// A light gathered from the scene: the component's config plus its
-/// entity's world transform (gold packs position and forward direction
-/// out of the light's world matrix in `meshRenderer::draw`).
+/// entity's world transform (position and forward direction resolved
+/// from the light's world matrix at gather time).
 #[derive(Debug, Clone, Copy)]
 pub struct SceneLight {
     /// World position of the light's entity (point/spot origin).
@@ -164,7 +163,7 @@ impl SceneLight {
     }
 }
 
-/// A rotation taking +z — gold's light forward, the direction the light
+/// A rotation taking +z — the light forward, the direction the light
 /// *shines* — onto `dir` (normalized internally; degenerate inputs fall
 /// back to identity). Light orientation belongs to the entity transform,
 /// so "a sun shining toward `dir`" is an entity with this rotation and a

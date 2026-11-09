@@ -1,12 +1,12 @@
-//! The game module — gold's engine core, as Rust traits and registries.
+//! The game module — the engine core, as Rust traits and registries.
 //!
-//! The shape follows gold's `game` module: an [`Engine`] pumps frames
+//! The shape: an [`Engine`] pumps frames
 //! (poll window events → physics → sort/init components → priority-ordered
 //! `update` → draw pass → frame cap), [`Component`]s hang off [`Entity`]s
 //! with [`Transform`] hierarchies, and subsystems are swappable backends
-//! behind `register`/`create` registries — gold's pattern, as Rust traits.
+//! behind `register`/`create` registries.
 //!
-//! Headless first, like gold's `windowSystemHeadless`: the whole loop runs
+//! Headless first: the whole loop runs
 //! and tests without a window or GPU. The wgpu render backend is the next
 //! rung; events already cross the boundary as `Var` (the thesis — a `quit`
 //! event is just `o!{ "type": "quit" }`).

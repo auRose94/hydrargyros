@@ -1,7 +1,4 @@
-//! Timers and tweening — Hydrargyros-native (gold has no tween/timer
-//! surface: the lineage check over gold's src/include turns up only the UI
-//! style system's CSS timing functions — style.cpp `easeValue`, cubic-bézier
-//! curves interpolating style properties, not game values). This is the
+//! Timers and tweening — Hydrargyros-native. This is the
 //! app-development fill, the way [`super::camera::OrbitController`] is:
 //! an [`Easing`] curve, a [`Tween`] interpolating a scalar over a duration,
 //! and a [`Timer`] that ticks.

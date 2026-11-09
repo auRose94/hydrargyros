@@ -1,4 +1,4 @@
-//! A physics world: a ball falls onto a floor (rapier behind gold's
+//! A physics world: a ball falls onto a floor (rapier through the
 //! registered-backend pattern), the engine syncs its pose into the entity
 //! transform each frame, a raycast names what it lands on — and the wgpu
 //! offscreen renderer saves a screenshot.
@@ -34,7 +34,7 @@ fn main() {
     engine.fixed_dt(1.0 / 60.0); // 240 frames = 4 simulated seconds
 
     // the world sim: rapier when built with --features physics, otherwise
-    // the no-op "none" backend (gold's fallback contract)
+    // the no-op "none" backend (the fallback when rapier is unavailable)
     let world = PhysicsWorld::create("rapier", &Var::Null)
         .unwrap_or_else(|_| PhysicsWorld::none());
     println!("physics backend: {}", world.backend_name());
@@ -62,7 +62,7 @@ fn main() {
         .unwrap_or((Vec3::new(0.0, 0.0, 0.0), hyg::var::Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
     println!("ball settled at y={:.3} (floor top is 0.5)", pos.y);
 
-    // gold's screenshot debug aid, headless: render a frame, save it
+    // the headless screenshot debug aid: render a frame, save it
     #[cfg(feature = "wgpu")]
     {
         match pollster::block_on(hyg::game::WgpuRenderer::new_offscreen(320, 180)) {

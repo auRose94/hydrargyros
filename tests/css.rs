@@ -1,4 +1,5 @@
-//! CSS parser tests, ported from gold's webTest.cpp suite.
+//! CSS parser tests: selectors, declarations, function/quoted values with
+//! embedded semicolons/braces, `!important`, at-rules, typed numbers.
 
 use hyg::web::css;
 

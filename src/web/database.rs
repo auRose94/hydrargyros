@@ -1,11 +1,10 @@
-//! The database facade — gold's `database`: gold-shaped config in,
-//! collection handles out, over a store backend.
+//! The database facade — config in, collection handles out, over a
+//! store backend.
 //!
 //! `database({{"backend","file"},{"name","mydb"},{"path","./data"}})` +
 //! `connect()` becomes [`Database::connect`]; `getCollection("users")`
-//! becomes [`Database::get_collection`]. The `"file"` backend is the one
-//! gold ships (it wraps [`Store`]); the facade is where other backends
-//! would slot in.
+//! becomes [`Database::get_collection`]. The `"file"` backend wraps
+//! [`Store`]; the facade is where other backends would slot in.
 //!
 //! ```
 //! use hyg::web::database::Database;
@@ -26,13 +25,13 @@
 use super::store::{Store, StoreError};
 use crate::var::Var;
 
-/// The gold `database` facade over one backend store.
+/// The database facade over one backend store.
 #[derive(Clone)]
 pub struct Database {
     store: Store,
 }
 
-/// A named collection handle — gold's `db.getCollection(...)` result.
+/// A named collection handle — the [`Database::get_collection`] return value.
 #[derive(Clone)]
 pub struct Collection {
     store: Store,
@@ -40,9 +39,9 @@ pub struct Collection {
 }
 
 impl Database {
-    /// Connect from gold-style config: `{ "backend": "file", "name": ...,
+    /// Connect from config: `{ "backend": "file", "name": ...,
     /// "path": ... }` (`name` defaults to `"db"`, `path` to `"."`). Only the
-    /// `"file"` backend exists, matching gold.
+    /// `"file"` backend exists.
     pub fn connect(config: impl Into<Var>) -> Result<Database, StoreError> {
         let cfg = config.into();
         let backend = cfg.get("backend").as_string().unwrap_or_else(|| "file".to_string());

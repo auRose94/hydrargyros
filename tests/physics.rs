@@ -69,7 +69,7 @@ fn re_registering_a_name_replaces_the_body() {
     assert_eq!(rot, Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 });
 }
 
-// ---- mass: gold's `mass` proto knob ----
+// ---- mass: the `mass` proto knob ----
 
 #[test]
 fn mass_scales_momentum_transfer() {
@@ -162,7 +162,7 @@ fn set_gravity_wakes_sleeping_bodies() {
     );
 }
 
-// ---- the none backend: gold's contract ----
+// ---- the none backend: the no-op contract ----
 
 #[test]
 fn none_backend_initializes_and_no_ops() {

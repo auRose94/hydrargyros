@@ -1,5 +1,5 @@
-//! Camera 3D tests: the `view_projection` matrix (the v0 ortho golden
-//! values, gold's perspective look-at + fov with the WebGPU z convention)
+//! Camera 3D tests: the `view_projection` matrix (the ortho matrix pinned
+//! bit-for-bit, the perspective look-at + fov with the WebGPU z convention)
 //! and the Hydrargyros-native orbit controls over synthetic window events.
 
 use hyg::game::camera::{Camera, OrbitController, Projection};
@@ -21,8 +21,8 @@ fn ndc(clip: [f32; 4]) -> [f32; 2] {
     [clip[0] / clip[3], clip[1] / clip[3]]
 }
 
-/// gold's defaults: fov 60° y, near 0.1, far 100, 16:9 — eye at the origin
-/// looking down +z.
+/// The perspective defaults: fov 60° y, near 0.1, far 100, 16:9 — eye at
+/// the origin looking down +z.
 fn perspective() -> Camera {
     Camera {
         position: Vec3::splat(0.0),
@@ -74,10 +74,10 @@ fn ortho_matrix_agrees_with_world_to_clip() {
     assert_eq!(farthest[2], 1.0);
 }
 
-// ---- perspective: gold's bx look-at + projection ----
+// ---- perspective: the look-at + projection matrix ----
 
 /// A point straight ahead of the eye lands at the clip center, and w is
-/// the view depth (bx's [11] = 1 row: clip.w = view.z).
+/// the view depth (the projection's w row selects view z: clip.w = view.z).
 #[test]
 fn perspective_maps_ahead_points_to_the_clip_center() {
     let camera = perspective();
@@ -245,7 +245,7 @@ fn wheel_zooms() {
 
 /// `camera()` puts the eye on the sphere around the target:
 /// `target + d·(cos(pitch)sin(yaw), sin(pitch), cos(pitch)cos(yaw))`,
-/// looking at the target with gold's fov/near/far.
+/// looking at the target with the standard fov/near/far.
 #[test]
 fn orbit_camera_matches_the_spherical_formula() {
     let target = Vec3::new(1.0, 2.0, 3.0);

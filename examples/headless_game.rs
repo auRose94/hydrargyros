@@ -1,4 +1,4 @@
-//! A headless game: gold's pump + dispatch, no window or GPU — components
+//! A headless game: the pump + event dispatch, no window or GPU — components
 //! update in priority order, events cross as `Var`, and the entity config
 //! is a `FromVar`-derived struct (the typed hot-path seam).
 //!

@@ -1,6 +1,5 @@
-//! Models — meshes with their textures, the shape glTF files load into
-//! (gold's `meshRenderer` carried one mesh; a model is what a real asset
-//! file expands to).
+//! Models — meshes with their textures, the shape glTF files load into:
+//! a model is what a real asset file expands to.
 //!
 //! glTF primitives are grouped by their `baseColorTexture`: everything
 //! sharing a texture (or none) merges into one [`ModelPart`], so a model

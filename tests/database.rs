@@ -1,4 +1,4 @@
-//! The `database` facade — gold-shaped config in, collection handles out.
+//! The `database` facade — a config object in, collection handles out.
 
 use hyg::web::database::Database;
 use hyg::{a, o};

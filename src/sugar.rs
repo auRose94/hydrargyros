@@ -5,7 +5,7 @@
 //! - `tpl!("...$0 $1", a, b)` builds a string (JS template literals)
 //! - `func!(|x, y| ...)` builds a `Func` (JS function literal)
 //!
-//! `o!`/`a!` nest, exactly like gold's `jo(...)`/`ja(...)`. These are the
+//! `o!`/`a!` nest arbitrarily deep. These are the
 //! idioms that make prototyping feel like JavaScript.
 
 use crate::list::List;
@@ -65,8 +65,8 @@ macro_rules! a {
     }};
 }
 
-/// Template-literal string builder. `$0`, `$1`, … are positional args (gold's
-/// `tpl`). For inline interpolation prefer Rust's native `format!("...{x}")`.
+/// Template-literal string builder. `$0`, `$1`, … are positional args.
+/// For inline interpolation prefer Rust's native `format!("...{x}")`.
 ///
 /// ```
 /// use hyg::tpl;

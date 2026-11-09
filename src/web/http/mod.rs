@@ -1,15 +1,15 @@
-//! The HTTP layer — gold's expressjs-like `web::server`, rebuilt on
+//! The HTTP layer — an expressjs-like server surface, built on
 //! [axum](https://github.com/tokio-rs/axum). Routes are plain closures over
 //! `Var`, JSON rides serde for free, and shared state is a cloned `Var`
 //! handle. Behind the `web` feature so the core stays dependency-light.
 //!
 //! Two layers:
 //!
-//! - **[`Server`]** (gold's `server` facade): `get`/`post`/`put`/`patch`/
+//! - **[`Server`]**: `get`/`post`/`put`/`patch`/
 //!   `delete`/`options` routes with `:param` and trailing `*` patterns,
 //!   WebSocket routes (`open`/`message`/`close`), `mount` for static files,
 //!   an `on_error` hook for unmatched requests, streamed bodies both ways
-//!   (`route_stream` / [`Response::stream`] — gold's `onData`/`write`),
+//!   (`route_stream` / [`Response::stream`]),
 //!   HTTPS via the `sslCert`/`sslKey` config keys, and graceful, restartable
 //!   `start()`/`stop()`.
 //! - **Sugar** ([`post_var`]/[`get_var`]/[`serve`]): one-shot routers when a
@@ -19,8 +19,8 @@
 //! `{ "method", "path", "params", "query", "headers", "body" }` — with the
 //! body pre-parsed by content type: `application/json` → `Var`,
 //! `application/x-www-form-urlencoded` → object, anything else → string.
-//! The helpers below (`is_json`, `accepting_json`, …) mirror gold's
-//! `request` predicates.
+//! The helpers below (`is_json`, `accepting_json`, …) are the request
+//! predicates over that object.
 //!
 //! ```ignore
 //! // (doctests are feature-gated; see examples/web_site.rs and tests/web.rs)
@@ -46,7 +46,7 @@ use crate::var::Var;
 
 pub use server::{Server, WsHandlers, WsSock};
 
-// ---- response (gold's `response`: status / headers / typed body) ----
+// ---- response (status / headers / typed body) ----
 
 /// The body flavor of a [`Response`]; picks the default content type.
 enum RespBody {
@@ -59,7 +59,7 @@ enum RespBody {
     /// Sent verbatim (`application/octet-stream` unless `ct` overrides).
     Raw(Vec<u8>),
     /// Sent as chunked frames (`application/octet-stream` unless `ct`
-    /// overrides) — gold's `write`/`end` loop, and the SSE shape.
+    /// overrides) — one frame per stream item, the SSE shape.
     Stream(axum::body::Body),
 }
 
@@ -96,7 +96,7 @@ impl Response {
     }
 
     /// `200` streamed: each stream item becomes one chunked-transfer frame
-    /// (gold's `write`/`end` loop; `text/event-stream` + this is SSE).
+    /// (`text/event-stream` + this is SSE).
     pub fn stream<S>(source: S) -> Self
     where
         S: futures_util::TryStream + Send + 'static,
@@ -111,13 +111,13 @@ impl Response {
         }
     }
 
-    /// Override the status code (gold's `res.writeStatus`).
+    /// Override the status code.
     pub fn status(mut self, code: u16) -> Self {
         self.status = code;
         self
     }
 
-    /// Add a response header (gold's `res.writeHeader`).
+    /// Add a response header.
     pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
@@ -187,30 +187,29 @@ impl From<&str> for Response {
     fn from(s: &str) -> Self { Response::html(s) }
 }
 
-// ---- request helpers (gold's `request` predicates) ----
+// ---- request helpers (predicates over the staged request) ----
 
 /// One request header, by case-insensitive name ("" on a miss).
 pub fn req_header(req: &Var, name: &str) -> String {
     req.get("headers").get(&name.to_ascii_lowercase()).as_string().unwrap_or_default()
 }
 
-/// Content type is `application/json` (gold's `request.isJSON`).
+/// Content type is `application/json`.
 pub fn req_is_json(req: &Var) -> bool {
     req_header(req, "content-type").contains("application/json")
 }
 
-/// Content type is `application/x-www-form-urlencoded`
-/// (gold's `request.isWWWFormURLEncoded`).
+/// Content type is `application/x-www-form-urlencoded`.
 pub fn req_is_www_form_urlencoded(req: &Var) -> bool {
     req_header(req, "content-type").contains("application/x-www-form-urlencoded")
 }
 
-/// The client accepts JSON (gold's `request.acceptingJSON`).
+/// The client accepts JSON (`Accept: application/json`).
 pub fn req_accepting_json(req: &Var) -> bool {
     req_header(req, "accept").contains("application/json")
 }
 
-/// The client accepts HTML (gold's `request.acceptingHTML`).
+/// The client accepts HTML (`Accept: text/html`).
 pub fn req_accepting_html(req: &Var) -> bool {
     req_header(req, "accept").contains("text/html")
 }
@@ -241,7 +240,7 @@ fn form_decode(s: &str) -> String {
     percent_decode(&s.replace('+', " "))
 }
 
-/// Parse `a=1&b=x%20y` into an ordered object (gold's `getQuery` shape).
+/// Parse `a=1&b=x%20y` into an ordered object.
 pub(crate) fn parse_query(q: &str) -> Object {
     let o = Object::new();
     for pair in q.split('&').filter(|s| !s.is_empty()) {
@@ -254,8 +253,8 @@ pub(crate) fn parse_query(q: &str) -> Object {
     o
 }
 
-/// Build the request `Var` the way gold stages one: method, path, params,
-/// query, headers (lowercased names), and a content-typed body.
+/// Build the request `Var`: method, path, params, query, headers
+/// (lowercased names), and a content-typed body.
 pub(crate) fn build_req(
     method: &Method,
     uri: &Uri,

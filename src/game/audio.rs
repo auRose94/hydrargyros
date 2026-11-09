@@ -1,22 +1,19 @@
-//! Audio — gold's `audioSystem` split: an [`AudioBackend`] trait with
-//! register/create registries (gold's `registerAudioSystem`/`createAudioSystem`
-//! factory map under a mutex), and the real device behind the `audio`
-//! feature: **rodio** (cpal underneath) — the wheel gold loads SDL for (its
-//! SDL2/SDL3 `audioSystem` adapters ship as plugins).
+//! Audio — a backend-registry split: an [`AudioBackend`] trait with
+//! register/create registries (name → factory maps under a mutex), and
+//! the real device behind the `audio` feature: **rodio** (cpal
+//! underneath) — device output delegated to the crate, not hand-rolled.
 //!
-//! gold's `audioSystem` (include/game/audioSystem.hpp): backends registered
-//! by name, `loadSound(path)` → handle, `play(handle, loop)`, `stop()`
-//! (everything), `setVolume` master [0, 1], `name()`. The port mirrors the
-//! split with deliberate divergences:
+//! The facade contract: backends registered by name, `play`, `stop`,
+//! `setVolume` master [0, 1], `name()` — with deliberate divergences
+//! from the classic load-handle-then-play shape:
 //!
 //! - `play` takes the [`AudioSource`] directly and returns a **per-play
-//!   id** — gold's load-then-play two-step collapses into one call, and
-//!   [`AudioBackend::stop`] names ONE sound where gold's `stop()` stops
+//!   id** — no load-then-play two-step, one call — and
+//!   [`AudioBackend::stop`] names ONE sound instead of stopping
 //!   everything.
-//! - gold's registry has **no** no-op fallback (`createAudioSystem` returns
-//!   nullptr on a miss); the port ships the headless-first `none` recorder
-//!   backend — the physics pattern — so the facade's contracts test without
-//!   a device (its play records are introspectable through
+//! - the registry ships a no-op fallback: the headless-first `none`
+//!   recorder backend — the physics pattern — so the facade's contracts
+//!   test without a device (its play records are introspectable through
 //!   [`AudioWorld::none_plays`]).
 //! - [`AudioSource::Tone`] synthesizes PCM in-memory (44.1 kHz mono i16,
 //!   stdlib WAV encoder below) — sounds testable with zero assets.
@@ -49,8 +46,8 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::var::Var;
 
-/// Why an audio call failed — path-style messages, the way gold's
-/// `loadSound` reports 0-and-move-on is replaced by reporting WHY.
+/// Why an audio call failed — path-style messages: failures report WHY
+/// instead of a load-returns-0-and-move-on sentinel.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AudioError {
     /// A source could not be loaded or decoded: the message carries the
@@ -174,7 +171,7 @@ fn tone_samples(frequency: f32, duration: f32, shape: WaveShape) -> Vec<i16> {
 /// The WAV container: a canonical 44-byte PCM header + little-endian i16
 /// data. ~20 lines of stdlib — no wav crate (rodio's `wav_output` wheel
 /// writes device output to files, not in-memory bytes; the header shape is
-/// the same one gold's SDL adapters decode).
+/// the canonical one any PCM decoder expects).
 fn wav_bytes(samples: &[i16]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + samples.len() * 2);
@@ -198,7 +195,7 @@ fn wav_bytes(samples: &[i16]) -> Vec<u8> {
     out
 }
 
-/// How a source plays — gold's `play(handle, loop)` plus a per-play volume.
+/// How a source plays — loop-or-not plus a per-play volume.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlaySpec {
     /// Per-play gain, 0..=1 (1 = the source at full volume). Values built
@@ -211,7 +208,7 @@ pub struct PlaySpec {
 }
 
 impl Default for PlaySpec {
-    /// gold's `play(handle, loop)` defaults: full volume, no loop.
+    /// Play defaults: full volume, no loop.
     fn default() -> Self {
         PlaySpec {
             volume: 1.0,
@@ -229,10 +226,10 @@ impl PlaySpec {
         }
     }
 
-    /// gold-style config object — `o!{ "volume": 0.5, "loop": true }`.
-    /// Missing keys keep the defaults (gold's prototype-defaults voice);
+    /// A `Var` config object — `o!{ "volume": 0.5, "loop": true }`.
+    /// Missing keys keep the defaults (prototype-defaults voice);
     /// unknown keys are IGNORED, on purpose: the spec reads only the knobs
-    /// it owns, and gold's prototype objects carry unrelated fields all the
+    /// it owns, and script objects carry unrelated fields all the
     /// time — a stray `"pan"` should not fail a play. The script seam can
     /// pass these objects through later.
     #[must_use]
@@ -248,16 +245,16 @@ impl PlaySpec {
     }
 }
 
-/// One audio device behind the facade — gold's `audioSystem` (backends
+/// One audio device behind the facade (backends
 /// registered by name, created through the registry below). One trait
-/// object per world — gold's `audioSystem*` flattened into the natural
+/// object per world — the registry factory flattened into the natural
 /// Rust shape.
 pub trait AudioBackend: Send {
-    /// Backend name, e.g. "none" / "rodio" (gold's `name()`).
+    /// Backend name, e.g. "none" / "rodio".
     fn name(&self) -> &str;
 
-    /// Play a source now; returns the backend's play id (gold's
-    /// loadSound→play two-step, collapsed — see the module doc).
+    /// Play a source now; returns the backend's play id (the
+    /// load→play two-step collapsed — see the module doc).
     ///
     /// # Errors
     /// [`AudioError::Source`] when the source can't be loaded or decoded,
@@ -265,11 +262,11 @@ pub trait AudioBackend: Send {
     fn play(&mut self, source: &AudioSource, spec: &PlaySpec) -> Result<u64, AudioError>;
 
     /// Stop one play by id. Unknown ids are a CLEAN NO-OP — stopping an
-    /// already-finished sound is routine, not a protocol violation (gold's
-    /// `stop()` never errors; it just stops everything).
+    /// already-finished sound is routine, not a protocol violation: stop
+    /// never errors, it silences what it's asked to silence.
     fn stop(&mut self, id: u64);
 
-    /// Master volume in [0, 1] (gold's `setVolume` contract; values clamp
+    /// Master volume in [0, 1] (values clamp
     /// into the range). Scales every live play — per-play volume × master.
     fn set_master_volume(&mut self, volume: f32);
 }
@@ -287,7 +284,7 @@ pub struct CreatedBackend {
 }
 
 /// Factory shape for the backend registry: config `Var` in, backend out
-/// (gold's `audioSystem* (*)()` factory pointers, as Rust closures).
+/// (factory function pointers, as Rust closures).
 pub type AudioFactory = Arc<dyn Fn(&Var) -> Result<CreatedBackend, AudioError> + Send + Sync>;
 type BackendMap = HashMap<String, AudioFactory>;
 
@@ -319,7 +316,7 @@ fn backends() -> &'static RwLock<BackendMap> {
     })
 }
 
-/// Register an audio backend under a name (gold's plugin registration).
+/// Register an audio backend under a name (plugin-style registration).
 pub fn register_audio_backend(name: &str, factory: AudioFactory) {
     backends()
         .write()
@@ -374,18 +371,17 @@ pub struct NoneState {
 
 /// The built-in recording backend — the none-physics analogue: plays are
 /// recorded (ids assigned from an atomic counter), nothing sounds, and
-/// headless tests assert on the records instead of listening. gold's
-/// audioSystem registry ships NO fallback (`createAudioSystem` returns
-/// nullptr on a miss); this one is Hydrargyros's, so the facade and its
-/// contracts are testable without a device.
+/// headless tests assert on the records instead of listening. The
+/// registry ships this fallback, so the facade and its contracts are
+/// testable without a device.
 pub struct NoneAudioBackend {
     next_id: AtomicU64,
     state: Arc<Mutex<NoneState>>,
 }
 
 impl NoneAudioBackend {
-    /// A fresh recorder; ids start at 1 (0 stays "no play", gold's
-    /// loadSound-failure sentinel).
+    /// A fresh recorder; ids start at 1 (0 stays the "no play" sentinel —
+    /// a failed load never yields a play id).
     #[must_use]
     pub fn new() -> NoneAudioBackend {
         NoneAudioBackend {
@@ -483,7 +479,7 @@ impl AudioWorld {
         self.backend.stop(id);
     }
 
-    /// Master volume in [0, 1] (gold's `setVolume`).
+    /// Master volume in [0, 1].
     pub fn set_master_volume(&mut self, volume: f32) {
         self.backend.set_master_volume(volume);
     }
@@ -503,8 +499,8 @@ impl AudioWorld {
     }
 }
 
-/// The real device backend: rodio 0.23 (cpal underneath) — the wheel gold
-/// loads SDL for (its SDL2/SDL3 `audioSystem` adapters). One
+/// The real device backend: rodio 0.23 (cpal underneath) — device output
+/// delegated to the crate, not hand-rolled. One
 /// `MixerDeviceSink` owns the device stream; each play gets its own
 /// `Player` connected to the sink's mixer, tracked per id; master volume
 /// multiplies every play's volume (per-player volume × master). Dropping

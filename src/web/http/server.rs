@@ -1,10 +1,10 @@
-//! `Server` — the gold `web::server` facade: routes buffer onto the server
-//! (`get`/`post`/`put`/`patch`/`delete`/`options`, plus `ws` for WebSockets,
-//! `mount` for static files and `on_error` for the 404-page hook) until
-//! `start()` runs them. `stop()` is graceful and safe from any thread, and a
-//! stopped server can be started again — gold's restartable-loop behavior.
+//! `Server` — the expressjs-like server facade: routes buffer onto the
+//! server (`get`/`post`/`put`/`patch`/`delete`/`options`, plus `ws` for
+//! WebSockets, `mount` for static files and `on_error` for the 404-page
+//! hook) until `start()` runs them. `stop()` is graceful and safe from any
+//! thread, and a stopped server can be started again.
 //!
-//! Route patterns follow the conventions gold grew with (uWS-style):
+//! Route patterns follow uWS-style conventions:
 //! `:id` captures one path segment, a trailing `*` captures the rest
 //! including slashes (surfacing as `params["*"]`). Unmatched requests fall
 //! through the mounts, then the `on_error` handler, then an automatic 404.
@@ -38,7 +38,7 @@ struct Shared {
     error_handler: Mutex<Option<RouteHandler>>,
 }
 
-/// The HTTP server facade, transport-independent (gold's `server`).
+/// The HTTP server facade, transport-independent.
 ///
 /// Cloning a `Server` shares the routes, mounts, and stop signal — hand a
 /// clone to `tokio::spawn` and keep the original for `stop()`.
@@ -46,7 +46,7 @@ struct Shared {
 pub struct Server {
     addr: String,
     /// The `sslCert`/`sslKey` PEM pair — when present, `start()` serves HTTPS
-    /// on the same port (gold's lws vhost behavior).
+    /// on the same port (one listener, both schemes).
     tls: Option<(PathBuf, PathBuf)>,
     router: Router,
     shared: Arc<Shared>,
@@ -65,7 +65,7 @@ impl Server {
     /// A server on the defaults: `127.0.0.1:8080`.
     pub fn new() -> Self { Self::with_config(()) }
 
-    /// Configure from gold-style data:
+    /// Configure from data:
     /// `o!{ "host": "127.0.0.1", "port": 8080 }`. `Null` means defaults.
     /// A `"sslCert"`/`"sslKey"` PEM pair switches the vhost to HTTPS.
     pub fn with_config(config: impl Into<Var>) -> Self {
@@ -81,8 +81,8 @@ impl Server {
         };
         let shared = Arc::new(Shared::default());
 
-        // Unmatched requests: fall through mounts, then the error hook, then
-        // an automatic 404 — gold's fallthrough order.
+        // Unmatched requests fall through in order: mounts, then the error
+        // hook, then an automatic 404.
         let fb = shared.clone();
         let router = Router::new().fallback(
             move |method: Method, uri: Uri, headers: HeaderMap, bytes: Bytes| {
@@ -126,9 +126,9 @@ impl Server {
         }
     }
 
-    // ---- route buffering (gold's server.get/post/put/patch/del/options) ----
+    // ---- route buffering (get/post/put/patch/delete/options) ----
 
-    /// Buffer a GET route: `{pattern, func}` in gold, `(pattern, func)` here.
+    /// Buffer a GET route: `(pattern, func)`.
     pub fn get<F, R>(&mut self, pattern: &str, f: F) -> &mut Self
     where
         F: Fn(Var) -> R + Send + Sync + 'static,
@@ -161,7 +161,7 @@ impl Server {
         self.route("PATCH", pattern, f)
     }
 
-    /// gold's `del` — Rust doesn't need the abbreviation.
+    /// The DELETE verb, spelled out.
     pub fn delete<F, R>(&mut self, pattern: &str, f: F) -> &mut Self
     where
         F: Fn(Var) -> R + Send + Sync + 'static,
@@ -191,7 +191,7 @@ impl Server {
         self
     }
 
-    /// Streaming variant of [`route`](Self::route) — gold's `onData`, as a
+    /// Streaming variant of [`route`](Self::route) — the request body as a
     /// Rust stream. The async handler receives the staged request (its
     /// `body` is `Null`; the raw body is the second argument) and the body
     /// stream, so uploads can be consumed chunk by chunk without buffering.
@@ -207,7 +207,7 @@ impl Server {
         self
     }
 
-    /// Buffer a WebSocket route (gold's `ws(pattern, {open, message, close})`):
+    /// Buffer a WebSocket route with `{open, message, close}` handlers:
     /// `open(sock)` fires on connect, `message(sock, data)` per text message,
     /// `close(sock)` on teardown. Push with `sock.send(...)` from any of them.
     pub fn ws(&mut self, pattern: &str, handlers: WsHandlers) -> &mut Self {
@@ -222,7 +222,7 @@ impl Server {
         self
     }
 
-    /// Serve static files under a path prefix (gold's `setMountPoint`).
+    /// Serve static files under a path prefix.
     /// A mount miss falls through to later mounts / the error hook.
     pub fn mount(&mut self, prefix: &str, dir: impl Into<PathBuf>) -> &mut Self {
         let prefix = prefix.trim_end_matches('/');
@@ -230,7 +230,7 @@ impl Server {
         self
     }
 
-    /// Hook for requests no route or mount handled (gold's `setErrorHandler`).
+    /// Hook for requests no route or mount handled.
     pub fn on_error<F, R>(&mut self, f: F) -> &mut Self
     where
         F: Fn(Var) -> R + Send + Sync + 'static,
@@ -241,12 +241,12 @@ impl Server {
         self
     }
 
-    // ---- lifecycle (gold's start/stop) ----
+    // ---- lifecycle (start/stop) ----
 
     /// Blocking: binds and runs until [`stop()`](Self::stop). Returns an
     /// error when the bind fails instead of entering the loop; safe to call
-    /// again after a stop (gold's restartable server). With a
-    /// `sslCert`/`sslKey` config pair, the same port serves HTTPS.
+    /// again after a stop. With a `sslCert`/`sslKey` config pair, the same
+    /// port serves HTTPS.
     pub async fn start(&self) -> std::io::Result<()> {
         // clear the stale addr so `local_addr()` polling reflects THIS bind
         *self.bound.lock().unwrap() = String::new();
@@ -304,7 +304,7 @@ impl Server {
 
     /// Request a graceful stop of a running `start()`; safe from any thread.
     /// In-flight requests get a grace period, then the loop returns anyway —
-    /// gold's stop-makes-the-loop-return, with a bounded worst case.
+    /// stop always makes the loop return, with a bounded worst case.
     /// Returns false when nothing is running.
     pub fn stop(&self) -> bool {
         self.shutdown
@@ -322,7 +322,7 @@ impl Server {
     }
 }
 
-// ---- pattern translation (gold's uWS-style → axum) ----
+// ---- pattern translation (uWS-style → axum) ----
 
 /// `/users/:id` → `/users/{id}`, trailing `/assets/*` → `/assets/{*rest}`.
 /// The wildcard resurfaces in the request as `params["*"]`.
@@ -467,16 +467,16 @@ fn mime_of(path: &FsPath) -> String {
     .to_string()
 }
 
-// ---- WebSocket routes (gold's wsSocket: send / close) ----
+// ---- WebSocket routes (send / close) ----
 
 enum WsOut {
     Text(String),
     Close,
 }
 
-/// A connected WebSocket client, handed to `ws()` handlers (gold's
-/// `wsSocket`). Send stages into a channel that flushes on the connection's
-/// writable moment; `close()` requests a graceful close.
+/// A connected WebSocket client, handed to `ws()` handlers. Send stages
+/// into a channel that flushes on the connection's writable moment;
+/// `close()` requests a graceful close.
 #[derive(Clone)]
 pub struct WsSock {
     tx: mpsc::UnboundedSender<WsOut>,
@@ -494,7 +494,7 @@ impl WsSock {
     }
 }
 
-/// The three `ws()` callbacks (gold's `{open, message, close}` object).
+/// The three `ws()` callbacks (`{open, message, close}`).
 /// All are optional; the builder methods take plain closures.
 #[derive(Clone, Default)]
 pub struct WsHandlers {

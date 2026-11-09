@@ -1,0 +1,63 @@
+# hyg — platform support
+
+hyg's invariant is **headless-first**: the engine loop, web server, parsers,
+store, physics (`none` backend), tween, and the script seam run and test
+without a GPU, window, or GUI toolkit anywhere Rust compiles. The heavy
+backends ride cross-platform wheels (wgpu, winit, axum, rodio, rustls,
+tray-icon), so portability is mostly about the seams where an OS peeks
+through.
+
+## Support matrix
+
+| Area | Linux | Windows | macOS | Notes |
+| --- | --- | --- | --- | --- |
+| Core (`Var`/`Object`/`List`/serde/`FromVar`) | ✅ verified | ✅ pure Rust | ✅ pure Rust | No OS surface at all |
+| Web siblings (`html`/`css`/`store`/`database`) | ✅ verified | ✅ | ✅ | File I/O via `std::fs` + `temp_dir()` |
+| Web server (`web` feature, axum/tokio/rustls) | ✅ verified (real traffic + TLS) | ✅ expected | ✅ expected | Binds TCP; no Unix sockets anywhere |
+| Physics — `none` backend | ✅ verified | ✅ pure Rust | ✅ pure Rust | The no-op contract keeps transforms under script control |
+| Physics — rapier3d | ✅ verified | ✅ pure Rust | ✅ pure Rust | Deterministic fixed timestep headless |
+| Render — offscreen wgpu | ✅ verified (pixel tests) | ✅ expected (DX12) | ✅ expected (Metal) | Vulkan/GL fallbacks; PNG readback needs no surface |
+| glTF + textures (`gltf`/`image`) | ✅ verified | ✅ pure Rust | ✅ pure Rust | |
+| Game — headless loop + tween | ✅ verified | ✅ | ✅ | The whole pump runs windowless |
+| Audio (`audio` feature, rodio/cpal) | ✅ tests use the `none` recorder | ✅ expected (WASAPI) | ✅ expected (CoreAudio) | Contracts test without a device; real device plays where cpal does |
+| Scripting (`script` feature, v12) | ✅ verified | ✅ expected | ✅ expected | ⚠ the pinned v12 git dep needs a seeded cargo checkout on any OS (upstream `test262` gitlink wart — see roadmap) |
+| Window — `winit` backend | ✅ (X11/Wayland) | ✅ expected | ⚠ | winit runs its event loop on the main thread everywhere; hyg's pump is off-thread through the same seam |
+| Native view (borderless fullscreen hand-off) | ✅ (X11 any-thread escape hatch) | ✅ expected (off-main loops allowed) | ❌ refused honestly | macOS requires the event loop on the main thread; the hand-off prints a clear refusal instead of panicking |
+| Streaming window (`stream`) | ✅ verified (WS traffic, QR decode) | ✅ expected | ✅ expected | Browser page + WebSocket — OS-neutral except `open_in_browser` |
+| `open_in_browser` | ✅ `xdg-open` | ✅ `cmd /c start` | ✅ `open` | All three wired |
+| Tray (`tray` feature) | ⚠ needs GTK (degrades gracefully without it) | ✅ expected (Win32) | ✅ expected | Linux: `gtk::init()` failure prints "tray unavailable" and continues — headless servers stay headless |
+
+Legend: ✅ verified on this machine / expected to work and cheap to verify ·
+⚠ works with caveats · ❌ explicit, honest refusal.
+
+## Verification status
+
+Everything marked **verified** runs in this repo's test suite on Linux
+x86_64 — including real HTTP/WebSocket traffic, a real TLS handshake, real
+GPU pixels asserted from PNG readback, and the QR round-trip decode.
+Windows/macOS rows are **expected, not yet machine-verified**; the cheap
+first check is a cross-compile:
+
+```
+rustup target add x86_64-pc-windows-msvc
+cargo check  --all-features --target x86_64-pc-windows-msvc   # type/backends compile
+cargo check  --all-features --target aarch64-apple-darwin     # same idea for macOS
+```
+
+(`cargo check` needs no linker for the target, so it validates cfg-gates and
+API usage without OS-specific toolchains.) Runtime verification wants a real
+machine or CI runners — the natural follow-up is a GitHub Actions matrix
+(linux/windows/macos, `cargo test` core + `cargo check` all-features).
+
+## Portability rules for new code
+
+- **No hardcoded `/tmp`** — use `std::env::temp_dir()` (Windows has no
+  `/tmp`). Same for any absolute path assumptions.
+- **No Unix-only APIs** — no `std::os::unix`, no Unix domain sockets; the
+  web layer speaks TCP.
+- **OS peeks get cfg-gates with honest degradation** — follow the existing
+  patterns: `open_in_browser`'s three-way gate, the native view's printed
+  refusal, the tray's "unavailable, continuing" path. A missing desktop
+  service is a warning, never a panic.
+- **GUI toolkits are lazy** — GTK init happens only when a tray is actually
+  requested, so headless machines never load it.

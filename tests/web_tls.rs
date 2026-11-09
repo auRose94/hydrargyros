@@ -1,6 +1,6 @@
 //! HTTPS tests: the `sslCert`/`sslKey` config pair switches the vhost to
-//! TLS on the same port (gold's lws behavior), verified with a real
-//! handshake against a self-signed certificate.
+//! TLS on the same port, verified with a real handshake against a
+//! self-signed certificate.
 
 #![cfg(feature = "web")]
 

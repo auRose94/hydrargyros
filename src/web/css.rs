@@ -1,4 +1,4 @@
-//! CSS parsing — gold's `CSS::parseCSS`, as data.
+//! CSS parsing — stylesheets as data.
 //!
 //! [`parse_css`] turns a stylesheet into rules (`selector` + typed
 //! `declarations`): numeric values stay typed (`margin: 0` → `0`),

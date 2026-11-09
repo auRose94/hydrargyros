@@ -1,11 +1,11 @@
-//! `Var` — the universal dynamic value, a Rust reimagining of gold's `var`.
+//! `Var` — the universal dynamic value at the root of hyg's value graph.
 //!
 //! Copy-on-write: `List`/`Object` payloads are shared through `Arc<Mutex<…>>`,
-//! so passing a `Var` by value is a cheap pointer bump, exactly like gold's
-//! `shared_ptr`-backed `var`. Because the payload is interior-mutable, a write
+//! so passing a `Var` by value is a cheap pointer bump, like a `shared_ptr`.
+//! Because the payload is interior-mutable, a write
 //! through one handle is visible through every other handle that shares it —
-//! which is what lets the `VarRef` proxy mutate the original in place,
-//! faithfully reproducing gold's `varRef`. `Arc`/`Mutex` (rather than
+//! which is what lets the `VarRef` proxy mutate the original in place.
+//! `Arc`/`Mutex` (rather than
 //! `Rc`/`RefCell`) makes the whole value graph `Send + Sync`: the same `Var`
 //! crosses threads, async tasks, and route handlers.
 
@@ -18,9 +18,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::list::List;
 use crate::object::Object;
 
-/// A value's runtime type tag. Kept for introspection (`as_*` / `is_*`), the
-/// way gold has `types`. Most code won't match on this — it's there when you
-/// need it.
+/// A value's runtime type tag. Kept for introspection (`as_*` / `is_*`).
+/// Most code won't match on this — it's there when you need it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
     Null,
@@ -55,7 +54,7 @@ impl fmt::Display for Ty {
     }
 }
 
-/// A 3-component float vector (mirrors gold's vec3f).
+/// A 3-component float vector.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vec3 {
     pub x: f32,
@@ -237,7 +236,7 @@ static FUNC_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// [`Func::new`] — the single creation choke point, so every `func!` expansion
 /// is covered automatically. Entries are never removed (no GC): every function
 /// simply lives for the life of the process, which is the acceptable shape for
-/// a prototyping framework — gold's lang registry worked the same way.
+/// a prototyping framework.
 static FUNC_REGISTRY: OnceLock<Mutex<HashMap<u64, Func>>> = OnceLock::new();
 
 fn func_registry() -> &'static Mutex<HashMap<u64, Func>> {
@@ -272,7 +271,7 @@ fn func_from_handle(id: &Var) -> Var {
 /// A function body: takes the argument list, produces a `Var`.
 type FuncBody = Arc<dyn Fn(&[Var]) -> Var + Send + Sync>;
 
-/// An id-bearing function value — Mercury's `func`, the gold `func` equivalent.
+/// An id-bearing function value — hyg's `func`.
 ///
 /// A `Func` wraps a closure *and* carries a stable id. That id is the workaround
 /// for the fact that closures have no inspectable identity: two functions can be
@@ -495,7 +494,7 @@ impl Var {
         }
     }
 
-    // ---- property access (gold's v["key"] / v[i]) ----
+    // ---- property access (the v["key"] / v[i] surface) ----
     //
     // Rust's `Index` can't return by value or reach behind interior mutability,
     // so reads use `.get()` (null-safe, prototype-walking for objects). Writes
@@ -529,7 +528,7 @@ impl Var {
     }
 
     /// Write `key` on an object (no-op-ish: panics on non-objects, which is the
-    /// safe default vs gold's silent no-op).
+    /// safe default over failing silently).
     pub fn set(&self, key: &str, value: impl Into<Var>) {
         match self {
             Var::Object(o) => o.set(key, value.into()),
@@ -555,7 +554,7 @@ impl Var {
         }
     }
 
-    /// Return a `VarRef` proxy for `key` — the gold-like handle for chained
+    /// Return a `VarRef` proxy for `key` — the handle for chained
     /// read/write: `v.at("a").at("b").put(5)`.
     pub fn at(&self, key: &str) -> crate::proxy::VarRef {
         crate::proxy::VarRef::object(self.clone(), key)
@@ -566,7 +565,7 @@ impl Var {
         crate::proxy::VarRef::index(self.clone(), i)
     }
 
-    // ---- call (gold's var operator()) ----
+    // ---- call (invoke a `Func` value) ----
     pub fn call(&self, args: &[Var]) -> Var {
         match self {
             Var::Func(f) => f.call(args),
@@ -575,7 +574,7 @@ impl Var {
     }
 }
 
-// ---- stringification (gold's `var.getString()` for every type) ----
+// ---- stringification (a display string for every type) ----
 
 impl fmt::Display for Var {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -595,7 +594,7 @@ impl fmt::Display for Var {
     }
 }
 
-// ---- arithmetic (gold overloads +,-,*,/ on var) ----
+// ---- arithmetic (+,-,*,/ overloaded on Var) ----
 //
 // Numeric ops widen: int + float -> float. Mismatched/unsupported types panic
 // with a clear message; a production build might return an error Var instead.
@@ -663,7 +662,7 @@ impl Neg for Var {
     }
 }
 
-// ---- ergonomic conversions (gold's implicit constructor set) ----
+// ---- ergonomic conversions (the `From` constructor set) ----
 
 impl From<()> for Var {
     fn from(_: ()) -> Self {
@@ -903,8 +902,7 @@ impl From<Var> for bool {
 
 /// Recursively write `path` ("a.b.c") on an object, creating intermediate
 /// objects. Because payloads are `Arc<Mutex>`, this mutates the shared data
-/// in place, visible through every handle (on any thread) — matching gold's
-/// `varRef`.
+/// in place, visible through every handle (on any thread).
 pub(crate) fn set_path_impl(target: &Var, path: &str, value: Var) {
     let (first, rest) = match path.split_once('.') {
         Some((f, r)) => (f, Some(r)),

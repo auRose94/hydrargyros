@@ -1,12 +1,11 @@
-//! `VarRef` — the read/write proxy, a faithful port of gold's `varRef`.
+//! `VarRef` — the read/write proxy into a shared `Var`.
 //!
 //! Because `Var` payloads are `Arc<Mutex<…>>`, a `VarRef` can mutate the
-//! original object/list in place through one handle — the behavior gold gets
-//! from its mutex-guarded shared data. Reads chain (`v.at("a").at("b")`);
-//! writes go through `.put()` / `.set()`.
+//! original object/list in place through one handle. Reads chain
+//! (`v.at("a").at("b")`); writes go through `.put()` / `.set()`.
 //!
-//! The one thing Rust can't reproduce is gold's `varRef::operator=` —
-//! `v["k"] = 5` with a bare literal. Rust's `Index` can't run a user-defined
+//! The one thing Rust can't reproduce is `v["k"] = 5` with a bare literal:
+//! Rust's `Index` can't run a user-defined
 //! conversion during assignment, so writes are an explicit method call:
 //!
 //! ```
@@ -62,7 +61,7 @@ impl VarRef {
     }
 
     /// Write through this position. Panics on a non-object/non-list parent
-    /// (gold silently no-ops there; failing loudly is the safer default).
+    /// (failing loudly is the safer default).
     pub fn put(&mut self, value: impl Into<Var>) {
         let value = value.into();
         match &mut self.kind {

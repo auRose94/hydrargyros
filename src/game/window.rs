@@ -1,7 +1,7 @@
-//! Window backends — gold's registered-backend pattern, as Rust traits and
-//! a register/create registry. Events cross the boundary as `Var` objects
+//! Window backends — the registered-backend pattern: Rust traits and a
+//! register/create registry. Events cross the boundary as `Var` objects
 //! (`{ "type": "quit" }`, `{ "type": "key", "key": "w" }`, …); the headless
-//! backend (gold ships one too) runs the whole loop in tests without a GPU.
+//! backend runs the whole loop in tests without a GPU or window.
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -11,7 +11,7 @@ use crate::object::Object;
 use crate::var::Var;
 
 /// A window/display backend: the engine polls it for events each frame and
-/// hands events back for its own handling (gold's `windowSystem`).
+/// hands events back for its own handling.
 pub trait WindowSystem: Send {
     /// All events queued since the last poll, as `Var` objects.
     fn poll(&mut self) -> Vec<Var>;
@@ -38,12 +38,12 @@ fn headless_factory() -> WindowFactory {
     Arc::new(|_config| Ok(Box::new(HeadlessWindow::new())))
 }
 
-/// Register a window backend under a name (gold's `registerBackend`).
+/// Register a window backend under a name (replaces any existing one).
 pub fn register_window_backend(name: &str, factory: WindowFactory) {
     backends().write().unwrap().insert(name.to_string(), factory);
 }
 
-/// Create a window backend by name (gold's `createBackend`).
+/// Create a window backend by name (looked up in the registry).
 ///
 /// # Errors
 /// Unknown backend name, or the backend's own factory failure.
@@ -57,9 +57,9 @@ pub fn create_window_backend(name: &str, config: &Var) -> Result<Box<dyn WindowS
     factory(config)
 }
 
-/// The no-window backend (gold's `windowSystemHeadless`): no events unless
-/// scripted, and an automatic `quit` once the scripted ones run out, so
-/// `Engine::start` terminates. Frame behavior is fully deterministic.
+/// The no-window backend: no events unless scripted, and an automatic
+/// `quit` once the scripted ones run out, so `Engine::start` terminates.
+/// Frame behavior is fully deterministic.
 pub struct HeadlessWindow {
     events: VecDeque<Var>,
     quit_on_empty: bool,

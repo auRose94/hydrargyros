@@ -1,5 +1,5 @@
 //! Audio tests (behind the `audio` feature): the none recorder's contract,
-//! gold-style `PlaySpec` config objects, tone synthesis + the stdlib WAV
+//! `PlaySpec` config objects, tone synthesis + the stdlib WAV
 //! encoder decoded by rodio's REAL Decoder (no device involved), and the
 //! rodio backend skipped gracefully when the machine has no output device.
 
@@ -14,7 +14,7 @@ use hyg::{o, Var};
 
 /// The none backend records plays faithfully: distinct ids, the source and
 /// spec round-trip, unknown-id stops are clean no-ops, master volume is
-/// recorded (clamped to gold's [0, 1] `setVolume` contract).
+/// recorded (clamped to the [0, 1] `setVolume` contract).
 #[test]
 fn none_backend_records_plays_faithfully() {
     let mut world = AudioWorld::none();
@@ -68,10 +68,10 @@ fn none_backend_records_plays_faithfully() {
     assert_eq!(world.none_master_volume(), Some(0.0));
 }
 
-/// gold-style config objects: missing keys keep the defaults (gold's
+/// Config-object options: missing keys keep the defaults (the
 /// prototype-defaults voice), unknown keys are ignored, values clamp.
 #[test]
-fn play_specs_read_gold_style_vars() {
+fn play_specs_read_var_config_objects() {
     // defaults survive an empty object and Null
     assert_eq!(PlaySpec::from_var(&Var::from(o! {})), PlaySpec::default());
     assert_eq!(PlaySpec::from_var(&Var::Null), PlaySpec::default());

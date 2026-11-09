@@ -1,9 +1,10 @@
-//! The engine — gold's `engine`: the pump + dispatch loop.
+//! The engine: the pump + dispatch loop.
 //!
-//! gold's frame, ported: poll window events (`quit` stops the loop),
-//! physics step (no physics backend yet), sort + initialize components,
-//! priority-ordered `update` with the frame's delta time, the draw pass,
-//! then the frame-rate cap (`frameTime` config, gold's default 16 ms).
+//! The frame: poll window events (`quit` stops the loop), the physics step
+//! (the world set via `set_physics`; none registered = no step), sort +
+//! initialize components, priority-ordered `update` with the frame's delta
+//! time, the draw pass, then the frame-rate cap (`frameTime` config,
+//! default 16 ms).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -26,31 +27,31 @@ use crate::var::Var;
 /// Tree path to a component slot: `[top_entity_slot, child_idx, child_slot, …]`.
 type SlotPath = Vec<usize>;
 
-/// The game engine (gold's `engine`): entities, the pump, settings.
+/// The game engine: entities, the pump, settings.
 pub struct Engine {
     company: String,
     game_name: String,
     entities: Vec<Entity>,
     running: bool,
-    /// Frame cap in milliseconds (gold's `frameTime`; 0 = uncapped, used by
+    /// Frame cap in milliseconds (`frameTime`; 0 = uncapped, used by
     /// headless runs and tests).
     frame_time: f64,
     settings_root: PathBuf,
     physics: Option<PhysicsWorld>,
-    /// The audio world, if one is attached (gold's engine holds the
-    /// `audioSystem` too; the whole module rides the `audio` feature).
+    /// The audio world, if one is attached (the whole module rides the
+    /// `audio` feature).
     #[cfg(feature = "audio")]
     audio: Option<AudioWorld>,
     renderer: Option<Box<dyn RenderBackend>>,
     camera: Camera,
-    /// Fixed delta time for the pump (seconds). `None` = wall clock (gold's
-    /// behavior); headless sims set it for deterministic frames.
+    /// Fixed delta time for the pump (seconds). `None` = wall clock;
+    /// headless sims set it for deterministic frames.
     fixed_dt: Option<f64>,
 }
 
 impl Engine {
     /// An engine for `company`/`game_name` — the settings namespace
-    /// (gold's `boot(company, gameName)`).
+    /// (settings live under those two names).
     pub fn new(company: impl Into<String>, game_name: impl Into<String>) -> Engine {
         Engine {
             company: company.into(),
@@ -88,7 +89,7 @@ impl Engine {
         self
     }
 
-    /// Attach the physics world (gold's engine holds a `world` object).
+    /// Attach the physics world (the engine holds at most one).
     pub fn set_physics(&mut self, world: PhysicsWorld) -> &mut Self {
         self.physics = Some(world);
         self
@@ -99,7 +100,7 @@ impl Engine {
         self.physics.as_mut()
     }
 
-    /// Attach the audio world (gold's engine holds the `audioSystem`).
+    /// Attach the audio world (the engine holds at most one).
     #[cfg(feature = "audio")]
     pub fn set_audio(&mut self, audio: AudioWorld) -> &mut Self {
         self.audio = Some(audio);
@@ -112,13 +113,13 @@ impl Engine {
         self.audio.as_mut()
     }
 
-    /// Attach a render backend (gold's `graphics` object).
+    /// Attach a render backend (the engine holds at most one).
     pub fn set_renderer(&mut self, renderer: Box<dyn RenderBackend>) -> &mut Self {
         self.renderer = Some(renderer);
         self
     }
 
-    /// Attach a top-level entity (gold's `engine += [component, entity]`).
+    /// Attach a top-level entity (one of the scene's roots).
     pub fn add_entity(&mut self, entity: Entity) -> &mut Self {
         self.entities.push(entity);
         self
@@ -128,7 +129,7 @@ impl Engine {
         &self.entities
     }
 
-    /// A top-level entity by name — the direct handle gold scripts get
+    /// A top-level entity by name — the direct handle scripts get
     /// with `engine.entities[i]`. First match wins; children are reached
     /// through [`Entity::child_mut`](super::entity::Entity::child_mut).
     pub fn entity_mut(&mut self, name: &str) -> Option<&mut Entity> {
@@ -151,8 +152,8 @@ impl Engine {
         self.running
     }
 
-    /// Set `running` false — the pump exits after the current frame (gold's
-    /// quit semantics: the frame in flight still completes).
+    /// Set `running` false — the pump exits after the current frame (quit
+    /// semantics: the frame in flight still completes).
     pub fn stop(&mut self) {
         self.running = false;
     }
@@ -165,7 +166,7 @@ impl Engine {
             .join("settings.json")
     }
 
-    /// Save settings as JSON (gold's `saveSettings`).
+    /// Save settings as JSON (pretty-printed) to the settings path.
     ///
     /// # Errors
     /// Filesystem trouble along the settings path.
@@ -179,7 +180,7 @@ impl Engine {
         std::fs::write(path, bytes)
     }
 
-    /// Load settings (gold's `loadSettings`); `Null` when absent.
+    /// Load settings from disk; `Null` when absent.
     ///
     /// # Errors
     /// Filesystem trouble, or unparsable JSON.
@@ -192,8 +193,8 @@ impl Engine {
         }
     }
 
-    /// The pump (gold's `start`): creates the named window backend and runs
-    /// frames until a `quit` event or [`stop`](Self::stop). Blocks.
+    /// The pump: creates the named window backend and runs frames until a
+    /// `quit` event or [`stop`](Self::stop). Blocks.
     ///
     /// # Panics
     /// On an unknown window backend name (the registry's job to report
@@ -212,7 +213,7 @@ impl Engine {
         let mut last = Instant::now();
 
         while self.running {
-            // events: quit stops the loop after this frame (gold's semantics)
+            // events: a quit event stops the loop after this frame completes
             for event in window.poll() {
                 if event.get("type").as_str() == Some("quit") {
                     self.running = false;
@@ -220,7 +221,7 @@ impl Engine {
                 window.handle_event(&event);
             }
 
-            // gold's frame: gfx.preFrame before the update pass
+            // frame order: pre_frame before the update pass
             if let Some(renderer) = &mut self.renderer {
                 renderer.pre_frame();
             }
@@ -243,7 +244,7 @@ impl Engine {
     }
 
     /// One frame's update pass: the physics world steps and its body poses
-    /// sync back into entity transforms (gold's step-and-sync), then
+    /// sync back into entity transforms (the step-and-sync), then
     /// components sort by priority (stable, every frame — priorities can
     /// change), initialize newcomers, and update with the frame's delta
     /// time; finally scripted components' transforms write back into their
@@ -266,12 +267,11 @@ impl Engine {
     }
 
     /// One frame's draw pass: the scene opens with the camera and every
-    /// light component gathered at its entity's WORLD transform (gold's
-    /// draw passes the lights list), every renderable component
-    /// contributes its geometry at its entity's WORLD transform (composed
-    /// down the parent chain), then non-mesh draw-tier components get
-    /// their `draw()`. Public so tests and headless code can drive frames
-    /// without a window.
+    /// light component gathered at its entity's WORLD transform into the
+    /// scene's light list, every renderable component contributes its
+    /// geometry at its entity's WORLD transform (composed down the parent
+    /// chain), then non-mesh draw-tier components get their `draw()`.
+    /// Public so tests and headless code can drive frames without a window.
     pub fn draw(&mut self) {
         let order = self.update_order();
         let Self {
@@ -282,8 +282,7 @@ impl Engine {
         } = self;
 
         // the scene's lights: light components at their entity's world
-        // transform (gold gathers these per draw call; the engine gathers
-        // once for the frame)
+        // transform, gathered once per frame (not per draw call)
         let lights: Vec<SceneLight> = order
             .iter()
             .filter_map(|(_, path)| {
@@ -334,9 +333,9 @@ impl Engine {
     }
 
     /// One frame's render: the backend draws the scene [`draw`](Self::draw)
-    /// collected — offscreen or into a window — and publishes it (gold's
-    /// `gfx.renderFrame`). Public with [`update`](Self::update) and
-    /// [`draw`](Self::draw) so custom pumps can script the frame's phases.
+    /// collected — offscreen or into a window — and publishes it. Public
+    /// with [`update`](Self::update) and [`draw`](Self::draw) so custom
+    /// pumps can script the frame's phases.
     pub fn render(&mut self) {
         if let Some(renderer) = &mut self.renderer {
             renderer.render_frame();
@@ -363,7 +362,7 @@ impl Engine {
         order.into_iter().map(|(_, p)| p).collect()
     }
 
-    /// gold's step-and-sync: the physics world advances, then every
+    /// The step-and-sync: the physics world advances, then every
     /// materialized body's pose writes back into its entity's transform.
     /// Under the `none` backend (or with no world), transforms stay under
     /// script control — the sync finds nothing to write.
@@ -377,8 +376,8 @@ impl Engine {
         } = self;
         let Some(physics) = physics else { return };
 
-        // materialize bodies that joined since the last frame — gold's
-        // physicsBody spawns at its ENTITY's transform
+        // materialize bodies that joined since the last frame — each one
+        // spawns at its ENTITY's current transform
         for path in &paths {
             let entity_path = &path[..path.len() - 1];
             let [first, rest @ ..] = entity_path else {
@@ -438,8 +437,8 @@ impl Engine {
     /// the sibling of the physics sync above. Two writes per frame, one
     /// direction each: before the component pass, a not-yet-initialized
     /// scripted component takes its ENTITY's transform as the spawn pose
-    /// (gold's physicsBody spawns at its entity transform — the same
-    /// rule); after the pass, every scripted component's shared transform
+    /// (the same spawn rule physics bodies follow); after the pass, every
+    /// scripted component's shared transform
     /// handle writes back into its entity's transform, so the draw pass
     /// (and anything reading entity transforms) sees the scripted pose.
     ///
@@ -486,8 +485,8 @@ impl Engine {
         }
     }
 
-    /// Flat slot paths over the whole tree, in priority order — gold's
-    /// `sortComponents` across the flat component list.
+    /// Flat slot paths over the whole tree, in priority order — the
+    /// flat component list, sorted by tier.
     fn update_order(&self) -> Vec<(i64, SlotPath)> {
         let mut order: Vec<(i64, SlotPath)> = Vec::new();
         let mut path = Vec::new();
@@ -520,7 +519,7 @@ fn walk_mut<'a>(entities: &'a mut [Entity], top: usize, rest: &[usize]) -> Optio
 }
 
 /// The world transform of an entity at an owner path (composed down the
-/// parent chain — gold's transform hierarchy).
+/// parent chain — the transform hierarchy).
 fn world_transform_at(entities: &[Entity], owner_path: &[usize]) -> Transform {
     let Some((first, rest)) = owner_path.split_first() else {
         return Transform::default();
