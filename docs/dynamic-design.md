@@ -175,6 +175,9 @@ the model.** Nothing agentic ships before this floor exists:
   that doesn't route through the hashing primitives is rejected, whatever
   the prompt asked for), and **nothing applies without the enduser's
   visual scan** — the graph draft is the human gate, by design.
+  *(Decided: the gate is a **static screen over the graph document** —
+  pure, host-side, no model in the loop; adapter capability limits stay
+  as later hardening. Better than nothing is the floor, not the ceiling.)*
 
 Status: deliberately outside the milestones below. It's written down now
 so the formats (graph schema, manifest permissions, editor APIs) don't
@@ -247,8 +250,8 @@ already has its shape, so the ecosystem can arrive without a format break.
   nodes automatically).
 - **Graph versioning** — same story as scene schemas: `format` field plus
   per-node migrations as `Var → Var` functions.
-- **Agentic adapter surface** — which providers first (local ollama is the
-  privacy default), and how policy gates are expressed: as a static
-  screen over the graph document, or as host-enforced capability limits
-  on the adapter. The enforcement floor (sandboxing, encryption, policy
-  gates) must exist before any of this lands.
+- **Agentic adapter surface** — which providers ship first (local ollama
+  is the privacy default). Policy gates are decided: a **static screen
+  over the graph document** (host-side floor; adapter capability limits
+  as later hardening). The enforcement floor must exist before any of
+  this lands.

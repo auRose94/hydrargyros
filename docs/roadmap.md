@@ -371,6 +371,10 @@ The port rung queue is closed; new work branches from these items:
    milestones until the security floor lands: wasmtime sandboxing by
    default, encryption, and host-enforced policy gates (credential paths
    salted+hashed or rejected; nothing applies without the human scan).
+   Policy gates decided: a **static screen over the graph document** —
+   host-side floor, adapter capability limits as later hardening. The
+   drafting arc is complete; implementation starts at dynamic M0 (the
+   engine registry).
 
 ## What hyg will NOT do
 
