@@ -30,9 +30,8 @@ cargo test --all-features   # full suite: web, physics, wgpu, stream, gltf, wini
 cargo clippy --all-targets --all-features
 ```
 
-- Known pre-existing failures: 4 doc tests (`web/store`, `web/database`,
-  `web/html`, `from_var`) — identical in both modes, verified on pristine
-  HEAD. Out of scope unless your change touches web; don't chase them.
+The full suite is expected green — core and `--all-features`, doctests
+included. If something fails, it's yours: fix it or revert.
 - **Do not run `cargo fmt` across the repo** — it reformats ~40 unrelated
   files. Format only what you touch. `rustfmt` on a file with `mod`
   declarations (e.g. `src/game/mod.rs`) recursively formats every

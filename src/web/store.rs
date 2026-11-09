@@ -11,13 +11,13 @@
 //!
 //! ```
 //! use hyg::web::store::Store;
-//! use hyg::{o, Var};
+//! use hyg::{a, o, Var};
 //!
 //! # fn demo(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
 //! let store = Store::open("mydb", dir)?;
 //! store.create_collection("users")?;
 //!
-//! let doc = store.insert("users", o!{ "name": "alice", "tags": ["admin", "user"] })?;
+//! let doc = store.insert("users", o!{ "name": "alice", "tags": a!["admin", "user"] })?;
 //! let id = doc.get("_id").as_string().unwrap().to_string();
 //! assert_eq!(id.len(), 24);
 //!

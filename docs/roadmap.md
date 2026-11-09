@@ -330,8 +330,10 @@ The port rung queue is closed; new work branches from these items:
    editor for the web module. Drafts for review, not commitments.
 3. **Examples tour**: every feature area reachable from a runnable example,
    indexed in `examples/`.
-4. **Test hardening**: close coverage gaps on the highest-regression-risk
-   surfaces (parsers, server stop, physics contracts, camera math).
+4. **Test hardening** (done): the four long-broken doctests fixed — the
+   suite is fully green in both modes; `List` (order, grows-with-nulls,
+   self-extend snapshot, serde) and `Object::prepend` move-to-front
+   contracts now pinned in tests.
 5. **Cross-platform**: audit Linux-only assumptions (paths, APIs, backend
    availability), fix what's fixable, document a support matrix
    ([platforms.md](platforms.md)).
@@ -357,6 +359,4 @@ cargo test --all-features   # full suite: web, physics, wgpu, stream, gltf, wini
 cargo clippy --all-targets --all-features
 ```
 
-Known pre-existing failures: 4 doc tests (`web/store`, `web/database`,
-`web/html`, `from_var`) — identical in both modes, verified on a pristine
-checkout; out of scope unless a change touches web.
+The suite is fully green — core and `--all-features`, doctests included.

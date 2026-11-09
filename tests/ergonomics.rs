@@ -135,3 +135,19 @@ fn cow_sharing() {
     a.at("x").put(99i64);
     assert_eq!(b.get("x").as_i64(), Some(99));
 }
+
+#[test]
+fn object_prepend_moves_key_to_front() {
+    // insertion order is the invariant: prepend puts a key first, and
+    // re-prepending an existing key MOVES it (no duplicate, value replaced)
+    let mut obj = o!{ "a": 1i64, "b": 2i64 };
+    obj.prepend("c", Var::from(3i64));
+    let keys: Vec<String> = obj.entries().into_iter().map(|(k, _)| k).collect();
+    assert_eq!(keys, ["c", "a", "b"]);
+
+    obj.prepend("a", Var::from(9i64));
+    let keys: Vec<String> = obj.entries().into_iter().map(|(k, _)| k).collect();
+    assert_eq!(keys, ["a", "c", "b"]);
+    assert_eq!(obj.get("a").as_i64(), Some(9));
+    assert_eq!(obj.get("b").as_i64(), Some(2));
+}

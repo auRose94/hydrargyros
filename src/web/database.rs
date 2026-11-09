@@ -11,7 +11,7 @@
 //! use hyg::o;
 //!
 //! # fn demo(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
-//! let db = Database::connect(o!{ "backend": "file", "name": "mydb", "path": dir })?;
+//! let db = Database::connect(o!{ "backend": "file", "name": "mydb", "path": dir.display().to_string() })?;
 //! let users = db.get_collection("users");
 //!
 //! let doc = users.insert(o!{ "name": "alice", "logins": 0 })?;

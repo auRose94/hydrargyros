@@ -14,11 +14,11 @@
 //! let card = h::div([
 //!     h::h2([Node::text("Title")]),
 //!     h::p([Node::text("Fish & <Chips>")]),
-//!     h::attrs(hyg::o!{ "class": "card", "id": "main" }),
+//!     Node::attrs(hyg::o!{ "class": "card", "id": "main" }),
 //! ]);
 //! assert_eq!(
 //!     card.render(),
-//!     r#"<div><h2>Title</h2><p>Fish &amp; &lt;Chips&gt;</p></div>"#
+//!     r#"<div class="card" id="main"><h2>Title</h2><p>Fish &amp; &lt;Chips&gt;</p></div>"#
 //! );
 //! ```
 //!

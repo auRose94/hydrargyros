@@ -7,7 +7,7 @@
 //! path attached (`"user.stats.score": expected int, found string`).
 //!
 //! ```
-//! use hyg::{o, FromVar};
+//! use hyg::{a, o, FromVar, Var};
 //!
 //! #[derive(FromVar, Debug)]
 //! struct User {
@@ -17,7 +17,7 @@
 //!     tags: Vec<String>,
 //! }
 //!
-//! let user = User::from_var(&o!{ "name": "bob", "score": 9, "tags": ["admin"] }).unwrap();
+//! let user = User::from_var(&Var::from(o!{ "name": "bob", "score": 9i64, "tags": a!["admin"] })).unwrap();
 //! assert_eq!(user.name, "bob");
 //! assert_eq!(user.tags, vec!["admin".to_string()]);
 //! ```
