@@ -11,12 +11,12 @@ use std::time::Duration;
 // gate the import, never delete it — clippy without features lies)
 #[cfg(feature = "wgpu")]
 use futures_util::{SinkExt, StreamExt};
-use hydrargyros::game::render::FrameSink;
+use hyg::game::render::FrameSink;
 #[cfg(feature = "wgpu")]
-use hydrargyros::game::window::WindowSystem;
-use hydrargyros::game::StreamingWindow;
+use hyg::game::window::WindowSystem;
+use hyg::game::StreamingWindow;
 #[cfg(feature = "wgpu")]
-use hydrargyros::game::{RenderBackend, WgpuRenderer};
+use hyg::game::{RenderBackend, WgpuRenderer};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 #[cfg(feature = "wgpu")]
@@ -318,7 +318,7 @@ async fn token_gates_page_and_ws() {
 /// `QR_LOGO_PLATE_FRACTION`/`QR_LOGO_GLYPH_FRACTION` as decode-verified.
 /// Pure CPU: runs with just the `stream` feature (no frames, no wgpu).
 mod qr_contract {
-    use hydrargyros::game::stream_window::{QR_LOGO_GLYPH_FRACTION, QR_LOGO_PLATE_FRACTION};
+    use hyg::game::stream_window::{QR_LOGO_GLYPH_FRACTION, QR_LOGO_PLATE_FRACTION};
 
     /// Rasterize the QR (with or without the logo) the way the painter lays
     /// it out: 14 px per module keeps both test grids well over 400 px.
@@ -438,7 +438,7 @@ mod qr_contract {
         // the visual deliverable: keep the painted logo'd QR for a human
         // (or agent) to read — the tray glyph test dumps its PNG the same way
         paint_qr(&urls[0], true)
-            .save("/tmp/hydrargyros_qr_logo.png")
+            .save("/tmp/hyg_qr_logo.png")
             .unwrap();
         for url in &urls {
             assert_eq!(decode(&paint_qr(url, false)), *url, "baseline, no logo");
@@ -451,7 +451,7 @@ mod qr_contract {
 mod native_view_helpers {
     // the native view's pure seams: the loop can't run in CI, but the
     // letterbox fit math and the frame-skip rule are extracted and tested
-    use hydrargyros::game::native_view::{fit_extents, should_present};
+    use hyg::game::native_view::{fit_extents, should_present};
 
     #[test]
     fn fit_extents_letterboxes_any_aspect() {

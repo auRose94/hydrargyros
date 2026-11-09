@@ -8,7 +8,7 @@ it be safer *and* friendlier.
 Hydrargyros is a standalone project. It is **not** a gold branch. Gold (the C++
 codebase) is untouched by this repo.
 
-> **Name:** gold is **Au**, hydrargyros is the Greek name for mercury — **Hg**, the symbol ☿ — both chemical-element metals.
+> **Name:** gold is **Au**, hyg is the Greek name for mercury — **Hg**, the symbol ☿ — both chemical-element metals.
 > The pairing is a joke *and* a signal.
 
 ## The idea
@@ -28,7 +28,7 @@ JavaScript:
 ## Quick start
 
 ```rust
-use hydrargyros::{a, o, Null, Var};
+use hyg::{a, o, Null, Var};
 
 // object / array literals read like JS
 let user = o! {

@@ -16,12 +16,12 @@
 //! The page opens automatically (http://127.0.0.1:8401). Hit the page's
 //! quit button to end the pump.
 
-use hydrargyros::game::camera::OrbitController;
-use hydrargyros::game::light::{forward_quat, Light};
-use hydrargyros::game::render::FrameSink;
-use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::{Engine, Entity, Model, WgpuRenderer};
-use hydrargyros::var::{Quat, Vec3};
+use hyg::game::camera::OrbitController;
+use hyg::game::light::{forward_quat, Light};
+use hyg::game::render::FrameSink;
+use hyg::game::renderable::MeshRenderer;
+use hyg::game::{Engine, Entity, Model, WgpuRenderer};
+use hyg::var::{Quat, Vec3};
 
 fn main() {
     let mut engine = Engine::new("acme", "gltf-demo");
@@ -64,7 +64,7 @@ fn main() {
 
     // --no-open skips the auto-launch (paste the URL into any browser)
     let open_browser = !std::env::args().any(|a| a == "--no-open");
-    let window = hydrargyros::game::StreamingWindow::new("127.0.0.1:8401", sink, open_browser)
+    let window = hyg::game::StreamingWindow::new("127.0.0.1:8401", sink, open_browser)
         .expect("stream server");
     println!(
         "streaming at {}{}",

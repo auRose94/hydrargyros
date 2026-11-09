@@ -3,7 +3,7 @@
 
 use std::thread;
 
-use hydrargyros::{func, o, Var};
+use hyg::{func, o, Var};
 
 #[test]
 fn shared_object_across_threads() {

@@ -7,7 +7,7 @@
 //! path attached (`"user.stats.score": expected int, found string`).
 //!
 //! ```
-//! use hydrargyros::{o, FromVar};
+//! use hyg::{o, FromVar};
 //!
 //! #[derive(FromVar, Debug)]
 //! struct User {

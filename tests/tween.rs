@@ -1,7 +1,7 @@
 //! Tween/timer tests (feature-free — the core CI): the easing curves' defining
 //! values, deterministic Tween stepping, and Timer tick semantics.
 
-use hydrargyros::game::tween::{Easing, Timer, Tween, MIN_DURATION};
+use hyg::game::tween::{Easing, Timer, Tween, MIN_DURATION};
 
 /// Every curve pins its endpoints, and the middle points carry the curve's
 /// defining shape (exact values — the math is closed-form).

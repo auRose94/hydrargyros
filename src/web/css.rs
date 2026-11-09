@@ -9,7 +9,7 @@
 //! end at `;`.
 //!
 //! ```
-//! use hydrargyros::web::css;
+//! use hyg::web::css;
 //!
 //! let rules = css::parse_css("/* c */ p, .x { color: red; margin : 0 }");
 //! assert_eq!(rules.len(), 1);

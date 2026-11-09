@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
-use hydrargyros::web::Server;
-use hydrargyros::o;
+use hyg::web::Server;
+use hyg::o;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -17,7 +17,7 @@ async fn https_serves_with_pem_pair() {
     // guess a provider — install one before the server task builds its config
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-    let dir = std::env::temp_dir().join("hydrargyros_tls_test");
+    let dir = std::env::temp_dir().join("hyg_tls_test");
     std::fs::create_dir_all(&dir).unwrap();
     let cert_path = dir.join("cert.pem");
     let key_path = dir.join("key.pem");

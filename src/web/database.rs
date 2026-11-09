@@ -8,8 +8,8 @@
 //! would slot in.
 //!
 //! ```
-//! use hydrargyros::web::database::Database;
-//! use hydrargyros::o;
+//! use hyg::web::database::Database;
+//! use hyg::o;
 //!
 //! # fn demo(dir: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
 //! let db = Database::connect(o!{ "backend": "file", "name": "mydb", "path": dir })?;

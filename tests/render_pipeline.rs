@@ -4,14 +4,14 @@
 
 #![cfg(feature = "wgpu")]
 
-use hydrargyros::game::camera::Camera;
-use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::HeadlessWindow;
-use hydrargyros::game::{
+use hyg::game::camera::Camera;
+use hyg::game::renderable::MeshRenderer;
+use hyg::game::HeadlessWindow;
+use hyg::game::{
     Engine, Entity, PhysicsWorld, RenderBackend, StreamingWindow, WgpuRenderer,
 };
-use hydrargyros::o;
-use hydrargyros::var::Vec3;
+use hyg::o;
+use hyg::var::Vec3;
 
 fn pixel(frame: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * width + x) * 4) as usize;
@@ -62,7 +62,7 @@ async fn world_space_quad_lands_where_the_camera_says() {
         &Camera::ortho(Vec3::new(0.0, 4.0, 0.0), Vec3::new(8.0, 4.5, 1.0)),
         &[], // quads are unlit: an empty light list is fine here
     );
-    renderer.push_quad(hydrargyros::game::Quad::rect(
+    renderer.push_quad(hyg::game::Quad::rect(
         [0.0, 4.0],
         [0.5, 0.5],
         [1.0, 0.0, 0.0, 1.0],
@@ -85,7 +85,7 @@ async fn circle_shape_clips_to_a_disc() {
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(240, 240))
         .expect("no wgpu adapter on this machine");
     renderer.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-    renderer.set_scene(&[hydrargyros::game::Quad::circle(
+    renderer.set_scene(&[hyg::game::Quad::circle(
         [0.0, 0.0],
         [0.5, 0.5],
         [0.0, 1.0, 0.0, 1.0],
@@ -109,7 +109,7 @@ async fn circle_shape_clips_to_a_disc() {
 /// its entity's world transform — no manual mapping anywhere.
 #[tokio::test]
 async fn entity_meshrenderer_renders_through_camera() {
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
@@ -146,7 +146,7 @@ async fn entity_meshrenderer_renders_through_camera() {
 /// transform hierarchy reaches the pixels.
 #[tokio::test]
 async fn child_entities_render_at_world_transforms() {
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
@@ -181,7 +181,7 @@ async fn child_entities_render_at_world_transforms() {
 async fn stream_window_with_renderables() {
     use std::sync::Arc;
 
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer =
         pollster::block_on(WgpuRenderer::new_offscreen(320, 180)).expect("no wgpu adapter");
     renderer.attach_sink(sink.clone());
@@ -202,11 +202,11 @@ async fn stream_window_with_renderables() {
 
 // ---- meshes (the triangle pipeline) ----
 
-use hydrargyros::game::light::{forward_quat, Light, LightKind, SceneLight};
-use hydrargyros::game::mesh::Mesh;
-use hydrargyros::game::model::Model;
-use hydrargyros::game::Transform;
-use hydrargyros::var::{Quat, Vec3 as V3};
+use hyg::game::light::{forward_quat, Light, LightKind, SceneLight};
+use hyg::game::mesh::Mesh;
+use hyg::game::model::Model;
+use hyg::game::Transform;
+use hyg::var::{Quat, Vec3 as V3};
 
 /// The mesh shader's fixed key light, mirrored from `WGSL_MESH`:
 /// light = normalize(0.4, 0.7, 0.5), shade = 0.45 + 0.55·max(n·light, 0).
@@ -417,7 +417,7 @@ async fn mesh_geometry_beyond_the_depth_window_clips() {
 
 // ---- camera 3D (perspective/look-at per gold's bx conventions) ----
 
-use hydrargyros::game::camera::Projection;
+use hyg::game::camera::Projection;
 
 /// Project a world point through the camera → NDC (x right, y up).
 fn project(camera: &Camera, p: V3) -> [f32; 2] {
@@ -671,7 +671,7 @@ async fn perspective_beyond_the_far_plane_clips() {
 #[cfg(feature = "gltf")] // loads a glTF file (wgpu-only builds stay compilable)
 #[tokio::test]
 async fn gltf_model_renders_through_the_engine() {
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
@@ -706,7 +706,7 @@ async fn gltf_model_renders_through_the_engine() {
 
 // ---- textures (sampled by the mesh pipeline) ----
 
-use hydrargyros::game::texture::Texture;
+use hyg::game::texture::Texture;
 
 /// sRGB-decode a stored byte the way sampling an Rgba8UnormSrgb texture
 /// does (the mirror of `srgb8`).
@@ -724,7 +724,7 @@ fn srgb_decode(v: u8) -> f64 {
 /// +y-up screen), and each texel is tinted by the key-light shade.
 #[tokio::test]
 async fn sprite_samples_the_texture_upright() {
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());
@@ -801,7 +801,7 @@ async fn sprite_samples_the_texture_upright() {
 #[cfg(feature = "gltf")] // loads a glTF file (wgpu-only builds stay compilable)
 #[tokio::test]
 async fn gltf_checker_cube_samples_its_texture() {
-    let sink = hydrargyros::game::FrameSink::new();
+    let sink = hyg::game::FrameSink::new();
     let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(480, 270))
         .expect("no wgpu adapter on this machine");
     renderer.attach_sink(sink.clone());

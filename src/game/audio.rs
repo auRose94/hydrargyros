@@ -25,8 +25,8 @@
 //! engine carries one like its physics world (`set_audio`/`audio_mut`).
 //!
 //! ```
-//! use hydrargyros::game::audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
-//! use hydrargyros::{o, Var};
+//! use hyg::game::audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
+//! use hyg::{o, Var};
 //!
 //! // headless: the none backend records plays instead of sounding
 //! let mut audio = AudioWorld::none();

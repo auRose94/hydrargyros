@@ -12,9 +12,9 @@
 //! event is just `o!{ "type": "quit" }`).
 //!
 //! ```
-//! use hydrargyros::game::component::Component;
-//! use hydrargyros::game::{Engine, Entity, HeadlessWindow};
-//! use hydrargyros::{o, Var};
+//! use hyg::game::component::Component;
+//! use hyg::game::{Engine, Entity, HeadlessWindow};
+//! use hyg::{o, Var};
 //!
 //! struct Counter(u64);
 //! impl Component for Counter {

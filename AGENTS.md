@@ -2,12 +2,12 @@
 
 Instructions for AI coding agents working in this repository.
 
-Hydrargyros (crate `hydrargyros`) is a Rust reimagining of **gold** — a C++20/26
+Hydrargyros (crate `hyg`) is a Rust reimagining of **gold** — a C++20/26
 framework whose thesis is *high-level, JavaScript-like ergonomics for
 prototyping without sacrificing speed*. It is a standalone project, **not** a
 gold branch. The checkout directory is `/mnt/Matrix/Work/mercury` (kept from
 the pre-rename era; the project and all imports are Hydrargyros /
-`hydrargyros::`). The repo is **public** — never commit secrets or
+`hyg::`). The repo is **public** — never commit secrets or
 machine-specific paths.
 
 ## Source of truth

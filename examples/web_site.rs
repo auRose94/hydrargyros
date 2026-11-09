@@ -8,9 +8,9 @@
 //!
 //! Then: http://127.0.0.1:8377 (users, login form, chat, /api/*, a 404 page).
 
-use hydrargyros::web::html::{self as h, Node};
-use hydrargyros::web::{Response, Server, WsHandlers};
-use hydrargyros::{o, Var};
+use hyg::web::html::{self as h, Node};
+use hyg::web::{Response, Server, WsHandlers};
+use hyg::{o, Var};
 
 // ---- page frame (the builder in its natural habitat) ----
 
@@ -108,7 +108,7 @@ async fn main() {
                     h::p([Node::text("Gold's expressjs-like server, in Rust: routes are Var closures.")]),
                     h::ul([
                         h::li([Node::text(format!("{n} registered users"))]),
-                        h::li([Node::text("try "), h::code([Node::text("/hello/hydrargyros?shout=1")])]),
+                        h::li([Node::text("try "), h::code([Node::text("/hello/hyg?shout=1")])]),
                         h::li([Node::text("chat over WebSocket at "), h::code([Node::text("/chat")])]),
                         h::li([Node::text("JSON API at "), h::code([Node::text("/api/users")])]),
                     ]),
@@ -148,7 +148,7 @@ async fn main() {
         .get("/users/:id", move |req| {
             let id = req.get("params").get("id").as_string().unwrap_or_default();
             match users_detail.get(&id) {
-                user if user.ty() == hydrargyros::Ty::Object => page(
+                user if user.ty() == hyg::Ty::Object => page(
                     "user",
                     "/users",
                     h::div([
@@ -174,7 +174,7 @@ async fn main() {
         .post("/api/echo", |req| {
             // JSON bodies arrive as Var; malformed input arrives as Null
             let body = req.get("body");
-            Response::json(o!{ "echo": body, "ok": body.ty() != hydrargyros::Ty::Null }).status(201)
+            Response::json(o!{ "echo": body, "ok": body.ty() != hyg::Ty::Null }).status(201)
         })
         // WebSocket chat (echo)
         .ws(

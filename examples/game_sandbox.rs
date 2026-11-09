@@ -29,19 +29,19 @@
 
 use std::sync::Arc;
 
-use hydrargyros::game::audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
-use hydrargyros::game::camera::OrbitController;
-use hydrargyros::game::light::{forward_quat, Light};
-use hydrargyros::game::physics::{BodyType, Shape as PhysShape};
-use hydrargyros::game::render::FrameSink;
-use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::{
+use hyg::game::audio::{AudioSource, AudioWorld, PlaySpec, WaveShape};
+use hyg::game::camera::OrbitController;
+use hyg::game::light::{forward_quat, Light};
+use hyg::game::physics::{BodyType, Shape as PhysShape};
+use hyg::game::render::FrameSink;
+use hyg::game::renderable::MeshRenderer;
+use hyg::game::{
     Easing, Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, ScriptedComponent, Tween,
     WgpuRenderer,
 };
-use hydrargyros::script::Script;
-use hydrargyros::var::{Quat, Vec3};
-use hydrargyros::Var;
+use hyg::script::Script;
+use hyg::var::{Quat, Vec3};
+use hyg::Var;
 
 fn main() {
     let mut engine = Engine::new("acme", "sandbox-demo");
@@ -251,8 +251,8 @@ fn main() {
     #[cfg(feature = "winit")]
     let native_sink = sink.clone();
     #[cfg(feature = "winit")]
-    let mut native_view: Option<hydrargyros::game::native_view::NativeViewHandle> = None;
-    let window = hydrargyros::game::StreamingWindow::new("127.0.0.1:8402", sink, open_browser)
+    let mut native_view: Option<hyg::game::native_view::NativeViewHandle> = None;
+    let window = hyg::game::StreamingWindow::new("127.0.0.1:8402", sink, open_browser)
         .expect("stream server");
     println!(
         "streaming at {}{}",
@@ -290,7 +290,7 @@ fn main() {
             if event.get("type").as_string().as_deref() == Some("native_fullscreen") {
                 #[cfg(feature = "winit")]
                 if native_view.as_ref().is_none_or(|h| !h.is_open()) {
-                    match hydrargyros::game::native_view::NativeView::spawn(
+                    match hyg::game::native_view::NativeView::spawn(
                         native_sink.clone(),
                         "☿ sandbox — native view",
                     ) {

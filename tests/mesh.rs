@@ -1,8 +1,8 @@
 //! Mesh unit tests (no GPU): the procedural builders produce valid,
 //! closed, outward-wound geometry, and `Mesh::new` rejects broken data.
 
-use hydrargyros::game::mesh::{Mesh, MeshVertex};
-use hydrargyros::var::Vec3;
+use hyg::game::mesh::{Mesh, MeshVertex};
+use hyg::var::Vec3;
 
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
     [

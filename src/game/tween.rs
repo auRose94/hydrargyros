@@ -12,7 +12,7 @@
 //! for free.
 //!
 //! ```
-//! use hydrargyros::game::tween::{Easing, Tween};
+//! use hyg::game::tween::{Easing, Tween};
 //!
 //! let mut tween = Tween::from_values(0.0, 100.0, 2.0, Easing::Linear);
 //! for _ in 0..2 {
@@ -111,7 +111,7 @@ impl Easing {
 /// `entity.transform_mut().position.x = tween.step(dt);`
 ///
 /// ```
-/// use hydrargyros::game::tween::{Easing, Tween};
+/// use hyg::game::tween::{Easing, Tween};
 ///
 /// let mut tween = Tween::from_values(10.0, 20.0, 1.0, Easing::QuadIn);
 /// assert_eq!(tween.step(0.5), 12.5); // halfway through, quad-in eased
@@ -179,7 +179,7 @@ impl Tween {
 /// fall silent.
 ///
 /// ```
-/// use hydrargyros::game::tween::Timer;
+/// use hyg::game::tween::Timer;
 ///
 /// let mut timer = Timer::new(1.0, false); // one-shot, one second
 /// for _ in 0..3 {

@@ -68,7 +68,7 @@ impl NativeView {
             let thread_shared = Arc::clone(&shared);
             let title = title.into();
             std::thread::Builder::new()
-                .name("hydrargyros-native-view".to_string())
+                .name("hyg-native-view".to_string())
                 .spawn(move || run_view(sink, title, thread_shared))
                 .map_err(|e| format!("native view thread: {e}"))?;
             Ok(NativeViewHandle { shared })
@@ -270,7 +270,7 @@ impl ViewState {
         if self.image != dims {
             self.image = dims;
             let tex = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("hydrargyros-native-view-frame"),
+                label: Some("hyg-native-view-frame"),
                 size: wgpu::Extent3d {
                     width: frame.width,
                     height: frame.height,
@@ -285,7 +285,7 @@ impl ViewState {
             });
             let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
             let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("hydrargyros-native-view-bind"),
+                label: Some("hyg-native-view-bind"),
                 layout: &self.bind_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -362,7 +362,7 @@ impl ViewState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("hydrargyros-native-view-blit"),
+                label: Some("hyg-native-view-blit"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -430,11 +430,11 @@ async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<Vi
     surface.configure(&device, &config);
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("hydrargyros-native-view-blit"),
+        label: Some("hyg-native-view-blit"),
         source: wgpu::ShaderSource::Wgsl(BLIT_WGSL.into()),
     });
     let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("hydrargyros-native-view-bind"),
+        label: Some("hyg-native-view-bind"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -470,7 +470,7 @@ async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<Vi
         immediate_size: 0,
     });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("hydrargyros-native-view-blit"),
+        label: Some("hyg-native-view-blit"),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -496,20 +496,20 @@ async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<Vi
     });
     // BILINEAR — the fit upscale smooths, matching the page's fit mode
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("hydrargyros-native-view-sampler"),
+        label: Some("hyg-native-view-sampler"),
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
     let fit = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-native-view-fit"),
+        label: Some("hyg-native-view-fit"),
         size: 16,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     // a 1×1 black frame until the first upload (the bind group is whole)
     let frame_tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("hydrargyros-native-view-frame"),
+        label: Some("hyg-native-view-frame"),
         size: wgpu::Extent3d {
             width: 1,
             height: 1,
@@ -524,7 +524,7 @@ async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<Vi
     });
     let frame_view = frame_tex.create_view(&wgpu::TextureViewDescriptor::default());
     let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hydrargyros-native-view-bind"),
+        label: Some("hyg-native-view-bind"),
         layout: &bind_layout,
         entries: &[
             wgpu::BindGroupEntry {

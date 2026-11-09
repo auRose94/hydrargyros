@@ -5,7 +5,7 @@
 
 #![cfg(feature = "gltf")]
 
-use hydrargyros::game::model::Model;
+use hyg::game::model::Model;
 use std::io::Cursor;
 
 /// Pack a GLB: magic + version + length, a JSON chunk (space-padded to 4),

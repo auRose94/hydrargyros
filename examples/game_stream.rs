@@ -11,13 +11,13 @@
 //! fall; press keys, click around — events print in the console; hit the
 //! page's quit button to end the pump.
 
-use hydrargyros::game::light::{forward_quat, Light};
-use hydrargyros::game::physics::Shape as PhysShape;
-use hydrargyros::game::render::FrameSink;
-use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::{Camera, Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, WgpuRenderer};
-use hydrargyros::var::Vec3;
-use hydrargyros::Var;
+use hyg::game::light::{forward_quat, Light};
+use hyg::game::physics::Shape as PhysShape;
+use hyg::game::render::FrameSink;
+use hyg::game::renderable::MeshRenderer;
+use hyg::game::{Camera, Engine, Entity, Mesh, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hyg::var::Vec3;
+use hyg::Var;
 
 fn main() {
     let mut engine = Engine::new("acme", "stream-demo");
@@ -69,7 +69,7 @@ fn main() {
     // --no-open skips the auto-launch (paste the URL into any browser —
     // including an embedded one like ZCode's).
     let open_browser = !std::env::args().any(|a| a == "--no-open");
-    let window = hydrargyros::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
+    let window = hyg::game::StreamingWindow::new("127.0.0.1:8400", sink, open_browser)
         .expect("stream server");
     let window = std::sync::Arc::new(window);
 
@@ -77,7 +77,7 @@ fn main() {
     #[cfg(feature = "tray")]
     {
         let window = window.clone();
-        match hydrargyros::game::spawn_tray_quit("hydrargyros (streaming)", move |quit| {
+        match hyg::game::spawn_tray_quit("hyg (streaming)", move |quit| {
             window.inject(quit);
         }) {
             Ok(()) => println!("tray icon up (Quit closes the game)"),

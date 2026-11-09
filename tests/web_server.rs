@@ -8,8 +8,8 @@
 
 use std::time::Duration;
 
-use hydrargyros::web::{req_header, req_is_json, Response, Server, WsHandlers};
-use hydrargyros::{o, Var};
+use hyg::web::{req_header, req_is_json, Response, Server, WsHandlers};
+use hyg::{o, Var};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -145,7 +145,7 @@ async fn verbs_and_params() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn wildcard_mount_and_error_fallthrough() {
-    let tmp = std::env::temp_dir().join("hydrargyros_web_mount_test");
+    let tmp = std::env::temp_dir().join("hyg_web_mount_test");
     std::fs::create_dir_all(tmp.join("css")).unwrap();
     std::fs::write(tmp.join("css/site.css"), "body{color:red}").unwrap();
 
@@ -191,7 +191,7 @@ async fn request_staging() {
         Var::from(format!("{method}:{who}:{}", req_header(&req, "x-tag")))
     })
     .post("/form", |req| {
-        assert!(hydrargyros::web::req_is_www_form_urlencoded(&req));
+        assert!(hyg::web::req_is_www_form_urlencoded(&req));
         Var::from(req.get("body").get("name").as_string().unwrap_or_default())
     })
     .post("/api", |req| {
@@ -304,7 +304,7 @@ async fn request_streaming_route() {
     serv.route_stream("POST", "/upload", |req, body| async move {
         use futures_util::StreamExt;
         // the staged request carries no body — the stream is the argument
-        let body_is_null = req.get("body").ty() == hydrargyros::Ty::Null;
+        let body_is_null = req.get("body").ty() == hyg::Ty::Null;
         let mut total = 0usize;
         let mut body = body.into_data_stream();
         while let Some(Ok(chunk)) = body.next().await {

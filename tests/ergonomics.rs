@@ -1,8 +1,8 @@
 //! Feel-the-ergonomics tests: do the gold sugar port faithfully, and where
 //! does Rust change the shape?
 
-use hydrargyros::sugar::{each, filter, find, join, map};
-use hydrargyros::{a, func, o, Null, tpl, Var};
+use hyg::sugar::{each, filter, find, join, map};
+use hyg::{a, func, o, Null, tpl, Var};
 
 #[test]
 fn jo_literal_nested() {

@@ -5,12 +5,12 @@
 
 #![cfg(feature = "audio")]
 
-use hydrargyros::game::audio::{
+use hyg::game::audio::{
     create_audio_backend, AudioError, AudioSource, AudioWorld, PlaySpec, WaveShape,
     TONE_SAMPLE_RATE,
 };
-use hydrargyros::game::Engine;
-use hydrargyros::{o, Var};
+use hyg::game::Engine;
+use hyg::{o, Var};
 
 /// The none backend records plays faithfully: distinct ids, the source and
 /// spec round-trip, unknown-id stops are clean no-ops, master volume is

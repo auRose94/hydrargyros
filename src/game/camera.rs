@@ -29,8 +29,8 @@
 //! [`Camera`] each frame.
 //!
 //! ```
-//! use hydrargyros::game::camera::{Camera, Projection};
-//! use hydrargyros::var::Vec3;
+//! use hyg::game::camera::{Camera, Projection};
+//! use hyg::var::Vec3;
 //!
 //! // gold's defaults: fov 60° (y), near 0.1, far 100, 16:9
 //! let camera = Camera {

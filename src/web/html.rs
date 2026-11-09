@@ -9,12 +9,12 @@
 //! (`<br>`, `<img>`, …) never emit end tags.
 //!
 //! ```
-//! use hydrargyros::web::html::{self as h, Node};
+//! use hyg::web::html::{self as h, Node};
 //!
 //! let card = h::div([
 //!     h::h2([Node::text("Title")]),
 //!     h::p([Node::text("Fish & <Chips>")]),
-//!     h::attrs(hydrargyros::o!{ "class": "card", "id": "main" }),
+//!     h::attrs(hyg::o!{ "class": "card", "id": "main" }),
 //! ]);
 //! assert_eq!(
 //!     card.render(),

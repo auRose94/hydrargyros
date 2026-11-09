@@ -1,7 +1,7 @@
 //! Texture unit tests (no GPU): raw-pixel validation, file decoding,
 //! and the glTF image-data conversion.
 
-use hydrargyros::game::texture::Texture;
+use hyg::game::texture::Texture;
 
 /// `from_rgba` demands exactly `width * height * 4` bytes.
 #[test]
@@ -29,7 +29,7 @@ fn white_is_one_opaque_pixel() {
 #[test]
 fn from_file_decodes_a_png() {
     let path =
-        std::env::temp_dir().join(format!("hydrargyros-tex-test-{}.png", std::process::id()));
+        std::env::temp_dir().join(format!("hyg-tex-test-{}.png", std::process::id()));
     image::save_buffer(
         &path,
         &[255u8, 0, 0, 255, 0, 255, 0, 255],

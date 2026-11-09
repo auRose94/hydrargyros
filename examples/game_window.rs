@@ -9,17 +9,17 @@
 
 use std::thread;
 
-use hydrargyros::game::physics::Shape;
-use hydrargyros::game::renderable::MeshRenderer;
-use hydrargyros::game::camera::Camera;
-use hydrargyros::game::winit_window::WinitWindow;
-use hydrargyros::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
-use hydrargyros::var::Vec3;
-use hydrargyros::Var;
+use hyg::game::physics::Shape;
+use hyg::game::renderable::MeshRenderer;
+use hyg::game::camera::Camera;
+use hyg::game::winit_window::WinitWindow;
+use hyg::game::{Engine, Entity, PhysicsBody, PhysicsWorld, WgpuRenderer};
+use hyg::var::Vec3;
+use hyg::Var;
 
 fn main() {
     // the event loop + window: created and run on the main thread
-    let window = match WinitWindow::new("☿ hydrargyros — game window", (800, 450)) {
+    let window = match WinitWindow::new("☿ hyg — game window", (800, 450)) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("no windowing system: {e}");

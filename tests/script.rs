@@ -10,11 +10,11 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use hydrargyros::game::component::Component;
-use hydrargyros::game::{Engine, Entity, ScriptedComponent};
-use hydrargyros::o;
-use hydrargyros::script::{Script, ScriptError};
-use hydrargyros::{List, Var};
+use hyg::game::component::Component;
+use hyg::game::{Engine, Entity, ScriptedComponent};
+use hyg::o;
+use hyg::script::{Script, ScriptError};
+use hyg::{List, Var};
 
 // ---- (a) scalar Var <-> script round-trips ----
 
@@ -54,13 +54,13 @@ fn scalar_set_get_global_round_trips() {
     let mut script = Script::new("var sink = 0;").unwrap();
     script.set_global("answer", &Var::from(42i64)).unwrap();
     script
-        .set_global("name", &Var::from("hydrargyros"))
+        .set_global("name", &Var::from("hyg"))
         .unwrap();
     script.set_global("ratio", &Var::from(0.5)).unwrap();
     assert_eq!(script.get_global("answer").unwrap(), Var::I64(42));
     assert_eq!(
         script.get_global("name").unwrap(),
-        Var::Str("hydrargyros".to_string())
+        Var::Str("hyg".to_string())
     );
     assert_eq!(script.get_global("ratio").unwrap(), Var::F64(0.5));
 
@@ -118,7 +118,7 @@ fn non_representable_values_are_rejected_not_degraded() {
         "got {big}"
     );
     // ... and the same rule fires nested inside an object
-    let nested = hydrargyros::o! { "deep": i64::MAX };
+    let nested = hyg::o! { "deep": i64::MAX };
     let nested = script.set_global("x", &Var::from(nested)).unwrap_err();
     assert!(nested.to_string().contains("not exactly representable"));
 }
@@ -189,7 +189,7 @@ fn func_var_crossing_in_becomes_a_callable() {
     script
         .set_global(
             "combine",
-            &Var::from(hydrargyros::func!(|a, b| {
+            &Var::from(hyg::func!(|a, b| {
                 Var::from(a.as_f64().unwrap_or(0.0) + b.as_f64().unwrap_or(0.0))
             })),
         )
@@ -270,12 +270,12 @@ fn vec_shapes_cross_as_plain_json_objects() {
     // back as plain objects too: the JSON bridge is untyped (documented
     // divergence from gold, whose scripts share typed host objects).
     let mut script = Script::new("function read(v) { return v.x + v.y + v.z; }").unwrap();
-    let v = hydrargyros::Vec3::new(1.0, 2.0, 3.0);
+    let v = hyg::Vec3::new(1.0, 2.0, 3.0);
     assert_eq!(script.call("read", &[Var::from(v)]).unwrap(), Var::I64(6));
 
     let mut script = Script::new("function build() { return {x: 1, y: 2, z: 3, w: 4}; }").unwrap();
     let out = script.call("build", &[]).unwrap();
-    assert_eq!(out.ty(), hydrargyros::Ty::Object);
+    assert_eq!(out.ty(), hyg::Ty::Object);
     assert_eq!(out.get("w"), Var::I64(4));
 }
 
@@ -346,8 +346,8 @@ fn engine_syncs_the_scripted_transform_into_its_entity() {
     let component = ScriptedComponent::new(script).unwrap();
 
     let mut entity = Entity::new("mover");
-    entity.transform_mut().position = hydrargyros::Vec3::new(10.0, 2.0, 5.0);
-    entity.transform_mut().scale = hydrargyros::Vec3::splat(2.0);
+    entity.transform_mut().position = hyg::Vec3::new(10.0, 2.0, 5.0);
+    entity.transform_mut().scale = hyg::Vec3::splat(2.0);
     entity.add_component(Box::new(component));
 
     let mut engine = Engine::new("acme", "scripted-sync");
@@ -375,7 +375,7 @@ fn engine_syncs_the_scripted_transform_into_its_entity() {
     // y untouched by the script, preserved by the whole-transform round-trip
     assert!((moved.position.y - 2.0).abs() < 1e-5);
     // scale rides the seam untouched too (the script never sees it change)
-    assert_eq!(moved.scale, hydrargyros::Vec3::splat(2.0));
+    assert_eq!(moved.scale, hyg::Vec3::splat(2.0));
 }
 
 #[test]
@@ -389,7 +389,7 @@ fn missing_script_hooks_are_silently_skipped() {
     component.draw();
     assert_eq!(
         component.transform(),
-        hydrargyros::game::Transform::default()
+        hyg::game::Transform::default()
     );
 }
 
@@ -426,7 +426,7 @@ fn hook_names_are_configurable() {
     let script = Script::new("function tick(dt) { transform.position.x += dt; }").unwrap();
     let mut component = ScriptedComponent::with_hooks(
         script,
-        hydrargyros::game::HookNames {
+        hyg::game::HookNames {
             update: "tick".to_string(),
             ..Default::default()
         },
@@ -440,8 +440,8 @@ fn hook_names_are_configurable() {
 fn priority_is_configurable() {
     let component = ScriptedComponent::new(Script::new("").unwrap())
         .unwrap()
-        .with_priority(hydrargyros::game::Priority::High);
-    assert_eq!(component.priority(), hydrargyros::game::Priority::High);
+        .with_priority(hyg::game::Priority::High);
+    assert_eq!(component.priority(), hyg::game::Priority::High);
 }
 
 // ---- (f) the pool design holds: the Send+Sync handle crosses threads ----

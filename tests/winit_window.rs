@@ -6,7 +6,7 @@
 
 #![cfg(feature = "winit")]
 
-use hydrargyros::game::winit_window::{key_var, mouse_button_var, mouse_move_var, quit_var, wheel_var};
+use hyg::game::winit_window::{key_var, mouse_button_var, mouse_move_var, quit_var, wheel_var};
 
 #[test]
 fn key_events_map_to_vars() {

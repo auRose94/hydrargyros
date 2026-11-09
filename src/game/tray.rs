@@ -12,7 +12,7 @@ use crate::var::Var;
 /// ☿ in a 32×32 RGBA buffer: mercury-silver glyph, fully transparent
 /// background. Drawn with anti-aliased signed-distance fields — the ring,
 /// the horns arc above it, and the cross below.
-fn hydrargyros_glyph() -> Vec<u8> {
+fn hyg_glyph() -> Vec<u8> {
     const SIZE: u32 = 32;
     // mercury silver, slightly warm
     let (r, g, b) = (220u8, 224u8, 232u8);
@@ -71,7 +71,7 @@ where
 {
     let tooltip = tooltip.to_string();
     std::thread::Builder::new()
-        .name("hydrargyros-tray".to_string())
+        .name("hyg-tray".to_string())
         .spawn(move || {
             // Linux: the tray lives in GTK, which needs init + a main loop on
             // this thread. Headless machines fail here — degrade gracefully.
@@ -99,7 +99,7 @@ fn build_tray<F>(tooltip: &str, on_quit: F) -> Result<tray_icon::TrayIcon, Strin
 where
     F: Fn(Var) + Send + 'static,
 {
-    let icon = tray_icon::Icon::from_rgba(hydrargyros_glyph(), 32, 32)
+    let icon = tray_icon::Icon::from_rgba(hyg_glyph(), 32, 32)
         .map_err(|e| format!("tray icon: {e}"))?;
 
     let menu = Menu::new();
@@ -119,7 +119,7 @@ where
 
     // menu events are global; pump them on a thread and forward quits
     std::thread::Builder::new()
-        .name("hydrargyros-tray-events".to_string())
+        .name("hyg-tray-events".to_string())
         .spawn(move || {
             let receiver = MenuEvent::receiver();
             while let Ok(event) = receiver.recv() {
@@ -141,7 +141,7 @@ mod tests {
     /// read the image and confirm the ☿ shape.
     #[test]
     fn glyph_renders_as_png() {
-        let rgba = super::hydrargyros_glyph();
+        let rgba = super::hyg_glyph();
         let (w, h, scale) = (32u32, 32u32, 8u32);
         let mut img = image::RgbaImage::new(w * scale, h * scale);
         for y in 0..h * scale {
@@ -155,6 +155,6 @@ mod tests {
                 ]));
             }
         }
-        img.save("/tmp/hydrargyros_tray_glyph.png").unwrap();
+        img.save("/tmp/hyg_tray_glyph.png").unwrap();
     }
 }

@@ -1,11 +1,11 @@
 //! FromVar derive tests: strict typed reads, field options, nested structs,
 //! and error paths.
 
-use hydrargyros::{a, o, FromVar, Var};
+use hyg::{a, o, FromVar, Var};
 
 /// `o!{...}` as a `Var` — the test-side shape of the config seam.
 macro_rules! var {
-    ($($t:tt)*) => { ::std::convert::Into::<hydrargyros::Var>::into(o!{ $($t)* }) };
+    ($($t:tt)*) => { ::std::convert::Into::<hyg::Var>::into(o!{ $($t)* }) };
 }
 
 #[derive(FromVar, Debug, PartialEq)]
@@ -110,8 +110,8 @@ fn var_passthrough_clones() {
 
 #[test]
 fn math_types_read_strictly() {
-    use hydrargyros::{Quat, Vec3};
-    let ok = Vec3::from_var(&Var::from(hydrargyros::Vec3::new(1.0, 2.0, 3.0))).unwrap();
+    use hyg::{Quat, Vec3};
+    let ok = Vec3::from_var(&Var::from(hyg::Vec3::new(1.0, 2.0, 3.0))).unwrap();
     assert_eq!(ok, Vec3::new(1.0, 2.0, 3.0));
     assert!(Vec3::from_var(&Var::from(1)).is_err());
     assert!(Quat::from_var(&Var::Null).is_err());

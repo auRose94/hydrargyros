@@ -1,10 +1,10 @@
 //! File dataStore tests, ported from gold's webTest.cpp suite.
 
-use hydrargyros::web::store::Store;
-use hydrargyros::{a, o};
+use hyg::web::store::Store;
+use hyg::{a, o};
 
 fn temp_root(tag: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("hydrargyros_store_test_{tag}"));
+    let root = std::env::temp_dir().join(format!("hyg_store_test_{tag}"));
     let _ = std::fs::remove_dir_all(&root);
     root
 }
@@ -62,14 +62,14 @@ fn data_store_update_operators() {
         .update_one("c", o!{ "_id": id.clone() }, o!{ "$unset": o!{ "temp": 1 } })
         .unwrap();
     let doc = store.find_one("c", o!{ "_id": id.clone() }).unwrap().unwrap();
-    assert_eq!(doc.get("temp").ty(), hydrargyros::Ty::Null);
+    assert_eq!(doc.get("temp").ty(), hyg::Ty::Null);
 
     // an update with no supported operator is an error, not a silent
     // success that rewrites nothing
     let err = store
         .update_one("c", o!{ "_id": id.clone() }, o!{ "$bump": o!{ "count": 1 } })
         .unwrap_err();
-    assert!(matches!(err, hydrargyros::web::store::StoreError::NoUpdateOperator));
+    assert!(matches!(err, hyg::web::store::StoreError::NoUpdateOperator));
 
     // queries miss cleanly
     assert!(store.find_one("c", o!{ "_id": "nope" }).unwrap().is_none());
@@ -104,7 +104,7 @@ fn data_store_metadata_files_are_not_documents() {
     let err = store
         .insert("c", o!{ "_id": id.clone(), "n": 99 })
         .unwrap_err();
-    assert!(matches!(err, hydrargyros::web::store::StoreError::DuplicateId(_)));
+    assert!(matches!(err, hyg::web::store::StoreError::DuplicateId(_)));
     let doc = store.find_one("c", o!{ "_id": id.clone() }).unwrap().unwrap();
     assert_eq!(doc.get("n").as_i64(), Some(1));
 
@@ -125,7 +125,7 @@ fn empty_query_matches_everything() {
     for n in 0..5 {
         store.insert("c", o!{ "n": n }).unwrap();
     }
-    assert_eq!(store.find("c", hydrargyros::Null).unwrap().len(), 5);
+    assert_eq!(store.find("c", hyg::Null).unwrap().len(), 5);
     assert_eq!(store.find("c", o!{}).unwrap().len(), 5);
 
     let _ = std::fs::remove_dir_all(&root);

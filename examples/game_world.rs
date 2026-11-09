@@ -6,11 +6,11 @@
 //! Run:
 //!   cargo run --example game_world --features physics,wgpu
 
-use hydrargyros::game::component::Component;
-use hydrargyros::game::physics::Shape;
-use hydrargyros::game::{Engine, Entity, HeadlessWindow, PhysicsBody, PhysicsWorld};
-use hydrargyros::var::Vec3;
-use hydrargyros::Var;
+use hyg::game::component::Component;
+use hyg::game::physics::Shape;
+use hyg::game::{Engine, Entity, HeadlessWindow, PhysicsBody, PhysicsWorld};
+use hyg::var::Vec3;
+use hyg::Var;
 
 struct FallReport {
     name: String,
@@ -59,17 +59,17 @@ fn main() {
         .physics_mut()
         .unwrap()
         .body_pose("ball")
-        .unwrap_or((Vec3::new(0.0, 0.0, 0.0), hydrargyros::var::Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+        .unwrap_or((Vec3::new(0.0, 0.0, 0.0), hyg::var::Quat { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
     println!("ball settled at y={:.3} (floor top is 0.5)", pos.y);
 
     // gold's screenshot debug aid, headless: render a frame, save it
     #[cfg(feature = "wgpu")]
     {
-        match pollster::block_on(hydrargyros::game::WgpuRenderer::new_offscreen(320, 180)) {
+        match pollster::block_on(hyg::game::WgpuRenderer::new_offscreen(320, 180)) {
             Ok(mut renderer) => {
-                use hydrargyros::game::RenderBackend;
+                use hyg::game::RenderBackend;
                 renderer.render_frame();
-                let path = "/tmp/hydrargyros_game_world.png";
+                let path = "/tmp/hyg_game_world.png";
                 let frame = renderer.screenshot();
                 let img: image::RgbaImage = image::ImageBuffer::from_raw(320, 180, frame.to_vec())
                     .expect("frame size mismatch");

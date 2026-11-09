@@ -1,5 +1,5 @@
 [package]
-name = "hydrargyros-derive"
+name = "hyg-derive"
 version = "0.1.0"
 edition = "2021"
 description = "Derive macros for Hydrargyros — FromVar turns a Var object into a typed struct for the hot path."

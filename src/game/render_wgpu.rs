@@ -359,7 +359,7 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
         }
     }
     let vertex_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-mesh-vbo"),
+        label: Some("hyg-mesh-vbo"),
         size: vbytes.len() as u64,
         usage: wgpu::BufferUsages::VERTEX,
         mapped_at_creation: true,
@@ -378,7 +378,7 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
         ibytes.extend_from_slice(&i.to_le_bytes());
     }
     let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-mesh-ibo"),
+        label: Some("hyg-mesh-ibo"),
         size: ibytes.len() as u64,
         usage: wgpu::BufferUsages::INDEX,
         mapped_at_creation: true,
@@ -452,11 +452,11 @@ fn create_pipelines(
     format: wgpu::TextureFormat,
 ) -> ScenePipelines {
     let quad_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("hydrargyros-quad"),
+        label: Some("hyg-quad"),
         source: wgpu::ShaderSource::Wgsl(WGSL_QUAD.into()),
     });
     let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("hydrargyros-mesh"),
+        label: Some("hyg-mesh"),
         source: wgpu::ShaderSource::Wgsl(WGSL_MESH.into()),
     });
 
@@ -543,7 +543,7 @@ fn create_pipelines(
         bias: wgpu::DepthBiasState::default(),
     };
     let quad_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("hydrargyros-quad"),
+        label: Some("hyg-quad"),
         layout: Some(&quad_pipe_layout),
         vertex: wgpu::VertexState {
             module: &quad_shader,
@@ -576,7 +576,7 @@ fn create_pipelines(
         bias: wgpu::DepthBiasState::default(),
     };
     let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("hydrargyros-mesh"),
+        label: Some("hyg-mesh"),
         layout: Some(&mesh_pipe_layout),
         vertex: wgpu::VertexState {
             module: &mesh_shader,
@@ -606,7 +606,7 @@ fn create_pipelines(
     });
 
     let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-scene"),
+        label: Some("hyg-scene"),
         size: SCENE_BYTES as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
@@ -620,13 +620,13 @@ fn create_pipelines(
         }],
     });
     let mesh_globals = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-mesh-globals"),
+        label: Some("hyg-mesh-globals"),
         size: MESH_GLOBALS_BYTES as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
     let lighting = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("hydrargyros-lighting"),
+        label: Some("hyg-lighting"),
         size: LIGHTING_BYTES as u64,
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
@@ -684,7 +684,7 @@ fn upload_texture(
     texture: &Texture,
 ) -> GpuTexture {
     let gpu = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("hydrargyros-texture"),
+        label: Some("hyg-texture"),
         size: wgpu::Extent3d {
             width: texture.width().max(1),
             height: texture.height().max(1),
@@ -719,7 +719,7 @@ fn upload_texture(
     );
     let view = gpu.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label: Some("hydrargyros-sampler"),
+        label: Some("hyg-sampler"),
         mag_filter: wgpu::FilterMode::Linear,
         min_filter: wgpu::FilterMode::Linear,
         // v0: no mipmaps — clamp instead of mipping
@@ -730,7 +730,7 @@ fn upload_texture(
         ..Default::default()
     });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hydrargyros-texture-bind"),
+        label: Some("hyg-texture-bind"),
         layout: tex_layout,
         entries: &[
             wgpu::BindGroupEntry {
@@ -755,7 +755,7 @@ fn depth_target(
     height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("hydrargyros-depth"),
+        label: Some("hyg-depth"),
         size: wgpu::Extent3d {
             width,
             height,
@@ -949,7 +949,7 @@ impl WgpuRenderer {
 
     fn offscreen_target(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hydrargyros-offscreen"),
+            label: Some("hyg-offscreen"),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -967,7 +967,7 @@ impl WgpuRenderer {
     fn offscreen_readback(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Buffer {
         let bytes_per_row = (width * 4).div_ceil(256) * 256;
         device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("hydrargyros-readback"),
+            label: Some("hyg-readback"),
             size: (bytes_per_row * height) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
@@ -1063,7 +1063,7 @@ impl WgpuRenderer {
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("hydrargyros-frame"),
+                label: Some("hyg-frame"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,

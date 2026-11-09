@@ -502,8 +502,8 @@ fn eval_with_args(
 /// single-mutator model means a script call mutates the context.
 ///
 /// ```
-/// use hydrargyros::script::{Script, ScriptError};
-/// use hydrargyros::Var;
+/// use hyg::script::{Script, ScriptError};
+/// use hyg::Var;
 ///
 /// # fn main() -> Result<(), ScriptError> {
 /// let mut script = Script::new("function greet(who) { return 'hi ' + who; }")?;

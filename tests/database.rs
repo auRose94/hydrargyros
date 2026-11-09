@@ -1,10 +1,10 @@
 //! The `database` facade — gold-shaped config in, collection handles out.
 
-use hydrargyros::web::database::Database;
-use hydrargyros::{a, o};
+use hyg::web::database::Database;
+use hyg::{a, o};
 
 fn temp_root(tag: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("hydrargyros_db_test_{tag}"));
+    let root = std::env::temp_dir().join(format!("hyg_db_test_{tag}"));
     let _ = std::fs::remove_dir_all(&root);
     root
 }
@@ -49,7 +49,7 @@ fn connect_get_collection_crud() {
 fn unknown_backend_is_refused() {
     match Database::connect(o!{ "backend": "redis", "name": "x", "path": "." }) {
         Ok(_) => panic!("unknown backend must not connect"),
-        Err(hydrargyros::web::store::StoreError::UnknownBackend(name)) => assert_eq!(name, "redis"),
+        Err(hyg::web::store::StoreError::UnknownBackend(name)) => assert_eq!(name, "redis"),
         Err(e) => panic!("wrong error: {e}"),
     }
 }
@@ -57,7 +57,7 @@ fn unknown_backend_is_refused() {
 #[test]
 fn defaults_apply_when_config_is_null() {
     // Null config = file backend, "db" name, "." path — connect succeeds
-    let db = Database::connect(hydrargyros::Null).unwrap();
+    let db = Database::connect(hyg::Null).unwrap();
     let c = db.get_collection("smoke");
     let doc = c.insert(o!{ "ok": true }).unwrap();
     assert!(doc.get("_id").as_string().is_some());

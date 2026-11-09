@@ -1,6 +1,6 @@
 //! Function values: the `Func` container and the `func!` literal.
 
-use hydrargyros::{func, o, Func, Ty, Var};
+use hyg::{func, o, Func, Ty, Var};
 
 #[test]
 fn func_named_args() {

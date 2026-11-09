@@ -4,8 +4,8 @@
 
 #![cfg(feature = "wgpu")]
 
-use hydrargyros::game::RenderBackend;
-use hydrargyros::game::WgpuRenderer;
+use hyg::game::RenderBackend;
+use hyg::game::WgpuRenderer;
 
 /// sRGB-encode a linear value the way the hardware does for an
 /// Rgba8UnormSrgb target.
@@ -31,8 +31,8 @@ fn offscreen_frame_has_expected_pixels() {
     };
     renderer.set_clear_color([0.1, 0.2, 0.3, 1.0]);
     renderer.set_scene(&[
-        hydrargyros::game::Quad::rect([-0.3, 0.0], [0.2, 0.2], [0.0, 0.6, 0.0, 1.0]),
-        hydrargyros::game::Quad::rect([0.3, 0.0], [0.2, 0.2], [1.0, 0.4, 0.1, 1.0]),
+        hyg::game::Quad::rect([-0.3, 0.0], [0.2, 0.2], [0.0, 0.6, 0.0, 1.0]),
+        hyg::game::Quad::rect([0.3, 0.0], [0.2, 0.2], [1.0, 0.4, 0.1, 1.0]),
     ]);
     renderer.render_frame();
     let frame = renderer.screenshot();
@@ -60,6 +60,6 @@ fn offscreen_frame_has_expected_pixels() {
 
 #[test]
 fn renderer_implements_the_backend_trait() {
-    fn assert_backend<T: hydrargyros::game::RenderBackend>() {}
+    fn assert_backend<T: hyg::game::RenderBackend>() {}
     assert_backend::<WgpuRenderer>();
 }

@@ -86,9 +86,9 @@ button.secondary { background: #2a2e36; color: #e8e6e3; }
 </style></head>
 <body>
 <div id="glyph-wrap">
-  <h1 id="glyph" tabindex="0" aria-label="hydrargyros — scan to open this stream on another device" aria-expanded="false">__QR_SVG__</h1>
+  <h1 id="glyph" tabindex="0" aria-label="hyg — scan to open this stream on another device" aria-expanded="false">__QR_SVG__</h1>
   <div id="glyph-info" hidden>
-    <p class="brand">hydrargyros — Hg</p>
+    <p class="brand">hyg — Hg</p>
     <p>scan the code to open this stream on another device, or copy the link:</p>
     <code class="handoff-url" id="glyph-url">__HANDOFF_URL__</code>
     <p>the ☿ toolbox (top right) has the controls</p>
@@ -319,7 +319,7 @@ impl StreamingWindow {
         let state = ServerState(Arc::clone(&access));
 
         let handle = std::thread::Builder::new()
-            .name("hydrargyros-stream".to_string())
+            .name("hyg-stream".to_string())
             .spawn(move || {
                 let runtime = tokio::runtime::Builder::new_current_thread()
                     .enable_all()

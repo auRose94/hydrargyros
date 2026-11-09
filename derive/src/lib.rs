@@ -99,10 +99,10 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
             quote! {
                 #ident: {
                     let __v = __root.get(#key);
-                    if __v.ty() == ::hydrargyros::Ty::Null {
+                    if __v.ty() == ::hyg::Ty::Null {
                         ::std::default::Default::default()
                     } else {
-                        <#ty as ::hydrargyros::FromVar>::from_var(&__v)
+                        <#ty as ::hyg::FromVar>::from_var(&__v)
                             .map_err(|e| e.at(#label))?
                     }
                 }
@@ -111,7 +111,7 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
             quote! {
                 #ident: {
                     let __v = __root.get(#key);
-                    <#ty as ::hydrargyros::FromVar>::from_var(&__v)
+                    <#ty as ::hyg::FromVar>::from_var(&__v)
                         .map_err(|e| e.at(#label))?
                 }
             }
@@ -123,10 +123,10 @@ pub fn derive_from_var(input: TokenStream) -> TokenStream {
 
     quote! {
         #[automatically_derived]
-        impl #impl_generics ::hydrargyros::FromVar for #name #ty_generics #where_clause {
-            fn from_var(__root: &::hydrargyros::Var) -> ::std::result::Result<Self, ::hydrargyros::FromVarError> {
-                if !matches!(__root.ty(), ::hydrargyros::Ty::Object) {
-                    return ::std::result::Result::Err(::hydrargyros::FromVarError::new(
+        impl #impl_generics ::hyg::FromVar for #name #ty_generics #where_clause {
+            fn from_var(__root: &::hyg::Var) -> ::std::result::Result<Self, ::hyg::FromVarError> {
+                if !matches!(__root.ty(), ::hyg::Ty::Object) {
+                    return ::std::result::Result::Err(::hyg::FromVarError::new(
                         ::std::format!("expected object, found {}", __root.ty()),
                     ));
                 }

@@ -1,6 +1,6 @@
 //! CSS parser tests, ported from gold's webTest.cpp suite.
 
-use hydrargyros::web::css;
+use hyg::web::css;
 
 #[test]
 fn css_parser_rules_and_declarations() {
@@ -47,7 +47,7 @@ fn css_parser_important_flag_on_any_value_type() {
     assert_eq!(decl.get("color").as_str(), Some("red"));
     assert_eq!(decl.get("color!").as_bool(), Some(true));
     // no flag on the value without !important
-    assert_eq!(decl.get("z-index!").ty(), hydrargyros::Ty::Null);
+    assert_eq!(decl.get("z-index!").ty(), hyg::Ty::Null);
 }
 
 #[test]

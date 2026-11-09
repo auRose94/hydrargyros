@@ -9,8 +9,8 @@
 //!   curl -X POST localhost:8377/hit  -H 'content-type: application/json' -d '{"who":"bob"}'
 //!   curl localhost:8377/stats
 
-use hydrargyros::web::{get_var, post_var, serve};
-use hydrargyros::{a, o, Var};
+use hyg::web::{get_var, post_var, serve};
+use hyg::{a, o, Var};
 
 #[tokio::main]
 async fn main() {

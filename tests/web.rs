@@ -8,8 +8,8 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
-use hydrargyros::web::{get_var, post_var};
-use hydrargyros::{o, Var};
+use hyg::web::{get_var, post_var};
+use hyg::{o, Var};
 use tower::ServiceExt;
 
 fn post_json(uri: &str, body: &str) -> Request<Body> {

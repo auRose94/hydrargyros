@@ -76,7 +76,7 @@ rather than reinventing wheels.
   (`"user.stats.score": expected int, found string`), `rename`/`default`
   field options, and `Option`/`Vec`/nested-struct support. Prototyping code
   passes `Var`; the hot loop works with real types. Lives in the
-  `hydrargyros-derive` proc-macro crate, re-exported at `hydrargyros::FromVar`.
+  `hyg-derive` proc-macro crate, re-exported at `hyg::FromVar`.
 - Functions (done): `Func` carries a stable id, so `Var` equality compares
   functions by id — clones equal their original; fresh functions never compare
   equal. Still open: the id→Func registry for serde round-tripping.
@@ -86,7 +86,7 @@ rather than reinventing wheels.
 gold had a web/UI layer; Hydrargyros's web layer leans on Rust's mature HTTP
 ecosystem instead of reinventing it.
 
-*Server facade (gold parity) + the sibling parsers/store:* `hydrargyros::web`
+*Server facade (gold parity) + the sibling parsers/store:* `hyg::web`
 mirrors gold's `web::server` — `get`/`post`/`put`/`patch`/`delete`/`options`
 routes with `:param` and trailing-`*` patterns (gold's uWS conventions),
 requests staged as `Var` (`method`/`path`/`params`/`query`/`headers` + a body

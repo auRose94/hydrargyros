@@ -10,8 +10,8 @@
 //! conversion during assignment, so writes are an explicit method call:
 //!
 //! ```
-//! # use hydrargyros::Var;
-//! let v = Var::from(hydrargyros::o!{ "score": 0i64 });
+//! # use hyg::Var;
+//! let v = Var::from(hyg::o!{ "score": 0i64 });
 //! v.at("score").put(10i64);
 //! assert_eq!(v.get("score").as_i64(), Some(10));
 //! ```

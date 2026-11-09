@@ -2,10 +2,10 @@
 //! values, gold's perspective look-at + fov with the WebGPU z convention)
 //! and the Hydrargyros-native orbit controls over synthetic window events.
 
-use hydrargyros::game::camera::{Camera, OrbitController, Projection};
-use hydrargyros::o;
-use hydrargyros::var::Vec3;
-use hydrargyros::Var;
+use hyg::game::camera::{Camera, OrbitController, Projection};
+use hyg::o;
+use hyg::var::Vec3;
+use hyg::Var;
 
 /// Multiply a column-major 4×4 by a world point → the raw clip vector.
 fn transform(m: &[[f32; 4]; 4], p: Vec3) -> [f32; 4] {
