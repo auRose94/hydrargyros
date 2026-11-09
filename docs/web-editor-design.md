@@ -143,6 +143,23 @@ graph open the canvas instead of the script pane. Auth middleware, webhook
 pipelines, and whole API folders are graphs too; the test console drives
 real requests through the live graph, breakpoints and all.
 
+### Agentic drafts — designed here, delivered later, security-gated
+
+The `/api` surface already accepts headless clients ("CI, an AI agent") —
+an LLM service (local ollama for privacy, zai/deepseek via adapters) is
+just such a client, and the agentic transform lands **directly in the
+reviewable artifact**: prompt → *graph draft*, skipping prompt → code
+entirely. The enduser visually scans a graph — no programming knowledge
+needed to judge it — and conversion-as-validation gives the model its own
+compile errors as feedback. Generated regression suites seed from saved
+test-console requests; database scaffolding seeds from the data
+designer's observed shapes. **None of it ships before the security floor**
+([dynamic-design.md](dynamic-design.md)): generated artifacts run in the
+wasmtime sandbox, credential paths are policy-screened (salted+hashed or
+rejected — the host enforces it, the prompt can't argue), and nothing
+applies without the enduser's visual scan. The human gate *is* the
+product.
+
 ### Data designer
 
 Collections listed with field inference from existing documents (the store

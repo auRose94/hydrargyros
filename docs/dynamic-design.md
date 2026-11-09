@@ -97,18 +97,20 @@ This buys the tooling almost for free:
 
 ## FFI plugins — the trusted tier
 
-A native plugin is a shared library with one mandated export:
+A native plugin is a shared library built against **`abi_stable`** —
+layout-stable Rust types across the boundary (`RString`/`RVec`/
+`RBoxError`), so plugins pass rich signatures without hand-rolling a C
+data protocol whose pointer rules would fight Rust's ownership model
+(decided: C-ABI's universality isn't worth its data-safety cost when every
+consumer we care about speaks Rust or WASM). One mandated export returns
+the plugin manifest — a `.json.hyg` Var riding an `RString`: id, version,
+ABI version, the functions it offers (name, pins/signature), and the
+permissions it wants.
 
-```c
-// returns a plugin manifest — a .json.hyg Var: id, version, ABI version,
-// the functions it offers (name, pins/signature), the permissions it wants
-char const* hyg_plugin_manifest(void);
-```
-
-The host loads it (`libloading`-style `dlopen`/`LoadLibrary`), checks the
-ABI version, reads the manifest, and registers each offered function into
-the same callable registry script functions live in — **plugins, scripts,
-and graph function nodes are three faces of one function table.**
+The host loads it (abi_stable's library loading), checks the ABI version,
+reads the manifest, and registers each offered function into the same
+callable registry script functions live in — **plugins, scripts, and
+graph function nodes are three faces of one function table.**
 
 **Hot reload for always-up processes**, the watch-based-stop pattern again:
 the new library version loads side-by-side (never over a mapped file), the
@@ -120,7 +122,12 @@ the admin/console (web) or the console panel (Studio).
 Native FFI is **trusted mode**: it can crash the process and sees raw
 pointers. The manifest's `permissions` field is honored where host APIs can
 enforce it (which registry namespaces a plugin may register into); the real
-security boundary for anything less trusted is WASM.
+security boundary for anything less trusted is WASM — **wasmtime** (decided:
+standards-compliant, mature, and its cranelift backend is already in the
+dependency tree via v12's JIT). wasmtime is also the indirect door for
+every language without an FFI story: anything that can emit WebAssembly —
+Rust, AssemblyScript, even C via emscripten — becomes a *sandboxed* plugin
+with no native ABI involved.
 
 ## Script engines — v12 first, registry-open
 
@@ -131,6 +138,48 @@ globals/call/register — today's `Script` surface), and `v12` registers as
 they route through the registry — so existing code and tests don't move.
 Future backends slot in without touching call sites (a Lua, a second JS,
 or a WASM runtime are all "engines" that compile to the same Var bridge).
+
+## Agentic assistance — the seam is designed; security matures first
+
+The editor surfaces are already programmatic: Press's `/api` accepts
+headless clients ("CI, an AI agent"), and the graph canvas is a viewport
+that vision-capable models can operate through the same editor APIs a
+human uses. An LLM service — **ollama or other local models for privacy,
+zai/deepseek/cloud via an adapter seam** (adapters are themselves dynamic
+plugins — the framework dogfoods its own extension story) — is just such
+a client. The pitch for endusers:
+
+- **Prompt → graph draft, skipping prompt → code.** The agentic transform
+  lands directly in the reviewable artifact: a graph the enduser can
+  visually scan and validate without programming knowledge. And the loop
+  is self-correcting by construction — **conversion IS validation**, so
+  the model's own compile errors (with node/pin coordinates) are its
+  feedback signal, no benchmark harness required.
+- **Unit tests and database scaffolding on request** — the test console's
+  saved requests seed generated regression suites; the data designer's
+  observed shapes scaffold collections the generated graphs target.
+- **The harness acts upon itself**: hyg talking to hyg — admin API,
+  dynamic plugins, real-traffic console — a built-in harness for the whole
+  framework, in the same sense the Studio's step-the-pump design serves a
+  human editor.
+
+**Security maturity is the hard prerequisite, and it's on the host, not
+the model.** Nothing agentic ships before this floor exists:
+
+- **Sandboxing** — generated artifacts run in the wasmtime tier by default;
+  native-FFI generation is never offered by the harness.
+- **Encryption** — secrets at rest; credential paths use the framework's
+  salted+hashed primitives (the admin-token hashing pattern, generalized).
+- **Enforcement** — policy gates between generation and apply: generated
+  graphs/manifests are statically screened (a credential-handling path
+  that doesn't route through the hashing primitives is rejected, whatever
+  the prompt asked for), and **nothing applies without the enduser's
+  visual scan** — the graph draft is the human gate, by design.
+
+Status: deliberately outside the milestones below. It's written down now
+so the formats (graph schema, manifest permissions, editor APIs) don't
+paint the ecosystem into a corner — the agentic layer is a *client* of
+seams this document already creates.
 
 ## Module shape
 
@@ -180,21 +229,15 @@ already has its shape, so the ecosystem can arrive without a format break.
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
 | M0 | Engine registry | `ScriptEngine` trait + registry; v12 loads through it; `script` feature and all its tests unchanged and green |
-| M1 | FFI plugins | manifest load, function registration, hot-swap with drain on a live server; a test plugin built in CI proves the ABI |
+| M1 | FFI plugins | abi_stable manifest load, function registration, hot-swap with drain on a live server; a test plugin built in CI proves the boundary |
 | M2 | Graph model | the Var schema round-trips `.json.hyg`; pins/wires validate structurally; feature-free |
 | M3 | Graph → JS | routes defined as graphs run end-to-end; every conversion failure reports `{node, pin, flow}` |
 | M4 | Graph → Rust | the native path; generated source compiles; span remapping keeps errors in graph coordinates |
 | M5 | Debugger + inspector | breakpoints/watches step a live route and a live frame; doc links resolve |
-| M6 | WASM tier | a sandboxed plugin compiles and runs; permissions enforced at the host boundary |
+| M6 | WASM tier | wasmtime: a sandboxed plugin compiles and runs; permissions enforced at the host boundary |
 
 ## Open questions
 
-- **ABI strategy** — hand-rolled `extern "C"` (as sketched) vs a framing
-  crate (`abi_stable`) for richer signatures. Lean C-ABI first: the
-  manifest is data, so complex values can cross as JSON/`Var` text and
-  only hot paths ever need raw pointers.
-- **WASM runtime choice** — wasmtime is the obvious wheel; note v12 already
-  pulls cranelift, so the dependency may be partly shared. Decide at M6.
 - **Graph → WASM path** — direct emit vs Rust-target compile. The Rust
   path reuses M4's validation; direct emit may win for size. Prototype
   both before promising.
@@ -204,3 +247,8 @@ already has its shape, so the ecosystem can arrive without a format break.
   nodes automatically).
 - **Graph versioning** — same story as scene schemas: `format` field plus
   per-node migrations as `Var → Var` functions.
+- **Agentic adapter surface** — which providers first (local ollama is the
+  privacy default), and how policy gates are expressed: as a static
+  screen over the graph document, or as host-enforced capability limits
+  on the adapter. The enforcement floor (sandboxing, encryption, policy
+  gates) must exist before any of this lands.

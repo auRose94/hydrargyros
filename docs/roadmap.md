@@ -360,7 +360,17 @@ The port rung queue is closed; new work branches from these items:
    validation** (errors carry node/pin coordinates and the flow chain —
    the graph's stack trace). Debugger + inspector with doc links serve
    both modules; route APIs as event graphs land in Hydrargyros Press.
-   Marketplace seams designed now, publishing built later.
+   Marketplace seams designed now, publishing built later. **Decisions
+   locked:** `abi_stable` at the FFI boundary (Rust-shaped signatures —
+   raw C pointer protocols fight ownership), **wasmtime** as the WASM
+   runtime (standards-compliant; cranelift is already in-tree via v12;
+   emscripten-compiled C rides in *sandboxed*, no native ABI involved).
+   The **agentic seam** — prompt → graph draft for enduser visual scan,
+   generated regression suites and database scaffolding, ollama/zai/
+   deepseek adapter clients — is designed but deliberately outside the
+   milestones until the security floor lands: wasmtime sandboxing by
+   default, encryption, and host-enforced policy gates (credential paths
+   salted+hashed or rejected; nothing applies without the human scan).
 
 ## What hyg will NOT do
 

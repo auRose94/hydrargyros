@@ -192,6 +192,10 @@ same id; the thread-local context pool rematerializes — the pool keyed by
 script id is the reload seam). The `transform` global the seam exposes is
 what the inspector's transform row shows — script and inspector write the
 same shared `Arc<Mutex<Transform>>`, so scripted motion is visible in both.
+The `dynamic` module's graphs ([dynamic-design.md](dynamic-design.md))
+attach through the same seam (graph nodes become the component's hooks),
+and its agentic drafting — prompt → graph draft the developer scans in
+this viewport — is the later, security-gated layer on top.
 
 ### Asset pipeline
 
