@@ -11,12 +11,18 @@
 //!   [`FunctionMeta`](functions::FunctionMeta) descriptor. Plugins,
 //!   scripts, and (at the graph milestone) function nodes all land here.
 //! - [`ffi`] — native FFI plugins (M1, behind `dynamic-ffi`): the
-//!   trusted tier, hot-swappable while the process stays up. Visual
-//!   graphs and the WASM tier branch from the roadmap's design.
+//!   trusted tier, hot-swappable while the process stays up.
+//! - [`graph`] — the graph tier (M2): the `.hyg` graph-document schema
+//!   and its structural validation (feature-free). The compilers —
+//!   graph → JavaScript / Rust / WASM, where **conversion IS
+//!   validation** — branch from here.
+//!
+//! and the WASM tier branches after the compilers.
 
 pub mod engine;
 #[cfg(feature = "dynamic-ffi")]
 pub mod ffi;
 pub mod functions;
+pub mod graph;
 #[cfg(feature = "script")]
 pub mod v12;

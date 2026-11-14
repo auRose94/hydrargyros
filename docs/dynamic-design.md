@@ -52,8 +52,8 @@ exchange big graphs. Schema sketch:
     { "id": "resp1", "type": "web/respond", "pos": [560, 110] }
   ],
   "wires": [
-    { "from": "req1", "pin": "exec", "to": "branch1", "pin": "exec_in" },
-    { "from": "req1", "pin": "body", "to": "branch1", "pin": "in" }
+    { "from": "req1", "from_pin": "exec", "to": "branch1", "to_pin": "exec_in" },
+    { "from": "req1", "from_pin": "body", "to": "branch1", "to_pin": "in" }
   ],
   "entry": ["req1"]
 }

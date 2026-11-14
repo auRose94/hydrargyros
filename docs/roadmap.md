@@ -400,7 +400,38 @@ The port rung queue is closed; new work branches from these items:
    version's call completes correctly, new calls already hit v2), and the
    live-server swap — a slow HTTP request enters v1, the reload drains
    it, the request completes on v1, and the next request hits v2 with the
-   pump never stopping. Next rung: M2 (the graph model). The
+   pump never stopping.
+
+6c. **The `dynamic` module — M2 landed (2026-11-14): the graph model.**
+   `hyg::dynamic::graph::model` (feature-free, pure data): the `.hyg`
+   graph-document schema — `graph` (name), `format`, `nodes` (`id`,
+   `type`, editor `pos`, free-form `params`), `wires`
+   (`from`/`from_pin`/`to`/`to_pin`), `entry` — with structural
+   validation whose failures are `GraphError`s carrying **graph
+   coordinates** (`node`, `pin`, message, and the `flow` chain the
+   compilers will walk — empty for structural errors). The schema fixes
+   the design sketch's wire shape: the sketch put `"pin"` on both ends
+   of a wire, and duplicate JSON keys are unrepresentable — the landed
+   document names each side (`from_pin`/`to_pin`). Validation is
+   vocabulary-blind BY DESIGN: unique identifier node ids, wires and
+   entries landing on known nodes, named identifier pins, the format
+   gate (unknown `format` is an explicit error — migrations are the
+   versioning path, never best-effort) — but fan-out is legal, cycles
+   are legal (loops are real), and orphans/empty-entry sub-graphs are
+   legal. Pin TYPES are the compilers' job (**type checking is pin
+   checking**, at conversion — a graph is valid iff it converts, M3+).
+   Round-trips: `Var` → `.json.hyg` text → `Var` is identity (insertion
+   order survives Var's serde, verified against a real file);
+   `to_var` regenerates the canonical document (schema fields, sketch
+   order) — unknown extra fields are tolerated on read, dropped on
+   regeneration. 9 tests in `tests/dynamic_graph.rs` (core suite):
+   both round-trips, canonical regeneration, coordinate-carrying
+   validation failures (unknown wire endpoint, unknown entry, duplicate
+   id, non-identifier id, unnamed pins, format gate, path-voice shape
+   failures), and the deliberate tolerances (fan-out, cycle, bare
+   document, duplicate-wire refusal). Also: the M1 live-server test's
+   entry window widened to a bounded 5s poll (the 1s window was flaky
+   under full-suite parallel load). Next rung: M3 (graph → JS). The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the

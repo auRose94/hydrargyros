@@ -124,6 +124,8 @@ image = "0.25"
 # the QR scannability contract: the logo'd /qr decodes back to its URL
 # (tests/stream.rs) — a dev-dep, so the shipped feature set stays untouched
 rqrr = "0.8"
+# scratch .json.hyg files for the graph-model carrier tests
+tempfile = "3"
 
 [[example]]
 name = "web_demo"
