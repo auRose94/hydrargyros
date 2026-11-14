@@ -227,6 +227,48 @@ graph; a whole API is a folder of graphs with `:param` patterns on the
 entry nodes. The admin's test console drives a request through the live
 graph (real traffic, not mocks — the existing test philosophy).
 
+## Shader graphs — the material tier
+
+A second graph genre on the same model. Where event graphs are
+imperative — exec wires, control flow, side effects — a shader graph is
+**pure dataflow**: no exec pins, every wire carries a value, and the
+output node is the graph's contract. The M2 schema carries it unchanged
+(genre-blind by design was the bet; this is the proof): nodes are shader
+ops (math, vectors, noise, texture samples, UV, time, camera vector,
+lights), pins are GPU-shaped (`float`, `vec2/3/4`, `mat4x4`,
+`sampler2D` — the **second pin vocabulary** in the same registry),
+`params` are the node's uniform values, and conversion IS validation —
+a `vec3` wired into a `float` pin is an error naming both ends, before
+any WGSL exists.
+
+The compiler targets **WGSL** — the graph document stays authoritative,
+generated WGSL is a build artifact, never hand-edited. Validation runs
+through **naga** (already in-tree via wgpu): the generator emits node
+markers into the generated source and naga's spans remap back to graph
+coordinates — the same trick the Rust path (M4) uses, so both compilers
+speak `{node, pin, flow}`. One genre-level refusal: **dataflow cycles
+are illegal here** (combinational loops) — the one place the M2 model's
+cycle tolerance meets a vocabulary that rejects it, reported like every
+other error.
+
+What is NOT free is the renderer. The mesh pipeline's material/lighting
+code is one fixed WGSL program; a material tier means entities carry a
+compiled material (module + bind group layout), the draw pass resolves
+materials per mesh, and the Studio viewport previews recompiled
+materials live (pipeline swap at a frame boundary — the streaming page
+is the natural preview surface). That is sized like the lights arc, not
+like a compiler. Fragment-only first (vertex graphs are a later rung);
+the quad scene's SDF shader stays fixed scene furniture.
+
+Positioning: Unreal's Material Editor is the *other* half of the
+Blueprint ecosystem's daily life. One graph model, two vocabularies,
+two compilers, one debugger — with the event tier, that makes hyg the
+engine where both halves are graph-first.
+
+Status: designed, deliberately **outside the milestones** until the
+event tier (M3–M6) lands — recorded now so the vocabulary registry and
+the span-remap seam don't get shaped blind by the first compiler.
+
 ## Marketplace seams (designed now, built later)
 
 The plugin manifest is the contract: `id`, `version`, `abi`, `trust:

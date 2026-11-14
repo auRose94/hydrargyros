@@ -431,7 +431,13 @@ The port rung queue is closed; new work branches from these items:
    failures), and the deliberate tolerances (fan-out, cycle, bare
    document, duplicate-wire refusal). Also: the M1 live-server test's
    entry window widened to a bounded 5s poll (the 1s window was flaky
-   under full-suite parallel load). Next rung: M3 (graph → JS). The
+   under full-suite parallel load). Next rung: M3 (graph → JS).
+   **Shader graphs** — the material tier: same M2 model, a GPU-shaped
+   second pin vocabulary, WGSL via naga (already in-tree via wgpu),
+   dataflow cycles illegal — are now recorded in the design doc,
+   deliberately outside the milestones until the event tier (M3–M6)
+   lands; the graph side is nearly free, the renderer material system
+   is the real arc. The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the
