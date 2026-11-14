@@ -107,10 +107,18 @@ the plugin manifest — a `.json.hyg` Var riding an `RString`: id, version,
 ABI version, the functions it offers (name, pins/signature), and the
 permissions it wants.
 
-The host loads it (abi_stable's library loading), checks the ABI version,
-reads the manifest, and registers each offered function into the same
-callable registry script functions live in — **plugins, scripts, and
-graph function nodes are three faces of one function table.**
+The host loads it, checks the ABI version, reads the manifest, and
+registers each offered function into the same callable registry script
+functions live in — **plugins, scripts, and graph function nodes are
+three faces of one function table.** *(Landed M1 with one refinement:
+abi_stable's `RootModule` loader turned out to cache the module in
+process-global statics — one load per process — and to leak the library
+by design, both incompatible with hot-swap. The loading mechanics are
+`libloading` instead, the same wheel abi_stable itself uses; the
+boundary keeps abi_stable's layout-stable types, and the manifest's ABI
+check plus the three plugin-author rules (default allocator, no unwind
+across the boundary, no thread-local state) carry the soundness role
+RootModule played.)*
 
 **Hot reload for always-up processes**, the watch-based-stop pattern again:
 the new library version loads side-by-side (never over a mapped file), the

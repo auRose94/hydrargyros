@@ -361,7 +361,46 @@ The port rung queue is closed; new work branches from these items:
    feature-free through a recording engine (the audio-`none` pattern).
    The new tests caught the module's first real bug on day one: a
    registry RwLock read-twice deadlock under parallel writer pressure.
-   Next rungs: M1 (abi_stable FFI plugins), M2 (the graph model). The
+
+6b. **The `dynamic` module — M1 landed (2026-11-14): FFI plugins, the
+   trusted tier.** `hyg::dynamic::ffi` (behind the `dynamic-ffi` feature)
+   loads native shared libraries as plugins: the mandated manifest export
+   returns the `.json.hyg` Var document (kept on the plugin for
+   introspection), the host checks the manifest's ABI version against its
+   own, and every offered function registers into the **shared callable
+   table** (`hyg::dynamic::functions`, feature-free — plugins, scripts,
+   and graph function nodes are three faces of one table) as
+   `"{plugin_id}.{fn}"` with pins mapped onto `Var`'s type vocabulary.
+   **Hot swap** works the always-up way: a new version loads from a
+   private side-by-side scratch copy (a rebuild that rewrites the source
+   file never touches a mapped mapping), the plugin's namespace swaps in
+   ONE atomic table write, in-flight calls drain against a bounded grace
+   period, and the old library unloads exactly when the last in-flight
+   call releases it (callers hold an `Arc` across the call — never
+   unloaded under itself). A failed load or a different plugin's id swaps
+   nothing; the serving version keeps serving. **Decision refined, not
+   reversed:** abi_stable stays at the boundary for its layout-stable
+   types (`RString`/`RVec`/`RBoxError`), but its `RootModule` loader was
+   rejected after source verification — it caches the module in
+   process-global statics (one load per process) and leaks the library by
+   design, both incompatible with hot-swap. The mechanics are libloading
+   (the same wheel abi_stable itself uses); the manifest ABI check plus
+   the abi_stable data guarantee carry the safety role RootModule played.
+   The contract lives in the **`hyg-plugin-api`** crate (workspace
+   member): `DYNAMIC_ABI`, the manifest types, the mandated export
+   signatures, and the three author rules (default system allocator,
+   never unwind across the boundary, no `thread_local!` — each keeps a
+   hot-unloadable library sound). The boundary is proven by an
+   **out-of-tree test plugin** (`tests/ffi-plugin/`, excluded from the
+   workspace — the third-party shape, depending on nothing but
+   hyg-plugin-api + abi_stable + serde_json) built on demand by the
+   tests: 5 boundary tests cover manifest/registration/calls, ABI-liar
+   and corrupt-file refusals that swap nothing, in-place rebuild + reload
+   (v1→v2 under the same process), the drain-grace timeout (the retired
+   version's call completes correctly, new calls already hit v2), and the
+   live-server swap — a slow HTTP request enters v1, the reload drains
+   it, the request completes on v1, and the next request hits v2 with the
+   pump never stopping. Next rung: M2 (the graph model). The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the

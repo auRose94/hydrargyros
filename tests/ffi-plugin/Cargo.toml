@@ -1,0 +1,19 @@
+# The out-of-tree test plugin — the third-party shape on purpose: it lives
+# OUTSIDE the workspace (excluded in the root Cargo.toml), depends on
+# hyg-plugin-api + abi_stable + serde_json and nothing else, and is built
+# on demand by tests/dynamic_ffi.rs into their own target dir. A plugin
+# author's project looks like this one.
+[package]
+name = "hyg-test-greeter"
+version = "0.1.0"
+edition = "2021"
+description = "hyg's boundary-proof test plugin: a version-baked greeter that hot-swap tests reload under live traffic."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+abi_stable = "0.11"
+hyg-plugin-api = { path = "../../plugin-api" }
+serde_json = "1"

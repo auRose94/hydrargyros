@@ -6,7 +6,11 @@ description = "Hydrargyros — a Rust reimagining of gold (the Greek name for me
 license = "MIT"
 
 [workspace]
-members = ["derive"]
+members = ["derive", "plugin-api"]
+# the test plugin is deliberately OUT of the workspace: a plugin is an
+# out-of-tree crate (the third-party shape), built on demand by the
+# dynamic-ffi tests into their own target dir
+exclude = ["tests/ffi-plugin"]
 
 # Dependencies:
 # - indexmap: gold's object preserves insertion order; indexmap is the wheel
@@ -25,6 +29,10 @@ indexmap = "2"
 serde = { version = "1", features = ["derive"] }
 # FromVar: the typed hot-path seam (re-exported as hyg::FromVar)
 hyg-derive = { path = "derive", version = "0.1.0" }
+# the FFI plugin contract: mandated-export signatures + manifest types,
+# shared by the host (behind `dynamic-ffi`) and every plugin author
+# (unconditionally)
+hyg-plugin-api = { path = "plugin-api", version = "0.1.0", optional = true }
 # store documents are JSON files; http responses are JSON
 serde_json = "1"
 axum = { version = "0.8", features = ["ws"], optional = true }
@@ -53,6 +61,15 @@ qrcodegen = { version = "1.8", optional = true }
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 tokio-rustls = { version = "0.26", optional = true }
+# dynamic-ffi: layout-stable plugin boundary (RString/RVec/RBoxError) — the
+# trusted-tier plugin seam; loading mechanics via libloading (abi_stable's
+# RootModule path is single-load-per-process and leak-by-design — the pivot
+# note lives in src/dynamic/ffi.rs)
+abi_stable = { version = "0.11", optional = true }
+libloading = { version = "0.8", optional = true }
+# dynamic-ffi: side-by-side scratch copies of plugin libraries (each loaded
+# version maps its own file, never the one the build system writes)
+tempfile = { version = "3", optional = true }
 
 # tray deps are target-split: Linux renders the glyph through GTK
 # (libappindicator), Windows/macOS use tray-icon's native backends. The
@@ -88,6 +105,9 @@ gltf = ["dep:gltf"]
 image = ["dep:image"]
 # script: the v12 interpreter seam (gold's script facade; scripted components)
 script = ["dep:v12-api"]
+# dynamic-ffi: native FFI plugins (the trusted tier) — abi_stable boundary,
+# manifest load, hot-swap with drain. The graph tier (M2+) sits on top.
+dynamic-ffi = ["dep:abi_stable", "dep:libloading", "dep:tempfile", "dep:hyg-plugin-api"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -148,3 +168,9 @@ required-features = ["audio"]
 [[example]]
 name = "game_tray"
 required-features = ["tray"]
+
+# the FFI boundary proof: builds the out-of-tree test plugin, loads it,
+# hot-swaps it under live traffic (tests/ffi-plugin is the plugin crate)
+[[test]]
+name = "dynamic_ffi"
+required-features = ["dynamic-ffi"]
