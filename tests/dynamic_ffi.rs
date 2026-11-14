@@ -398,13 +398,19 @@ mod live_server {
         // request hits v2 — the pump never stops
         let slow_addr = addr.clone();
         let slow = tokio::spawn(async move { http(&slow_addr, "/slow/400").await });
-        for _ in 0..500 {
-            if plugin.in_flight() >= 1 {
-                break;
+        // bounded but generous: under full-suite parallel load the request
+        // can take a while to get dispatched — never sleep-and-hope on a
+        // 1s window
+        let entered = tokio::time::timeout(Duration::from_secs(5), async {
+            while plugin.in_flight() < 1 {
+                tokio::time::sleep(Duration::from_millis(2)).await;
             }
-            tokio::time::sleep(Duration::from_millis(2)).await;
-        }
-        assert!(plugin.in_flight() >= 1, "the slow request entered v1");
+        })
+        .await;
+        assert!(
+            entered.is_ok(),
+            "the slow request entered v1 within the window"
+        );
 
         let v2 = build_plugin(&[("HYG_PLUGIN_ID", id), ("HYG_PLUGIN_VERSION", "0.2.0")]);
         let report = plugin.reload(&v2, Duration::from_secs(5)).expect("reload");
