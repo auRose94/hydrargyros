@@ -70,6 +70,10 @@ libloading = { version = "0.8", optional = true }
 # dynamic-ffi: side-by-side scratch copies of plugin libraries (each loaded
 # version maps its own file, never the one the build system writes)
 tempfile = { version = "3", optional = true }
+# dynamic-wasm: the sandboxed plugin tier — wasmtime runs untrusted modules
+# with no ambient authority wired (no WASI: no fs, no net, no clock); the
+# `wat` feature lets tests author plugins as text modules
+wasmtime = { version = "48", optional = true, default-features = false, features = ["cranelift", "runtime", "wat"] }
 
 # tray deps are target-split: Linux renders the glyph through GTK
 # (libappindicator), Windows/macOS use tray-icon's native backends. The
@@ -108,6 +112,9 @@ script = ["dep:v12-api"]
 # dynamic-ffi: native FFI plugins (the trusted tier) — abi_stable boundary,
 # manifest load, hot-swap with drain. The graph tier (M2+) sits on top.
 dynamic-ffi = ["dep:abi_stable", "dep:libloading", "dep:tempfile", "dep:hyg-plugin-api"]
+# dynamic-wasm: the sandboxed plugin tier — wasmtime runs untrusted modules
+# with no ambient authority wired (no WASI: no fs, no net, no clock)
+dynamic-wasm = ["dep:wasmtime", "dep:hyg-plugin-api"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -176,3 +183,9 @@ required-features = ["tray"]
 [[test]]
 name = "dynamic_ffi"
 required-features = ["dynamic-ffi"]
+
+# the WASM sandbox proof: a WAT plugin loads, calls, and is gated by the
+# host's permission grant (tests/wasm-plugin? inline WAT template)
+[[test]]
+name = "wasm_plugin"
+required-features = ["dynamic-wasm"]

@@ -201,11 +201,15 @@ src/dynamic/
                  # file in the repo allowed `unsafe` outside wgpu backends)
   graph/
     model.rs     # the graph Var schema — pure data, NO feature gate
+    spec.rs      # the vocabulary + the ONE conversion checker (shared)
     to_js.rs     # graph → JS compiler + validation errors
     route.rs     # graph routes through the script seam (script + web)
     to_rust.rs   # graph → Rust source compiler + span remapping
-    wasm.rs      # graph/WASM plugin target (sandboxed tier)
-  debug.rs       # breakpoints/watches/flow-chain traces
+    debug.rs     # the debugger: an interpreter — breakpoints, watches,
+                 # stepping; one implementation for both modules
+    inspect.rs   # the inspector: descriptor documents with doc links
+  wasm.rs        # the sandboxed plugin tier (wasmtime; the graph → WASM
+                 # compiler is the follow-on arc)
 ```
 
 Feature gates (core stays lean): `dynamic-ffi`, `dynamic-wasm`,

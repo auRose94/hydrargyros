@@ -26,3 +26,5 @@ pub mod functions;
 pub mod graph;
 #[cfg(feature = "script")]
 pub mod v12;
+#[cfg(feature = "dynamic-wasm")]
+pub mod wasm;

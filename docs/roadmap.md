@@ -548,7 +548,44 @@ The port rung queue is closed; new work branches from these items:
    (panicked task vs stalled dispatch) and M4's generated-crate builds
    moved to their own target dir — the intermittent 5s-window flake
    under full-suite load is retired with evidence. Next rung: M6 (the
-   WASM tier). The
+   WASM tier).
+
+6g. **The `dynamic` module — M6 landed (2026-11-14): the WASM tier, the
+   milestone queue complete.** `hyg::dynamic::wasm` (behind
+   `dynamic-wasm` — wasmtime 48 with cranelift+runtime+wat, no default
+   features): a sandboxed plugin compiles and runs, and **permissions
+   are enforced at the host boundary before anything registers**. The
+   contract is the wasm mirror of the native plugin: exports `memory`,
+   `alloc` (the guest's own bump allocator — the host writes ONLY into
+   what alloc returned), `hyg_manifest` (the SAME `.json.hyg` Var
+   document), and `hyg_call` (the dispatcher, JSON in/out — the same
+   wire as the script bridge). The trust difference is the HOST, not
+   the data: **no imports are bound** — no WASI, so no filesystem, no
+   network, no clock; the module's whole world is its own memory and
+   the bytes the host hands it. The manifest's requested permissions
+   must be a subset of the host's capability grant
+   (`load_wasm_plugin`'s `grants`) or the load refuses naming both
+   sides; a broken guest allocator refuses loudly instead of writing
+   into memory it does not own; missing mandated exports are explicit
+   `Export` errors; an ABI-liar module refuses like its native
+   sibling. Functions register into the SAME function table
+   (`wasm:{id}:{version}` origins) — plugins of both tiers, scripts,
+   and graph function nodes remain three faces of one table. The test
+   plugin is authored as **WAT** (wasmtime parses text modules — the
+   boundary proof needs no wasm32 toolchain; Rust→wasm32 via
+   `rustup target add wasm32-unknown-unknown` is the authoring path
+   for real plugins): 5 tests in `tests/wasm_plugin.rs` — load,
+   manifest round trip, the FULL wire round trip (`echo` copies the
+   args JSON verbatim through guest memory: ordered objects and nested
+   shapes survive), permission refusal, ABI refusal, missing-export
+   refusal, broken-allocator refusal. The milestone queue M0–M6 is
+   complete: the engine registry, native FFI plugins, the graph model,
+   two graph compilers (JS + Rust), the debugger + inspector, and the
+   WASM sandbox — the dynamic module's whole shape, with the agentic
+   seam's security floor (sandboxing, permission gates) now standing.
+   The graph→WASM compiler (graphs compiling INTO the sandbox) is the
+   natural next arc, alongside the editor surfaces that consume all of
+   it. The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the
