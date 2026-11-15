@@ -4,10 +4,16 @@
 //! authoring, `.cbor.hyg` when machines exchange big graphs).
 //!
 //! [`model`] is the document schema and its structural validation —
-//! pure data, no feature gate, like the web siblings. The compilers
-//! (graph → JavaScript, graph → Rust, graph → WASM) branch from here:
-//! **a graph is valid if and only if it converts**, so every structural
-//! question this layer can answer, it answers before a compiler ever
-//! sees the document.
+//! pure data, no feature gate, like the web siblings. [`to_js`] is the
+//! first compiler (M3): conversion IS validation, and its failures walk
+//! the flow chain. [`route`] runs compiled graphs through the script
+//! seam on a live web server. The Rust (M4) and WASM (M6) compilers
+//! branch from here.
 
 pub mod model;
+pub mod to_js;
+
+// a graph route needs an engine to run the generated JS and the web
+// layer to serve it
+#[cfg(all(feature = "script", feature = "web"))]
+pub mod route;

@@ -202,6 +202,7 @@ src/dynamic/
   graph/
     model.rs     # the graph Var schema — pure data, NO feature gate
     to_js.rs     # graph → JS compiler + validation errors
+    route.rs     # graph routes through the script seam (script + web)
     to_rust.rs   # graph → Rust source compiler + span remapping
     wasm.rs      # graph/WASM plugin target (sandboxed tier)
   debug.rs       # breakpoints/watches/flow-chain traces

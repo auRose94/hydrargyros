@@ -437,7 +437,44 @@ The port rung queue is closed; new work branches from these items:
    dataflow cycles illegal — are now recorded in the design doc,
    deliberately outside the milestones until the event tier (M3–M6)
    lands; the graph side is nearly free, the renderer material system
-   is the real arc. The
+   is the real arc.
+
+6d. **The `dynamic` module — M3 landed (2026-11-14): graph → JS, the
+   first compiler.** `hyg::dynamic::graph::to_js` (feature-free — the
+   JS source is data until an engine runs it): a graph compiles to one
+   `__hyg_handle(req)` function where **conversion IS validation** —
+   kinds resolve, wires land on real pins of matching types, entry
+   nodes are entry-capable, and every failure is a `GraphError` with
+   graph coordinates; cycle failures walk the chain (the graph's stack
+   trace: exec and data cycles both carry their own cycle as `flow`,
+   read `a → b → a`). The M3 vocabulary: `web/request` (the staged
+   request's params/query/headers/body as data outs), `web/respond`
+   (a `return`; a path that never reaches one reads `Null` through the
+   bridge — the undefined payload is already the protocol),
+   `flow/branch` (then/else), pure expression nodes inlined at their
+   use sites (`data/get`, `data/literal`, `math/compare`), and — the
+   M1 sentence made load-bearing — **function nodes**: a node whose
+   kind is a callable name (`js_route_greet`, `greeter.greet`) gets
+   its pins FROM the callable's `FunctionMeta` and dispatches through
+   a host binding into [`call_function`], the same table plugins
+   registered into. Codegen is straight-line Blueprint semantics:
+   non-pure data outs are function-scope lets (values produced in a
+   branch flow out of it), pure nodes inline (a pure cycle is an
+   expression cycle, caught at conversion), exec fan-out walks
+   sequentially, converging paths re-execute the shared tail.
+   Unwired pins read `undefined` (JS falsy rules; pin defaults are an
+   editor concern until a vocabulary carries them). `route.rs`
+   (script + web) materializes a compiled route as a `Script` — the
+   `Send + Sync` handle over the thread-local session pool, one v12
+   session per tokio worker — and serves it: 13 tests, including
+   graph routes on a live server (`{"who":"Rose"}` → `"hello,
+   Rose!"` through a function node, both sides of a branch driven by
+   real request bodies, a failing callable a loud 500). One
+   conversion-order voice decision: shape/type errors fail before
+   anything executes, so their `flow` is empty like the model's
+   structural errors; only cycles walk a chain (nothing was executing
+   — or what executed IS the cycle). Next rungs: M4 (graph → Rust),
+   then M5 (debugger + inspector), M6 (WASM tier). The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the
