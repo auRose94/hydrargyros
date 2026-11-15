@@ -474,7 +474,40 @@ The port rung queue is closed; new work branches from these items:
    anything executes, so their `flow` is empty like the model's
    structural errors; only cycles walk a chain (nothing was executing
    — or what executed IS the cycle). Next rungs: M4 (graph → Rust),
-   then M5 (debugger + inspector), M6 (WASM tier). The
+   then M5 (debugger + inspector), M6 (WASM tier).
+
+6e. **The `dynamic` module — M4 landed (2026-11-14): graph → Rust, the
+   native path.** **A compiled graph is a plugin.** The architecture
+   refactor first: M3's conversion checker moved to
+   `hyg::dynamic::graph::spec` — ONE validation pass (now including
+   pure-node params) that both compilers share, so they can never
+   disagree about what is valid; generators run only on a checked
+   graph and trust it (emission is mechanical). `to_rust.rs` emits a
+   **self-contained plugin crate** — the hyg-plugin-api contract's two
+   mandated exports around a Var-native `fn route(req: &Var) ->
+   Result<Var, String>` with NO JSON on the inside (marshaling once at
+   the plugin boundary): `data/get` is `Var::get`, `data/literal`
+   embeds its conversion-checked JSON, `math/compare` generates a
+   numeric-then-string comparator yielding `Var::Bool`, respond is a
+   `return Ok(...)` with `Ok(Var::Null)` fall-through (the JS path's
+   undefined-reads-as-Null contract, native). **Function nodes link
+   against project Rust** — the Blueprint→C++ story: `RustVocabulary`
+   binds a callable name to a Rust path (convention
+   `fn(&[Var]) -> Result<Var, String>`), the generated crate declares
+   the dependency, and a binding whose signature disagrees with the
+   function table's `FunctionMeta` is a conversion error (the JS and
+   Rust compilers may never disagree about a graph). Node markers
+   (`// [hyg:node:<id>]` before every node's code) + rustc span
+   remapping: when the generated source fails to build — the design's
+   "rare, only host-API drift" case, proven by a test binding a path
+   that doesn't exist — the failure re-reports as a `GraphError`
+   naming the node. The generated crate declares its own `[workspace]`
+   (it may live inside the host project's tree), and `build_generated`
+   shells the real toolchain: 6 tests in `tests/dynamic_graph_rust.rs`
+   drive the whole pipeline — generate, `rustc`, `load_plugin` through
+   the M1 boundary, the route in the function table (`rust_route.handle`),
+   live HTTP serving `hello, Rose (native)!`, and the drift remap.
+   Next rung: M5 (debugger + inspector), then M6 (WASM tier). The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the
