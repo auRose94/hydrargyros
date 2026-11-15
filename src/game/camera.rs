@@ -50,6 +50,74 @@
 //! ```
 
 use crate::var::Vec3;
+use crate::{FromVar, FromVarError};
+
+impl FromVar for Projection {
+    fn from_var(v: &crate::var::Var) -> Result<Self, FromVarError> {
+        use crate::var::{Ty, Var};
+
+        if !matches!(v.ty(), Ty::Object) {
+            return Err(FromVarError::new(format!(
+                "expected {{ \"ortho\" | \"perspective\": … }}, found {}",
+                v.ty()
+            )));
+        }
+        let ortho = v.get("ortho");
+        let perspective = v.get("perspective");
+        match (
+            !matches!(ortho, Var::Null),
+            !matches!(perspective, Var::Null),
+        ) {
+            (true, true) => Err(FromVarError::new(
+                "one projection per camera — both \"ortho\" and \"perspective\" present",
+            )),
+            (false, false) => Err(FromVarError::new(
+                "expected { \"ortho\": … } or { \"perspective\": … }",
+            )),
+            (true, false) => {
+                let Some(half_extents) = super::scene::opt_field(&ortho, "half_extents") else {
+                    return Err(FromVarError::new(
+                        "\"ortho\" needs \"half_extents\" [x, y, z]",
+                    )
+                    .at("ortho.half_extents"));
+                };
+                Ok(Projection::Orthographic {
+                    half_extents: super::scene::SceneVec3::from_var(&half_extents)
+                        .map_err(|e| e.at("ortho.half_extents"))?
+                        .0,
+                })
+            }
+            (false, true) => {
+                // sensible numeric defaults; aspect stays explicit on save
+                // (16:9 — the scene spec)
+                let mut fov_y_degrees = 60.0f32;
+                let mut near = 0.1f32;
+                let mut far = 100.0f32;
+                let mut aspect = 16.0 / 9.0;
+                if let Some(fov) = super::scene::opt_field(&perspective, "fov") {
+                    fov_y_degrees =
+                        super::scene::scene_f32(&fov).map_err(|e| e.at("perspective.fov"))?;
+                }
+                if let Some(n) = super::scene::opt_field(&perspective, "near") {
+                    near = super::scene::scene_f32(&n).map_err(|e| e.at("perspective.near"))?;
+                }
+                if let Some(f) = super::scene::opt_field(&perspective, "far") {
+                    far = super::scene::scene_f32(&f).map_err(|e| e.at("perspective.far"))?;
+                }
+                if let Some(a) = super::scene::opt_field(&perspective, "aspect") {
+                    aspect =
+                        super::scene::scene_f32(&a).map_err(|e| e.at("perspective.aspect"))?;
+                }
+                Ok(Projection::Perspective {
+                    fov_y_degrees,
+                    near,
+                    far,
+                    aspect,
+                })
+            }
+        }
+    }
+}
 
 /// The projection mode: the perspective 3D camera, or the orthographic
 /// v0 2D window kept for the quad scene.

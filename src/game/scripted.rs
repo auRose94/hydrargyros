@@ -55,18 +55,21 @@
 //! errors when the script breaks the `transform` shape.
 
 use std::any::Any;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use super::component::{Component, Priority};
 use super::transform::Transform;
 use crate::lock;
+use crate::object::Object;
 use crate::script::{Script, ScriptError};
 use crate::var::{Quat, Var, Vec3};
+use crate::FromVarError;
 
 /// The script function names the lifecycle dispatches to — the standard
 /// hook names by default, renamable so two scripted components can share one
 /// script's functions (e.g. `"tick"` instead of `"update"`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HookNames {
     /// Called once, the first frame the component exists in the engine.
     pub initialize: String,
@@ -98,6 +101,10 @@ pub struct ScriptedComponent {
     transform: Arc<Mutex<Transform>>,
     hooks: HookNames,
     priority: Priority,
+    /// The script file path a scene document named this component from —
+    /// what the save side writes back (`source`). `None` for scripts built
+    /// from inline source, which are runtime-only in scenes.
+    source_path: Option<String>,
 }
 
 impl ScriptedComponent {
@@ -132,6 +139,7 @@ impl ScriptedComponent {
             transform: Arc::clone(&transform),
             hooks,
             priority: Priority::Generic,
+            source_path: None,
         };
         component.arm_bridge(transform)?;
         Ok(component)
@@ -185,6 +193,63 @@ impl ScriptedComponent {
     #[must_use]
     pub fn hooks(&self) -> &HookNames {
         &self.hooks
+    }
+
+    /// Record the script file path this component came from — what
+    /// [`Component::scene_params`](crate::game::Component::scene_params)
+    /// writes back into scene documents. Scripts built from inline source
+    /// carry no path and serialize as runtime-only.
+    #[must_use]
+    pub fn with_source_path(mut self, path: impl Into<String>) -> Self {
+        self.source_path = Some(path.into());
+        self
+    }
+
+    /// The script file path the scene document named this component from,
+    /// if it came from one.
+    #[must_use]
+    pub fn source_path(&self) -> Option<&str> {
+        self.source_path.as_deref()
+    }
+
+    /// Build from a scene document's params object (the component
+    /// registry's `script` factory): `source` (required — a script file
+    /// path, resolved against the scene's base directory and recorded for
+    /// the save side) and optional `hooks` (`initialize`/`update`/`draw`).
+    ///
+    /// # Errors
+    /// A missing `source`, an unreadable script file, a failing script
+    /// load (parse errors surface here), or invalid hook names.
+    pub fn from_scene_params(v: &Var, base: &Path) -> Result<ScriptedComponent, FromVarError> {
+        let source = super::scene::req_string(v, "source")?;
+        let text = std::fs::read_to_string(base.join(&source)).map_err(|e| {
+            FromVarError::new(format!("cannot read script source {source:?}: {e}")).at("source")
+        })?;
+        let mut hooks = HookNames::default();
+        if let Some(hooks_doc) = super::scene::opt_field(v, "hooks") {
+            if !matches!(hooks_doc, Var::Object(_)) {
+                return Err(FromVarError::new(format!(
+                    "expected an object, found {}",
+                    hooks_doc.ty()
+                ))
+                .at("hooks"));
+            }
+            if let Some(name) = super::scene::opt_string(&hooks_doc, "initialize")? {
+                hooks.initialize = name;
+            }
+            if let Some(name) = super::scene::opt_string(&hooks_doc, "update")? {
+                hooks.update = name;
+            }
+            if let Some(name) = super::scene::opt_string(&hooks_doc, "draw")? {
+                hooks.draw = name;
+            }
+        }
+        let script = Script::new(text).map_err(|e| {
+            FromVarError::new(format!("script {source:?} failed to load: {e}")).at("source")
+        })?;
+        ScriptedComponent::with_hooks(script, hooks)
+            .map(|c| c.with_source_path(source))
+            .map_err(|e| FromVarError::new(e.to_string()))
     }
 
     /// Arm the per-component seam: the two transform host fns (closing over
@@ -283,6 +348,28 @@ impl Component for ScriptedComponent {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn scene_type(&self) -> Option<&'static str> {
+        Some("script")
+    }
+
+    /// The params, defaults omitted. Inline-source scripts
+    /// ([`source_path`](Self::source_path) `None`) are runtime-only — a
+    /// scene round-trips the path, never the script body (the file is the
+    /// asset; the editor saves scripts as files).
+    fn scene_params(&self, _ctx: &super::scene::ComponentContext) -> Option<Var> {
+        let source = self.source_path.as_ref()?;
+        let obj = Object::new();
+        obj.set("source", Var::from(source.as_str()));
+        if self.hooks != HookNames::default() {
+            let hooks = Object::new();
+            hooks.set("initialize", Var::from(self.hooks.initialize.as_str()));
+            hooks.set("update", Var::from(self.hooks.update.as_str()));
+            hooks.set("draw", Var::from(self.hooks.draw.as_str()));
+            obj.set("hooks", Var::from(hooks));
+        }
+        Some(Var::from(obj))
     }
 }
 

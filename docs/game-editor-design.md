@@ -3,9 +3,10 @@
 **Short name: `hyg` Studio** (the crate/namespace, pronounced however you
 like — high-g, hey-g, hedge, hegg).
 
-**Status: draft for review — not a commitment.** This sketch describes what a
-Godot/Unreal-style editor for the game module could look like while staying
-hyg-native. Nothing here exists yet; milestones are proposals.
+**Status: M0 (the scene model) landed 2026-11-14** — the milestone table
+tracks what exists. Everything past M0 is **draft for review, not a
+commitment**; where the build diverged from this sketch, the **as-built**
+notes under each landed section name the difference.
 
 ## Vision
 
@@ -88,6 +89,29 @@ live tree. `FromVar` is the load-side validator — a scene that doesn't
 match a component's schema fails with the path-tracked error
 (`"components[0].mass": expected number, found string`), never silently.
 
+**As-built (M0).** The schema is `{scene, format, camera, entities}` with
+the graph model's contracts: a `SCENE_FORMAT` gate, unknown extra fields
+tolerated on load and dropped on regeneration. The sketch's example showed
+every transform field present; as-built they are all **optional with
+identity defaults**, vectors are **number lists** (`[0, 2.1, 0]` — int and
+float are one JSON number type; the native `Var::Vec3`/`Quat` variants are
+accepted too for in-memory authoring), and the camera documents as
+`{"position": …, "target": …, "projection": {"ortho": {"half_extents":
+…}} | {"perspective": {"fov", "near", "far", "aspect"}}}` (absent = engine
+default). **Component reflection** landed as two `Component` hooks rather
+than a descriptor table: `scene_type` (the registry name; `None` =
+runtime-only — never materialized, skipped on save) and `scene_params`
+(the canonical params, defaults omitted — a default light documents as
+`{"type": "light"}`); a **component registry** (`register_component_factory`)
+materializes document objects, built-ins pre-seeded, user components
+registering their own. The descriptor struct that drives inspector UI
+generation can arrive when M1 needs it — the hooks already carry the data.
+**The git contract holds as specced**: save serializes the live tree and
+build → save → load → save is byte-identical — floats print the f32's
+shortest decimal, which parses back onto the same f32 through the f64 hop.
+Scripts ride as **file references** (resolved against the scene file's
+directory; the body is never inlined).
+
 **Component reflection:** built-in components expose a
 `ComponentDescriptor` (name, fields with types, defaults, ranges). The
 descriptor drives three things from one source: scene (de)serialization,
@@ -116,6 +140,13 @@ the requested filename, never from content type guesses. JSON stays the
 primary container (diffable, mergeable, greppable — scenes are code-adjacent
 data); the dense carriers are a per-file upgrade for size, not a project-wide
 leap of faith.
+
+**As-built (M0).** This is now code: `hyg::carrier` (feature-free, at the
+crate root). The two rules landed as specced — unknown suffixes are
+explicit errors naming the formats this build carries, `.json.hyg` writes
+pretty-printed, parent directories are created on write, and the dense
+carriers remain designed upgrades (nothing in the core needs them yet;
+the scene round-trip contract is already format-agnostic through `Var`).
 
 ### The editor shell
 
@@ -210,7 +241,7 @@ runs in headless tests.
 
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
-| M0 | Scene model | Scenes (de)serialize headless; `FromVar` rejects bad scenes with path errors; round-trip test: build → save → load → save is byte-identical |
+| M0 | Scene model | **LANDED 2026-11-14.** Scenes (de)serialize headless; `FromVar` rejects bad scenes with path errors; round-trip test: build → save → load → save is byte-identical (`tests/scene.rs`, `tests/carrier.rs`) |
 | M1 | Editor core | winit shell + egui panels + viewport presenting `FrameSink`; hierarchy + inspector editing a live `Engine`; headless UI-logic tests |
 | M2 | Manipulation | Selection (picking), transform gizmos, undo/redo, scene save/load from the UI; pixel tests assert gizmo rendering |
 | M3 | Play mode | Play/pause/step with snapshot-restore; script editing + live reload; console shows script errors |

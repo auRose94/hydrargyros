@@ -13,8 +13,11 @@
 //! collapses a spot to nothing, so spots need real angles.
 
 use super::component::{Component, Priority};
+use super::scene::ComponentContext;
 use super::transform::Transform;
-use crate::var::Vec3;
+use crate::object::Object;
+use crate::var::{Var, Vec3};
+use crate::{FromVar, FromVarError};
 
 /// What kind of light this is (the `type` string, as the renderer
 /// encodes it: directional = 0, point = 1, spot = 2).
@@ -32,6 +35,30 @@ impl LightKind {
             LightKind::Directional => 0,
             LightKind::Point => 1,
             LightKind::Spot => 2,
+        }
+    }
+
+    /// The document string (`"point"` / `"directional"` / `"spot"`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LightKind::Directional => "directional",
+            LightKind::Point => "point",
+            LightKind::Spot => "spot",
+        }
+    }
+}
+
+impl FromVar for LightKind {
+    fn from_var(v: &Var) -> Result<Self, FromVarError> {
+        match v.as_str() {
+            Some("point") => Ok(LightKind::Point),
+            Some("directional") => Ok(LightKind::Directional),
+            Some("spot") => Ok(LightKind::Spot),
+            _ => Err(FromVarError::new(format!(
+                "expected \"point\", \"directional\" or \"spot\", found {}",
+                v.ty()
+            ))),
         }
     }
 }
@@ -112,6 +139,35 @@ impl Light {
         self.range = range;
         self
     }
+
+    /// Build from a scene document's params object (the component
+    /// registry's `light` factory): optional `kind`, `color` `[r, g, b]`,
+    /// `intensity`, `cone` `[inner, outer]`, `range`. Strict,
+    /// path-tracked reads; the prototype defaults where absent.
+    ///
+    /// # Errors
+    /// A `FromVarError` at the offending field.
+    pub fn from_params(v: &Var) -> Result<Light, FromVarError> {
+        let mut light = Light::default();
+        if let Some(kind) = super::scene::opt_field(v, "kind") {
+            light.kind = LightKind::from_var(&kind).map_err(|e| e.at("kind"))?;
+        }
+        if let Some(color) = super::scene::opt_field(v, "color") {
+            let rgb = super::scene::SceneVec3::from_var(&color).map_err(|e| e.at("color"))?;
+            light.color = [rgb.0.x, rgb.0.y, rgb.0.z];
+        }
+        if let Some(intensity) = super::scene::opt_f32(v, "intensity")? {
+            light.intensity = intensity;
+        }
+        if let Some(cone) = super::scene::opt_field(v, "cone") {
+            light.cone =
+                super::scene::SceneVec2::from_var(&cone).map_err(|e| e.at("cone"))?.0;
+        }
+        if let Some(range) = super::scene::opt_f32(v, "range")? {
+            light.range = range;
+        }
+        Ok(light)
+    }
 }
 
 impl Component for Light {
@@ -129,6 +185,32 @@ impl Component for Light {
 
     fn as_light(&self) -> Option<&Light> {
         Some(self)
+    }
+
+    fn scene_type(&self) -> Option<&'static str> {
+        Some("light")
+    }
+
+    /// The params, defaults omitted: a default light documents as
+    /// `{"type": "light"}`.
+    fn scene_params(&self, _ctx: &ComponentContext) -> Option<Var> {
+        let obj = Object::new();
+        if self.kind != LightKind::Point {
+            obj.set("kind", Var::from(self.kind.as_str()));
+        }
+        if self.color != [1.0, 1.0, 1.0] {
+            obj.set("color", super::scene::f32s_to_var(&self.color));
+        }
+        if self.intensity != 1.0 {
+            obj.set("intensity", super::scene::f32_to_var(self.intensity));
+        }
+        if self.cone != [1.0, 1.0] {
+            obj.set("cone", super::scene::f32s_to_var(&self.cone));
+        }
+        if self.range != 0.0 {
+            obj.set("range", super::scene::f32_to_var(self.range));
+        }
+        Some(Var::from(obj))
     }
 }
 

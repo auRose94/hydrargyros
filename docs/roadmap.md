@@ -324,14 +324,15 @@ The port rung queue is closed; new work branches from these items:
 1. **Standalone identity** (done): crate renamed to `hyg`; the narrative is
    standalone-first (README, roadmap, code comments); the heritage record
    lives in [gold-lineage.md](gold-lineage.md).
-2. **Editor designs** (drafted): **Hydrargyros Studio**
-   ([game-editor-design.md](game-editor-design.md)) — a unified engine &
-   editor for the game module (`hyg` is its short name); **Hydrargyros
-   Press** ([web-editor-design.md](web-editor-design.md)) — a WYSIWYG
-   website/API editor for the web module. The **`.hyg` carrier type** is
-   established: a serialized `Var` whose terminal `.hyg` suffix is the file
-   type and whose preceding suffix names the serde format — `.json.hyg`
-   default, `.cbor.hyg`/`.bson.hyg` for dense scenes. The Studio design
+2. **Editor designs** (drafted; **M0 landed** — see item 7): **Hydrargyros
+   Studio** ([game-editor-design.md](game-editor-design.md)) — a unified
+   engine & editor for the game module (`hyg` is its short name);
+   **Hydrargyros Press** ([web-editor-design.md](web-editor-design.md)) — a
+   WYSIWYG website/API editor for the web module. The **`.hyg` carrier
+   type** is established — now code, `hyg::carrier`: a serialized `Var`
+   whose terminal `.hyg` suffix is the file type and whose preceding
+   suffix names the serde format — `.json.hyg` default, `.cbor.hyg`/
+   `.bson.hyg` designed dense upgrades. The Studio design
    also specs **canvas scaling** for non-standard ratios (Fit / Expand /
    Anchor with a derived 16:9 UI zone — ultrawide shows more world, not
    black bars, without re-anchoring the GUI) and the **Wayland-first,
@@ -610,6 +611,68 @@ The port rung queue is closed; new work branches from these items:
    host-side floor, adapter capability limits as later hardening. The
    drafting arc is complete; implementation starts at dynamic M0 (the
    engine registry).
+
+## The editor arc — Hydrargyros Studio
+
+The game-editor milestone queue ([game-editor-design.md](game-editor-design.md)):
+M0 scene model, M1 editor core (winit shell + egui + viewport), M2
+manipulation (picking, gizmos, undo), M3 play mode (snapshot/restore, live
+reload), M4 assets, M5 polish (packaging). One binary — the editor *is* the
+engine running with a shell around it; the headless-first pump, the
+registered window backends, and the multi-consumer `FrameSink` are the
+seams it grows through.
+
+7. **Studio M0 landed (2026-11-14): the scene model.** Scenes are `.hyg`
+   documents and everything about them runs and tests headless. The
+   **carrier type is now code**: `hyg::carrier` (feature-free, crate root)
+   — the terminal `.hyg` suffix is the type, the preceding suffix names the
+   serde format, `.json.hyg` is the default (pretty-printed — scenes are
+   diffable, mergeable, greppable), a bare `.hyg` sniffs as JSON, unknown
+   suffixes (`.cbor.hyg` and friends) are explicit errors naming the
+   formats this build carries, and the writer picks the format from the
+   filename, never a content-type guess. The **scene document**
+   (`hyg::game::scene`, feature-free) is `{scene, format, camera,
+   entities}` with the graph model's contracts: a `SCENE_FORMAT` gate
+   (migrations are the versioning path), unknown extra fields tolerated on
+   load and dropped on regeneration, vectors as number lists read through
+   the `SceneVec2/3/4`/`SceneQuat` vocabulary (the native `Var::Vec3`/
+   `Quat` variants accepted too — the in-memory authoring path), all
+   entity/transform fields optional with identity defaults, and the camera
+   projection as `{"ortho": …}` / `{"perspective": …}` (`Projection`'s
+   `FromVar`; absent camera = the engine default). **Components
+   materialize through a registry** (`register_component_factory`/
+   `create_component` — the backend-registry pattern): built-ins
+   pre-seeded (`light`, `mesh_renderer`, `physics_body`, and `script`
+   behind the `script` feature), user components register their own
+   factories, unknown types are explicit errors naming what IS registered,
+   and the `ComponentContext` carries the entity name (a body's default
+   name) plus the base directory file-referencing params resolve against
+   (the scene file's dir on load). **The component documents itself**:
+   two new `Component` hooks — `scene_type` (the registry name; `None` =
+   runtime-only: never materialized, skipped on save) and `scene_params`
+   (the canonical params, defaults omitted — a default light documents as
+   `{"type": "light"}`) — with `Entity::iter_components` feeding the save
+   walk. Model-backed `MeshRenderer`s are runtime-only until the asset
+   pipeline gives models provenance. **Loading is `FromVar` validation**:
+   strict, path-tracked rejections (`"entities.0.components.0.mass":
+   expected a number, found string`) — scene floats widen from ints
+   (JSON's one number type; `0` loads as `0.0`), and non-finite floats
+   write as `null` (serde_json's encoding) and then FAIL the load with the
+   path — never a silent zero. **The editor's git contract holds**: save
+   serializes the LIVE tree, and the bytes are a canonical function of
+   typed state — floats print the f32's shortest decimal, which parses
+   back onto the same f32 through the f64 hop, so build → save → load →
+   save is byte-identical (three-generation test; precision-hostile values
+   pinned: `0.1+0.2`, `8.89`, the `-1e-45` subnormal). **Scripts ride as
+   file references**: the document names a script path, the factory loads
+   it against the scene's base dir, `ScriptedComponent` records
+   `source_path` and writes it back on save — the body is never inlined;
+   inline-source scripts and custom hook names behave correctly (the
+   former runtime-only, the latter round-tripping). `Scene::spawn_into`
+   attaches the camera and roots to a live `Engine`. Tests: 18 in
+   `tests/scene.rs`, 7 in `tests/carrier.rs` (suite 324 green). Next
+   rung: **M1 — the editor core** (winit shell + egui panels + viewport
+   presenting `FrameSink`).
 
 ## What hyg will NOT do
 

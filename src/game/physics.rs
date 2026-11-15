@@ -35,6 +35,30 @@ pub enum BodyType {
     Static,
 }
 
+impl BodyType {
+    /// The document string (`"dynamic"` / `"static"`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BodyType::Dynamic => "dynamic",
+            BodyType::Static => "static",
+        }
+    }
+}
+
+impl crate::FromVar for BodyType {
+    fn from_var(v: &crate::var::Var) -> Result<Self, crate::FromVarError> {
+        match v.as_str() {
+            Some("dynamic") => Ok(BodyType::Dynamic),
+            Some("static") => Ok(BodyType::Static),
+            _ => Err(crate::FromVarError::new(format!(
+                "expected \"dynamic\" or \"static\", found {}",
+                v.ty()
+            ))),
+        }
+    }
+}
+
 /// One hit of a [`PhysicsWorld::raycast`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RayHit {

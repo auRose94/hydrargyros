@@ -42,6 +42,7 @@ pub mod entity;
 pub mod light;
 pub mod mesh;
 pub mod model;
+pub mod scene;
 #[cfg(feature = "audio")]
 pub mod audio;
 #[cfg(feature = "winit")]
@@ -89,6 +90,10 @@ pub use render::{Geometry, Quad, QuadShape, RenderBackend};
 #[cfg(feature = "wgpu")]
 pub use render_wgpu::WgpuRenderer;
 pub use renderable::{MeshGeometry, MeshRenderer, MeshShape, Renderable};
+pub use scene::{
+    create_component, register_component_factory, registered_component_types, ComponentContext,
+    ComponentFactory, Scene, SCENE_FORMAT,
+};
 #[cfg(feature = "script")]
 pub use scripted::{HookNames, ScriptedComponent};
 #[cfg(feature = "stream")]

@@ -31,6 +31,11 @@
 //! Payloads are `Arc<Mutex>`-shared, so the whole value graph is `Send +
 //! Sync`: the same `Var` crosses threads, async tasks, and web handlers.
 
+// The derive macros generate `::hyg::…` paths; this makes those resolve
+// inside the crate itself (the crate referring to itself by its own name).
+extern crate self as hyg;
+
+pub mod carrier;
 pub mod dynamic;
 pub mod from_var;
 pub mod game;

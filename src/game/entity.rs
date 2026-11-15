@@ -58,6 +58,12 @@ impl Entity {
         self
     }
 
+    /// The entity's components, in attach order — the scene save walk and
+    /// the editor's inspector read them through this.
+    pub(crate) fn iter_components(&self) -> impl Iterator<Item = &dyn Component> + '_ {
+        self.components.iter().map(|slot| slot.component.as_ref())
+    }
+
     pub fn children(&self) -> &[Entity] {
         &self.children
     }

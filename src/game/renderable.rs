@@ -7,9 +7,12 @@
 use super::component::{Component, Priority};
 use super::model::Model;
 use super::render::{Geometry, Quad};
+use super::scene::ComponentContext;
 use super::texture::Texture;
 use super::transform::Transform;
-use crate::var::Vec3;
+use crate::object::Object;
+use crate::var::{Var, Vec3};
+use crate::{FromVar, FromVarError};
 
 /// Something an entity owns that contributes geometry to the drawn scene.
 /// The engine queries components for this trait during the draw pass.
@@ -24,6 +27,30 @@ pub trait Renderable {
 pub enum MeshShape {
     Rect,
     Circle,
+}
+
+impl MeshShape {
+    /// The document string (`"rect"` / `"circle"`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MeshShape::Rect => "rect",
+            MeshShape::Circle => "circle",
+        }
+    }
+}
+
+impl FromVar for MeshShape {
+    fn from_var(v: &Var) -> Result<Self, FromVarError> {
+        match v.as_str() {
+            Some("rect") => Ok(MeshShape::Rect),
+            Some("circle") => Ok(MeshShape::Circle),
+            _ => Err(FromVarError::new(format!(
+                "expected \"rect\" or \"circle\", found {}",
+                v.ty()
+            ))),
+        }
+    }
 }
 
 /// What a [`MeshRenderer`] draws: a solid 2D shape (rendered in list
@@ -121,6 +148,36 @@ impl MeshRenderer {
     pub fn model(model: std::sync::Arc<Model>, color: [f32; 4]) -> Self {
         MeshRenderer::new(MeshGeometry::Model { model }, color)
     }
+
+    /// Build from a scene document's params object (the component
+    /// registry's `mesh_renderer` factory): `shape` (`"rect"` or
+    /// `"circle"`), optional `half_size` `[x, y, z]` (default unit) and
+    /// `color` `[r, g, b, a]` (default white). Model-backed renderers are
+    /// materialized by the asset pipeline, not scene params.
+    ///
+    /// # Errors
+    /// A `FromVarError` at the offending field.
+    pub fn from_params(v: &Var) -> Result<MeshRenderer, FromVarError> {
+        let Some(shape_var) = super::scene::opt_field(v, "shape") else {
+            return Err(
+                FromVarError::new("\"shape\" is required — \"rect\" or \"circle\"").at("shape")
+            );
+        };
+        let shape = MeshShape::from_var(&shape_var).map_err(|e| e.at("shape"))?;
+        let mut half_size = Vec3::splat(1.0);
+        if let Some(size) = super::scene::opt_field(v, "half_size") {
+            half_size =
+                super::scene::SceneVec3::from_var(&size).map_err(|e| e.at("half_size"))?.0;
+        }
+        let mut color = [1.0, 1.0, 1.0, 1.0];
+        if let Some(tint) = super::scene::opt_field(v, "color") {
+            color = super::scene::SceneVec4::from_var(&tint).map_err(|e| e.at("color"))?.0;
+        }
+        Ok(MeshRenderer::new(
+            MeshGeometry::Shape { shape, half_size },
+            color,
+        ))
+    }
 }
 
 impl Component for MeshRenderer {
@@ -138,6 +195,29 @@ impl Component for MeshRenderer {
 
     fn as_renderable(&self) -> Option<&dyn Renderable> {
         Some(self)
+    }
+
+    fn scene_type(&self) -> Option<&'static str> {
+        Some("mesh_renderer")
+    }
+
+    /// The params for shape-mode renderers, defaults omitted. Model-backed
+    /// renderers are runtime-only — the geometry is compiled (no
+    /// provenance to re-load it from) until the asset pipeline gives
+    /// models paths.
+    fn scene_params(&self, _ctx: &ComponentContext) -> Option<Var> {
+        let MeshGeometry::Shape { shape, half_size } = &self.geometry else {
+            return None;
+        };
+        let obj = Object::new();
+        obj.set("shape", Var::from(shape.as_str()));
+        if *half_size != Vec3::splat(1.0) {
+            obj.set("half_size", super::scene::vec3_to_var(*half_size));
+        }
+        if self.color != [1.0, 1.0, 1.0, 1.0] {
+            obj.set("color", super::scene::f32s_to_var(&self.color));
+        }
+        Some(Var::from(obj))
     }
 }
 

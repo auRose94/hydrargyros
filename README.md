@@ -65,7 +65,9 @@ let json = serde_json::to_string(&v).unwrap();
 ## Modules
 
 - **Core** — `Var` / `Object` / `List` / `VarRef` / sugar / serde / `Func` /
-  `#[derive(FromVar)]` (the `hyg-derive` proc-macro crate). *Done.*
+  `#[derive(FromVar)]` (the `hyg-derive` proc-macro crate), and `carrier` —
+  the `.hyg` document type (terminal `.hyg` suffix is the type, the preceding
+  suffix names the serde format, `.json.hyg` default). *Done.*
 - **Web** (`web` feature) — an expressjs-like `Server` on axum + tokio: all
   verbs, `:param` and trailing-`*` patterns, WebSocket routes, static mounts
   with mime detection, an `on_error` hook, streamed bodies (`Response::stream`,
@@ -90,7 +92,11 @@ let json = serde_json::to_string(&v).unwrap();
   easings/timers; audio runs on rodio behind an `AudioBackend` trait with a
   recorder `none` backend (`audio` feature). Scripting goes through the v12
   interpreter seam (`script` feature): `ScriptedComponent` dispatches
-  lifecycle hooks to script functions over a JSON bridge. *Done.*
+  lifecycle hooks to script functions over a JSON bridge. Scenes are `.hyg`
+  documents: `game::scene` (de)serializes the entity tree through a
+  component registry (built-ins pre-seeded, user components register their
+  own), validates with `FromVar` path errors, and save → load → save is
+  byte-identical. *Done.*
 - **Derive** — `FromVar`, re-exported as `hyg::FromVar`. *Done.*
 
 ## Examples
@@ -111,7 +117,8 @@ WebSockets). See the README table in `examples/` for the full index.
   learn hyg.
 - [docs/platforms.md](docs/platforms.md) — platform support matrix.
 - Design drafts (for review): [Hydrargyros Studio](docs/game-editor-design.md)
-  (game engine & editor), [Hydrargyros Press](docs/web-editor-design.md)
+  (game engine & editor — **M0, the scene model, landed**),
+  [Hydrargyros Press](docs/web-editor-design.md)
   (WYSIWYG website/API editor), and the
   [`dynamic` module](docs/dynamic-design.md) (FFI, scripts, visual
   programming).

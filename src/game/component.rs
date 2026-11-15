@@ -3,6 +3,8 @@
 
 use std::any::Any;
 
+use crate::var::Var;
+
 /// When a component's `update` runs in the frame. The priority tiers:
 /// things that must run first (input), things that load data, physics
 /// bodies, user space, and renderables — which run last.
@@ -75,6 +77,25 @@ pub trait Component: Send {
     /// engine's draw pass gathers it — with its entity's world transform —
     /// into the scene's light list.
     fn as_light(&self) -> Option<&super::light::Light> {
+        None
+    }
+
+    /// If this component serializes into scene documents, its registry
+    /// name — the `type` field its document objects carry, and the key its
+    /// factory registered under (`"light"`, `"physics_body"`, …). `None`
+    /// means runtime-only: never materialized from a document, skipped by
+    /// the scene save.
+    fn scene_type(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// The canonical params object this component writes under
+    /// [`scene_type`](Self::scene_type) — the same shape its registered
+    /// factory reads back. Defaults are omitted (the factory supplies
+    /// them); `None` means this instance's state has no expressible form
+    /// and the save skips it (a component is code, not data, until it
+    /// declares a schema for its current state).
+    fn scene_params(&self, _ctx: &super::scene::ComponentContext) -> Option<Var> {
         None
     }
 }
