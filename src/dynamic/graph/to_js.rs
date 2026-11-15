@@ -311,8 +311,8 @@ fn emit_node(
 
     // declare this node's data-out lets once (function scope)
     if !spec.pure {
-        for (pin, _) in &spec.data_outs {
-            let name = format!("{id}_{pin}");
+        for pin_spec in &spec.data_outs {
+            let name = format!("{}_{}", id, pin_spec.name);
             if declared.insert(name.clone()) {
                 writeln!(lets, "  let {name};").expect("string write");
             }

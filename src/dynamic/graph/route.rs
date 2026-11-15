@@ -21,6 +21,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use crate::dynamic::functions::call_function;
+use crate::dynamic::graph::debug::{register_run, unregister_run, DebugRun};
 use crate::dynamic::graph::model::Graph;
 use crate::dynamic::graph::to_js::{compile, NODE_CALL_HOST, ROUTE_FN};
 use crate::script::{Script, ScriptError};
@@ -55,6 +56,10 @@ impl std::error::Error for RouteError {}
 /// closure owns its route.
 pub struct GraphRoute {
     script: Arc<Mutex<Script>>,
+    /// The validated graph, kept for debug runs (the compiled path is
+    /// for speed; [`GraphRoute::debug_handler`] walks the same graph
+    /// through the debugger).
+    graph: Arc<Graph>,
 }
 
 impl GraphRoute {
@@ -83,6 +88,7 @@ impl GraphRoute {
             .map_err(RouteError::Script)?;
         Ok(GraphRoute {
             script: Arc::new(Mutex::new(script)),
+            graph: Arc::new(graph.clone()),
         })
     }
 
@@ -93,12 +99,40 @@ impl GraphRoute {
         let script = Arc::clone(&self.script);
         move |req| {
             let mut script = script.lock().expect("graph route script");
-            match script.call(ROUTE_FN, &[req]) {
-                Ok(Var::Null) => Response::text("").status(204),
-                Ok(Var::Str(text)) => Response::text(&text),
-                Ok(value) => Response::json(value),
-                Err(e) => Response::text(format!("{e}")).status(500),
-            }
+            map_result(script.call(ROUTE_FN, &[req]))
         }
+    }
+
+    /// The debug handler: the SAME route, run through the debugger's
+    /// interpreter — real traffic, real pauses. Each request starts a
+    /// [`DebugRun`] (registered, findable via
+    /// [`active_runs`](super::debug::active_runs)); `breakpoints` park
+    /// the request's thread before those nodes until a debugger client
+    /// resumes them, with the staged request visible at every pause.
+    /// Without breakpoints hit, the run completes straight through.
+    pub fn debug_handler(&self, breakpoints: Vec<String>) -> impl Fn(Var) -> Response {
+        let graph = Arc::clone(&self.graph);
+        move |req| {
+            let run = match DebugRun::start(&graph, req, breakpoints.clone()) {
+                Ok(run) => run,
+                Err(e) => return Response::text(format!("debug route: {e}")).status(500),
+            };
+            let id = register_run(Arc::clone(&run));
+            let result = run.run_blocking();
+            unregister_run(id);
+            map_result(result)
+        }
+    }
+}
+
+/// The route's response mapping — one voice for the compiled path and
+/// the debug path (they must be indistinguishable from the client's
+/// side), over whichever error type the execution produced.
+fn map_result<E: std::fmt::Display>(result: Result<Var, E>) -> Response {
+    match result {
+        Ok(Var::Null) => Response::text("").status(204),
+        Ok(Var::Str(text)) => Response::text(&text),
+        Ok(value) => Response::json(value),
+        Err(e) => Response::text(format!("{e}")).status(500),
     }
 }

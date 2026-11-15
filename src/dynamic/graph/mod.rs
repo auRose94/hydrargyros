@@ -9,8 +9,13 @@
 //! conversion IS validation, and its failures carry graph coordinates.
 //! [`to_js`] (M3) is the script seam's compiler; [`route`] runs compiled
 //! graphs on a live web server; [`to_rust`] (M4) is the native path. The
-//! WASM (M6) compiler branches from here.
+//! WASM (M6) compiler branches from here, and [`debug`] is the debugger
+//! — one implementation for both modules: breakpoints, watches, and
+//! single-stepping over exec wires, driven per frame by the game pump
+//! or blocking a live request's thread.
 
+pub mod debug;
+pub mod inspect;
 pub mod model;
 pub mod spec;
 pub mod to_js;

@@ -18,7 +18,9 @@
 //!
 //! Generators run only on a checked graph and TRUST it — emission is
 //! mechanical, validation never re-happens, so the two compilers cannot
-//! disagree about what is valid.
+//! disagree about what is valid. The descriptors double as the
+//! inspector's source ([`super::inspect`]): every pin carries a doc,
+//! every kind a summary and a doc link that resolves to a real file.
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,14 +28,34 @@ use crate::dynamic::functions::{function_meta, FunctionMeta};
 use crate::dynamic::graph::model::{Graph, GraphError, Node};
 use crate::var::Ty;
 
-/// A node kind's descriptor — what conversion checks wires against.
-/// Built-ins are fixed; a function node's descriptor is derived from its
-/// callable's [`FunctionMeta`].
+/// One pin of a node descriptor: a name, a type (`None` = any —
+/// `web/request`'s `body`, function nodes whose callable declared no
+/// signature), and a one-line doc for editor hovers and the inspector.
+#[derive(Debug, Clone)]
+pub struct PinSpec {
+    /// The pin's name (an ASCII identifier; the wire schema names pins).
+    pub name: String,
+    /// The pin's type — `None` is the untyped marker (the value system's
+    /// `Null` doubles as "any" in route-callable conventions).
+    pub ty: Option<Ty>,
+    /// One line for editor hovers and the inspector.
+    pub doc: String,
+}
+
+/// A node kind's descriptor — what conversion checks wires against and
+/// what the inspector shows. Built-ins are fixed; a function node's
+/// descriptor is derived from its callable's [`FunctionMeta`].
 #[derive(Debug, Clone)]
 pub struct NodeSpec {
     /// The vocabulary kind (`"web/request"`, or a callable like
     /// `"greeter.greet"`).
     pub kind: String,
+    /// One line for editors, hovers, and the inspector.
+    pub summary: String,
+    /// The node's documentation — a repo-relative path that resolves to
+    /// a real file (`None` for function nodes: their doc is their
+    /// origin's summary, carried by the table).
+    pub doc: Option<String>,
     /// May be an entry node (starts an execution path).
     pub entry: bool,
     /// Receives exec (has an `exec` in-pin).
@@ -41,15 +63,20 @@ pub struct NodeSpec {
     /// The exec-out pin names, in codegen order.
     pub exec_outs: Vec<String>,
     /// The data-in pins.
-    pub data_ins: Vec<(String, Option<Ty>)>,
+    pub data_ins: Vec<PinSpec>,
     /// The data-out pins.
-    pub data_outs: Vec<(String, Option<Ty>)>,
+    pub data_outs: Vec<PinSpec>,
     /// A pure node has no exec pins and inlines as an expression at its
     /// use sites.
     pub pure: bool,
 }
 
-/// The M3 built-in vocabulary + function-table kinds. The vocabulary
+/// The doc link every built-in kind carries — the graph tier's design
+/// section. `Option<String>` in the spec; the test asserts these resolve
+/// to real files.
+const GRAPH_DOC: &str = "docs/dynamic-design.md";
+
+/// The built-in vocabulary + function-table kinds. The vocabulary
 /// becomes a registry when a second registrar appears (shader graphs
 /// register a GPU-shaped one — see dynamic-design.md); today it is one
 /// lookup with two sources, which is the registry in embryo.
@@ -58,62 +85,125 @@ pub fn spec_for(kind: &str) -> Option<NodeSpec> {
     match kind {
         "web/request" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "the route's entry — the staged request".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: true,
             exec_in: false,
             exec_outs: vec!["exec".into()],
             data_ins: vec![],
             data_outs: vec![
-                ("params".into(), Some(Ty::Object)),
-                ("query".into(), Some(Ty::Object)),
-                ("headers".into(), Some(Ty::Object)),
-                ("body".into(), None),
+                PinSpec {
+                    name: "params".into(),
+                    ty: Some(Ty::Object),
+                    doc: "route parameters (from :param patterns)".into(),
+                },
+                PinSpec {
+                    name: "query".into(),
+                    ty: Some(Ty::Object),
+                    doc: "the query string as an object".into(),
+                },
+                PinSpec {
+                    name: "headers".into(),
+                    ty: Some(Ty::Object),
+                    doc: "the request headers".into(),
+                },
+                PinSpec {
+                    name: "body".into(),
+                    ty: None,
+                    doc: "the parsed body — any value (JSON shape)".into(),
+                },
             ],
             pure: false,
         }),
         "web/respond" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "finish the path — the response value".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: false,
             exec_in: true,
             exec_outs: vec![],
-            data_ins: vec![("body".into(), None)],
+            data_ins: vec![PinSpec {
+                name: "body".into(),
+                ty: None,
+                doc: "the response value — Str serves as text, other values as JSON".into(),
+            }],
             data_outs: vec![],
             pure: false,
         }),
         "flow/branch" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "choose then/else by a condition".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: false,
             exec_in: true,
             exec_outs: vec!["then".into(), "else".into()],
-            data_ins: vec![("condition".into(), Some(Ty::Bool))],
+            data_ins: vec![PinSpec {
+                name: "condition".into(),
+                ty: Some(Ty::Bool),
+                doc: "falsy takes the else branch".into(),
+            }],
             data_outs: vec![],
             pure: false,
         }),
         // pure nodes: expression-shaped, inlined at use sites
         "data/get" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "read one field of a value".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: false,
             exec_in: false,
             exec_outs: vec![],
-            data_ins: vec![("value".into(), None)],
-            data_outs: vec![("out".into(), None)],
+            data_ins: vec![PinSpec {
+                name: "value".into(),
+                ty: None,
+                doc: "the value to read from (any shape)".into(),
+            }],
+            data_outs: vec![PinSpec {
+                name: "out".into(),
+                ty: None,
+                doc: "the field's value (Null when absent)".into(),
+            }],
             pure: true,
         }),
         "math/compare" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "compare two values (numeric or lexical)".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: false,
             exec_in: false,
             exec_outs: vec![],
-            data_ins: vec![("a".into(), None), ("b".into(), None)],
-            data_outs: vec![("result".into(), Some(Ty::Bool))],
+            data_ins: vec![
+                PinSpec {
+                    name: "a".into(),
+                    ty: None,
+                    doc: "either side — numbers compare numerically, strings lexically".into(),
+                },
+                PinSpec {
+                    name: "b".into(),
+                    ty: None,
+                    doc: "either side — numbers compare numerically, strings lexically".into(),
+                },
+            ],
+            data_outs: vec![PinSpec {
+                name: "result".into(),
+                ty: Some(Ty::Bool),
+                doc: "true when the comparison holds".into(),
+            }],
             pure: true,
         }),
         "data/literal" => Some(NodeSpec {
             kind: kind.to_string(),
+            summary: "a constant value".into(),
+            doc: Some(GRAPH_DOC.into()),
             entry: false,
             exec_in: false,
             exec_outs: vec![],
             data_ins: vec![],
-            data_outs: vec![("out".into(), None)],
+            data_outs: vec![PinSpec {
+                name: "out".into(),
+                ty: None,
+                doc: "the literal (its `value` param, checked at conversion)".into(),
+            }],
             pure: true,
         }),
         _ => {
@@ -127,10 +217,17 @@ pub fn spec_for(kind: &str) -> Option<NodeSpec> {
 /// A function node's descriptor IS its callable's signature — the third
 /// face of the one function table (plugins registered in M1, scripts
 /// bind, graph nodes call). Data pins are positional: `in0`, `in1`, …
-/// in, `out` out.
+/// in, `out` out. The doc is the origin's summary; the link is None
+/// (the callable's home carries the docs).
 pub(crate) fn function_spec(kind: &str, meta: &FunctionMeta) -> NodeSpec {
     NodeSpec {
         kind: kind.to_string(),
+        summary: if meta.summary.is_empty() {
+            format!("callable {:?} (origin: {})", kind, meta.origin)
+        } else {
+            meta.summary.clone()
+        },
+        doc: None,
         entry: false,
         exec_in: true,
         exec_outs: vec!["exec".into()],
@@ -138,9 +235,17 @@ pub(crate) fn function_spec(kind: &str, meta: &FunctionMeta) -> NodeSpec {
             .inputs
             .iter()
             .enumerate()
-            .map(|(i, ty)| (format!("in{i}"), Some(*ty)))
+            .map(|(i, ty)| PinSpec {
+                name: format!("in{i}"),
+                ty: Some(*ty),
+                doc: format!("positional argument {i} of {kind:?}"),
+            })
             .collect(),
-        data_outs: vec![("out".into(), Some(meta.output))],
+        data_outs: vec![PinSpec {
+            name: "out".into(),
+            ty: Some(meta.output),
+            doc: "the callable's result".to_string(),
+        }],
         pure: false,
     }
 }
@@ -151,13 +256,9 @@ pub(crate) struct Checker<'g> {
     /// The checked graph (generators read it freely).
     pub(crate) graph: &'g Graph,
     /// Resolved descriptors per node id.
-    /// Resolved descriptors per node id.
     pub(crate) specs: HashMap<&'g str, NodeSpec>,
     /// Exec-wire adjacency: node id → [(from_pin, target id, target pin)].
-    /// Exec-wire adjacency: node id → [(from_pin, target id, target pin)].
     pub(crate) exec: HashMap<&'g str, Vec<(&'g str, &'g str, &'g str)>>,
-    /// Exec paths from the entries (the flow chains): node → entry →
-    /// chain. First entry to reach a node owns its chain.
     /// Exec paths from the entries (the flow chains): node → chain;
     /// first entry to reach a node owns its chain.
     pub(crate) paths: HashMap<&'g str, Vec<&'g str>>,
@@ -237,16 +338,21 @@ impl<'g> Checker<'g> {
             } else if self.specs[&*from_node.id]
                 .data_outs
                 .iter()
-                .any(|(p, _)| *p == wire.from_pin)
+                .any(|p| p.name == wire.from_pin)
             {
                 "data_out"
             } else {
+                let outs: Vec<&str> = self.specs[&*from_node.id]
+                    .data_outs
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect();
                 return Err(GraphError::at(
                     from_node.id.clone(),
                     wire.from_pin.clone(),
                     format!("wires[{i}]: {wire:?} — {:?} has no pin {:?} to wire from (exec outs: {:?}, data outs: {:?})",
                         from_node.kind, wire.from_pin,
-                        self.specs[&*from_node.id].exec_outs, self.specs[&*from_node.id].data_outs.iter().map(|(p, _)| p).collect::<Vec<_>>()),
+                        self.specs[&*from_node.id].exec_outs, outs),
                 ));
             };
             let to_side = if self.specs[&*to_node.id].exec_in && wire.to_pin == "exec" {
@@ -254,16 +360,20 @@ impl<'g> Checker<'g> {
             } else if self.specs[&*to_node.id]
                 .data_ins
                 .iter()
-                .any(|(p, _)| *p == wire.to_pin)
+                .any(|p| p.name == wire.to_pin)
             {
                 "data_in"
             } else {
+                let ins: Vec<&str> = self.specs[&*to_node.id]
+                    .data_ins
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect();
                 return Err(GraphError::at(
                     to_node.id.clone(),
                     wire.to_pin.clone(),
                     format!("wires[{i}]: {wire:?} — {:?} has no in-pin {:?} (exec in: {}, data ins: {:?})",
-                        to_node.kind, wire.to_pin, self.specs[&*to_node.id].exec_in,
-                        self.specs[&*to_node.id].data_ins.iter().map(|(p, _)| p).collect::<Vec<_>>()),
+                        to_node.kind, wire.to_pin, self.specs[&*to_node.id].exec_in, ins),
                 ));
             };
 
@@ -286,13 +396,13 @@ impl<'g> Checker<'g> {
                     "data_out" => spec
                         .data_outs
                         .iter()
-                        .find(|(p, _)| p == pin)
-                        .and_then(|(_, t)| *t),
+                        .find(|p| p.name == pin)
+                        .and_then(|p| p.ty),
                     _ => spec
                         .data_ins
                         .iter()
-                        .find(|(p, _)| p == pin)
-                        .and_then(|(_, t)| *t),
+                        .find(|p| p.name == pin)
+                        .and_then(|p| p.ty),
                 }
             };
             let (src_ty, dst_ty) = (
@@ -466,8 +576,8 @@ impl<'g> Checker<'g> {
         for wire in &self.graph.wires {
             let from_spec = &self.specs[&*self.graph.node(&wire.from).expect("M2").id];
             let to_spec = &self.specs[&*self.graph.node(&wire.to).expect("M2").id];
-            let from_is_data = from_spec.data_outs.iter().any(|(p, _)| *p == wire.from_pin);
-            let to_is_data = to_spec.data_ins.iter().any(|(p, _)| *p == wire.to_pin);
+            let from_is_data = from_spec.data_outs.iter().any(|p| p.name == wire.from_pin);
+            let to_is_data = to_spec.data_ins.iter().any(|p| p.name == wire.to_pin);
             if from_is_data && to_is_data {
                 data.entry(wire.from.as_str())
                     .or_default()

@@ -385,8 +385,8 @@ fn emit_lib(
         if spec.pure || !checker.paths.contains_key(node.id.as_str()) {
             continue;
         }
-        for (pin, _) in &spec.data_outs {
-            let name = format!("{}_{}", node.id, pin);
+        for pin_spec in &spec.data_outs {
+            let name = format!("{}_{}", node.id, pin_spec.name);
             if !declared.contains(&name) {
                 declared.push(name.clone());
                 let _ = writeln!(lib, "    let mut {name}: Var = Var::Null;");

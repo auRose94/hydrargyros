@@ -228,7 +228,7 @@ mod native_pipeline {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let hyg_dep = format!("hyg = {{ path = {:?} }}", repo.display().to_string());
         let workspace = repo.join("target/plugin-tests/graph-workspace");
-        let target_dir = repo.join("target/plugin-tests");
+        let target_dir = repo.join("target/graph-tests");
 
         // the generated crate + the project crate it links against
         write_hosts_crate(&workspace, &hyg_dep);
@@ -270,7 +270,7 @@ mod native_pipeline {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let hyg_dep = format!("hyg = {{ path = {:?} }}", repo.display().to_string());
         let workspace = repo.join("target/plugin-tests/graph-workspace");
-        let target_dir = repo.join("target/plugin-tests");
+        let target_dir = repo.join("target/graph-tests");
 
         write_hosts_crate(&workspace, &hyg_dep);
         let doc = greeting_doc();
@@ -330,7 +330,7 @@ mod native_pipeline {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let hyg_dep = format!("hyg = {{ path = {:?} }}", repo.display().to_string());
         let workspace = repo.join("target/plugin-tests/graph-drift");
-        let target_dir = repo.join("target/plugin-tests");
+        let target_dir = repo.join("target/graph-tests");
         write_hosts_crate(&workspace, &hyg_dep);
 
         let doc = greeting_doc();

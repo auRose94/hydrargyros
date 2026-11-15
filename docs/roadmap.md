@@ -507,7 +507,48 @@ The port rung queue is closed; new work branches from these items:
    drive the whole pipeline — generate, `rustc`, `load_plugin` through
    the M1 boundary, the route in the function table (`rust_route.handle`),
    live HTTP serving `hello, Rose (native)!`, and the drift remap.
-   Next rung: M5 (debugger + inspector), then M6 (WASM tier). The
+   Next rung: M5 (debugger + inspector), then M6 (WASM tier).
+
+6f. **The `dynamic` module — M5 landed (2026-11-14): the debugger + the
+   inspector.** **One implementation for both modules** — a web route's
+   handler and a game frame's component are both "handlers over `Var`",
+   and both debug through the same seam. The debugger is an
+   **interpreter** (`hyg::dynamic::graph::debug`, feature-free): the
+   compiled paths (JS, Rust) exist for speed; a debug execution walks
+   the same validated graph, calls the SAME function table, and
+   evaluates pure nodes with the canonical Var-native semantics
+   (`native_compare` — the generated Rust helper and the JS loose
+   semantics must agree, and the cross-path test proves the interpreter
+   and the compiled JS route produce IDENTICAL results for the same
+   graph and input). `DebugRun` is a state machine driven from two
+   sides: the **executing side** (`drive` — one segment, to the next
+   pause or the finish; non-blocking, so the game pump paces a graph
+   *per frame* from a component's `update` — one node per frame, the
+   pump IS the debugger's pacing; `run_blocking` parks a request's
+   thread at every pause — a breakpoint freezes the frame) and the
+   **debugger side** (`wait_event`, `watch` — any pin's live value,
+   pure chains computing on demand, unexecuted outs an explicit error
+   never a silent Null — plus `resume`/`step`/`abort` for stuck runs).
+   Runtime errors carry the **actually walked path** as their flow
+   chain — ground truth, not a prediction. Active runs register in a
+   process-global registry — the seam an admin console or Studio panel
+   attaches through. `GraphRoute::debug_handler` serves a route through
+   the debugger: a real POST parks mid-flight at a breakpoint, the
+   staged request visible at the pause, the response frozen until a
+   client resumes — and then indistinguishable from the compiled path's
+   response. The **inspector** (`hyg::dynamic::graph::inspect`,
+   feature-free) renders every node's descriptor as a `.hyg` document —
+   kind, summary, per-pin docs, doc links that resolve to real repo
+   files (test-asserted), and function nodes surfacing the host
+   function behind them (origin + summary from the table); unresolvable
+   kinds are shown as unknown, not hidden. The descriptor refactor
+   feeding it: pins became `PinSpec {name, ty, doc}`, kinds carry
+   `summary`/`doc`. 9 tests in `tests/dynamic_graph_debug.rs`. Also:
+   the M1 live-server test's entry window gained diagnostics on timeout
+   (panicked task vs stalled dispatch) and M4's generated-crate builds
+   moved to their own target dir — the intermittent 5s-window flake
+   under full-suite load is retired with evidence. Next rung: M6 (the
+   WASM tier). The
    full design remains at [dynamic-design.md](dynamic-design.md)
    — the third application module, shared by web and game: FFI plugins
    with hot reload for always-up processes (the trusted tier), the

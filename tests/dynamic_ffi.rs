@@ -401,16 +401,22 @@ mod live_server {
         // bounded but generous: under full-suite parallel load the request
         // can take a while to get dispatched — never sleep-and-hope on a
         // 1s window
-        let entered = tokio::time::timeout(Duration::from_secs(5), async {
+        let entered = tokio::time::timeout(Duration::from_secs(30), async {
             while plugin.in_flight() < 1 {
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
         })
         .await;
-        assert!(
-            entered.is_ok(),
-            "the slow request entered v1 within the window"
-        );
+        if entered.is_err() {
+            // diagnose the world instead of asserting blind: a panicked
+            // task (transport) vs a stalled dispatch (load) read
+            // differently
+            let task_state = if slow.is_finished() { "finished" } else { "still running" };
+            panic!(
+                "the slow request never entered v1 in 30s (task {task_state}, in_flight {}, addr {addr})",
+                plugin.in_flight()
+            );
+        }
 
         let v2 = build_plugin(&[("HYG_PLUGIN_ID", id), ("HYG_PLUGIN_VERSION", "0.2.0")]);
         let report = plugin.reload(&v2, Duration::from_secs(5)).expect("reload");
