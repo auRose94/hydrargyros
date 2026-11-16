@@ -269,6 +269,97 @@ fn abort_unwedges_a_stuck_run() {
     );
 }
 
+/// Pause-anywhere: a debugger can halt a RUNNING graph at the next node
+/// entry, without any pre-declared breakpoint. The slow function node
+/// makes the mid-run window real; the pause lands between entries.
+#[test]
+fn pause_stops_a_running_graph_at_the_next_entry() {
+    // a greet that takes real time, so the run spends milliseconds
+    // between node entries — the arming window the race exercises
+    register_function(
+        "dbg_slow_greet",
+        FunctionMeta {
+            summary: "greets, slowly".into(),
+            inputs: vec![Ty::Str],
+            output: Ty::Str,
+            origin: "host:dbg_slow_greet".into(),
+        },
+        Arc::new(Mutex::new(Box::new(|args: &[Var]| {
+            std::thread::sleep(Duration::from_millis(20));
+            Ok(Var::from(format!(
+                "hello, {}!",
+                args[0].as_str().unwrap_or_default()
+            )))
+        }))),
+    );
+    let graph_with = |greet: &str| {
+        let doc = Var::from(hyg::o! {
+            "graph": Var::from("pause-anywhere"),
+            "format": Var::from(GRAPH_FORMAT),
+            "nodes": Var::from(hyg::a![
+                node("req1", "web/request"),
+                node_params("get1", "data/get", Var::from(hyg::o! { "key": Var::from("who") })),
+                node(greet, "dbg_slow_greet"),
+                node("resp1", "web/respond"),
+            ]),
+            "wires": Var::from(hyg::a![
+                wire("req1", "exec", greet, "exec"),
+                wire(greet, "exec", "resp1", "exec"),
+                wire("req1", "body", "get1", "value"),
+                wire("get1", "out", greet, "in0"),
+                wire(greet, "out", "resp1", "body"),
+            ]),
+            "entry": Var::from(hyg::a![Var::from("req1")]),
+        });
+        Graph::from_var(&doc).expect("structurally valid")
+    };
+
+    let run = DebugRun::start(&graph_with("greet1"), demo_input(), vec![])
+        .expect("the graph validates");
+    let _guard = RunGuard(Arc::clone(&run));
+
+    // the executing side runs free (no breakpoints — one drive would
+    // finish it), so it runs on its own thread; the debugger side pauses
+    // it mid-run
+    let runner = {
+        let run = Arc::clone(&run);
+        std::thread::spawn(move || run.run_blocking())
+    };
+
+    // arm the pause while the run is somewhere mid-graph
+    let mut armed = false;
+    for _ in 0..100 {
+        if !run.path().is_empty() {
+            armed = run.pause();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(armed, "the pause armed while the run was executing");
+
+    // the run stops at the NEXT entry — a Step pause, nobody resumed it
+    match run.wait_event(Duration::from_secs(5)) {
+        Some(DebugEvent::Paused { reason, .. }) => {
+            assert_eq!(reason, PauseReason::Step, "pause-anywhere is a step stop");
+        }
+        other => panic!("expected the armed pause, got {other:?}"),
+    }
+    // the paused node has not executed; at most the entry ran
+    assert!(run.path().len() <= 2, "paused before executing: {:?}", run.path());
+
+    assert!(run.resume(), "the paused run resumes");
+    let result = runner.join().expect("the runner joins").expect("succeeds");
+    assert_eq!(result.as_str(), Some("hello, Rose!"));
+    assert_eq!(
+        run.path(),
+        vec!["req1", "greet1", "resp1"],
+        "the whole chain walked after resuming"
+    );
+
+    // pausing a finished run is a no-op answer, not an arm
+    assert!(!run.pause(), "a finished run cannot re-arm a pause");
+}
+
 #[test]
 fn the_registry_is_the_attach_seam() {
     register_greet();

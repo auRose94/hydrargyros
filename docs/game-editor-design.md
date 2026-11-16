@@ -228,6 +228,20 @@ attach through the same seam (graph nodes become the component's hooks),
 and its agentic drafting — prompt → graph draft the developer scans in
 this viewport — is the later, security-gated layer on top.
 
+**Debugger rulings (2026-11-16, user-approved).** Parking at a breakpoint
+is **indefinite — no time limit**: a developer thinking hard, or away for
+coffee, must never come back to a run the host killed. This is safe because
+of the web layer's blocking-pool rule (the AGENTS.md trap: handlers may
+block; workers may not) — a parked run holds a blocking thread, never a
+runtime worker. Two consequences: **pause anywhere** is in-scope — a
+debugger can halt a running graph at the next node entry without a
+pre-declared breakpoint (`DebugRun::pause`); and a frozen graph must never
+freeze the picture — **the renderer keeps drawing every frame**. The pump
+drives `drive()` non-blockingly per frame, so a paused graph simply stops
+advancing while the draw pass continues (live visuals, not a stuck last
+frame); the hard-freeze `run_blocking` shape stays a server-side route
+tool, never the editor's pause.
+
 ### Asset pipeline
 
 glTF import exists (`gltf` feature: node transforms + material base colors
@@ -242,7 +256,7 @@ runs in headless tests.
 | Stage | Deliverable | Done when |
 | --- | --- | --- |
 | M0 | Scene model | **LANDED 2026-11-14.** Scenes (de)serialize headless; `FromVar` rejects bad scenes with path errors; round-trip test: build → save → load → save is byte-identical (`tests/scene.rs`, `tests/carrier.rs`) |
-| M1 | Editor core | winit shell + egui panels + viewport presenting `FrameSink`; hierarchy + inspector editing a live `Engine`; headless UI-logic tests |
+| M1 | Editor core | **LANDED 2026-11-16.** winit shell + egui panels + viewport presenting `FrameSink`; hierarchy + inspector editing a live `Engine`; headless UI-logic tests (`src/game/editor/`, `tests/editor.rs`, `examples/editor_shell.rs`) |
 | M2 | Manipulation | Selection (picking), transform gizmos, undo/redo, scene save/load from the UI; pixel tests assert gizmo rendering |
 | M3 | Play mode | Play/pause/step with snapshot-restore; script editing + live reload; console shows script errors |
 | M4 | Assets | glTF/texture/audio import flow; physics + audio debug views (colliders, raycasts, sound list) |
@@ -260,7 +274,11 @@ feel heavy, the design bends there before anything else.
   in-viewport overlays (gizmo labels, handles) also go through egui or stay
   in the overlay pass needs a prototype.
 - **winit 0.30 + egui integration** on the same surface as the viewport —
-  verify layering before M1.
+  **ANSWERED (M1)**: egui 0.37 pairs with wgpu 30 + winit 0.30 exactly (the
+  same wheel versions); the shell blits the engine frame as a first pass
+  and composites egui in a second load pass of the same surface view
+  (`src/game/editor/shell.rs`). In-viewport overlays (gizmo labels,
+  handles) stay open for M2's prototype.
 - **Windowing direction — Wayland first, X11 second, HDR on Wayland.**
   winit already prefers Wayland at runtime when a compositor is present;
   keep that ordering and build **HDR** on it — HDR needs the compositor's

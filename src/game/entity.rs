@@ -35,6 +35,13 @@ impl Entity {
         &self.name
     }
 
+    /// Rename the entity (the editor inspector's name row). The
+    /// script-facing handle — anything holding the old name sees the new
+    /// one on its next lookup.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
     pub fn transform(&self) -> &Transform {
         &self.transform
     }
@@ -60,7 +67,7 @@ impl Entity {
 
     /// The entity's components, in attach order — the scene save walk and
     /// the editor's inspector read them through this.
-    pub(crate) fn iter_components(&self) -> impl Iterator<Item = &dyn Component> + '_ {
+    pub fn iter_components(&self) -> impl Iterator<Item = &dyn Component> + '_ {
         self.components.iter().map(|slot| slot.component.as_ref())
     }
 

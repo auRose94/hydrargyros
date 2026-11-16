@@ -117,7 +117,7 @@ WebSockets). See the README table in `examples/` for the full index.
   learn hyg.
 - [docs/platforms.md](docs/platforms.md) — platform support matrix.
 - Design drafts (for review): [Hydrargyros Studio](docs/game-editor-design.md)
-  (game engine & editor — **M0, the scene model, landed**),
+  (game engine & editor — **M0 scene model + M1 editor core landed**),
   [Hydrargyros Press](docs/web-editor-design.md)
   (WYSIWYG website/API editor), and the
   [`dynamic` module](docs/dynamic-design.md) (FFI, scripts, visual

@@ -37,6 +37,7 @@
 
 pub mod camera;
 pub mod component;
+pub mod editor;
 pub mod engine;
 pub mod entity;
 pub mod light;
@@ -72,6 +73,7 @@ pub mod winit_window;
 
 pub use camera::{Camera, OrbitController, Projection};
 pub use component::{Component, Priority};
+pub use editor::ui::EditorUi;
 pub use engine::Engine;
 pub use entity::Entity;
 #[cfg(feature = "audio")]

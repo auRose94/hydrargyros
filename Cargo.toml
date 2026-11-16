@@ -74,6 +74,15 @@ tempfile = { version = "3", optional = true }
 # with no ambient authority wired (no WASI: no fs, no net, no clock); the
 # `wat` feature lets tests author plugins as text modules
 wasmtime = { version = "48", optional = true, default-features = false, features = ["cranelift", "runtime", "wat"] }
+# editor: the Studio shell — egui panels composited over the engine's frame.
+# egui-wgpu 0.37 targets wgpu 30 and egui-winit 0.37 targets winit 0.30: the
+# same wheels the engine already turns (verified against the vendored
+# manifests before adding). Minimal features: default_fonts for the glyph
+# atlas, no clipboard yet (M2 polish); winit's backend defaults come from
+# this crate's own `winit` dep, not through egui-winit
+egui = { version = "0.37", default-features = false, features = ["default_fonts"], optional = true }
+egui-wgpu = { version = "0.37", default-features = false, optional = true }
+egui-winit = { version = "0.37", default-features = false, optional = true }
 
 # tray deps are target-split: Linux renders the glyph through GTK
 # (libappindicator), Windows/macOS use tray-icon's native backends. The
@@ -115,6 +124,8 @@ dynamic-ffi = ["dep:abi_stable", "dep:libloading", "dep:tempfile", "dep:hyg-plug
 # dynamic-wasm: the sandboxed plugin tier — wasmtime runs untrusted modules
 # with no ambient authority wired (no WASI: no fs, no net, no clock)
 dynamic-wasm = ["dep:wasmtime", "dep:hyg-plugin-api"]
+# editor: the Studio shell — egui panels composited over the engine's frame
+editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "wgpu", "winit"]
 
 [dev-dependencies]
 serde_json = "1"
@@ -177,6 +188,10 @@ required-features = ["audio"]
 [[example]]
 name = "game_tray"
 required-features = ["tray"]
+
+[[example]]
+name = "editor_shell"
+required-features = ["editor", "physics"]
 
 # the FFI boundary proof: builds the out-of-tree test plugin, loads it,
 # hot-swaps it under live traffic (tests/ffi-plugin is the plugin crate)

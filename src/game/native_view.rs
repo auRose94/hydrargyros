@@ -142,8 +142,10 @@ pub fn fit_extents(surface: (u32, u32), image: (u32, u32)) -> [f32; 2] {
 
 /// The blit: a uv-driven quad (six vertices) whose clip rect is the
 /// letterbox fit, the frame texture sampled with the bilinear sampler.
+/// `pub(crate)`: the Studio shell composites the same underlay pass (the
+/// editor's viewport) before its egui pass.
 #[cfg(feature = "wgpu")]
-const BLIT_WGSL: &str = r#"
+pub(crate) const BLIT_WGSL: &str = r#"
 @group(0) @binding(0) var<uniform> fit: vec4f; // x, y = clip half-extents
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
@@ -234,13 +236,14 @@ fn run_view(sink: FrameSink, title: String, shared: Arc<Shared>) {
 
 /// One view's renderer: the surface, the blit pipeline, and the uploaded
 /// frame texture (recreated when the frame size changes, written on every
-/// new generation).
+/// new generation). `pub(crate)` machinery: the Studio shell is the same
+/// second-consumer shape — its egui panels composite over the blit.
 #[cfg(feature = "wgpu")]
-struct ViewState {
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+pub(crate) struct BlitView {
+    pub(crate) surface: wgpu::Surface<'static>,
+    pub(crate) config: wgpu::SurfaceConfiguration,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
     bind_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
@@ -255,7 +258,7 @@ struct ViewState {
 }
 
 #[cfg(feature = "wgpu")]
-impl ViewState {
+impl BlitView {
     fn present_frame(&mut self, frame: &Frame) {
         self.upload(frame);
         self.seen = frame.generation;
@@ -265,7 +268,7 @@ impl ViewState {
     /// Upload the frame's rgba as an Rgba8UnormSrgb texture (sRGB bytes in,
     /// sRGB surface out — net identity), recreate it when the size changed,
     /// and re-fit the letterbox.
-    fn upload(&mut self, frame: &Frame) {
+    pub(crate) fn upload(&mut self, frame: &Frame) {
         let dims = [frame.width, frame.height];
         if self.image != dims {
             self.image = dims;
@@ -330,7 +333,7 @@ impl ViewState {
 
     /// Reconfigure the surface for a new size and re-fit (the fit uniform
     /// depends on both the image and the surface aspect).
-    fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+    pub(crate) fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
         self.config.width = size.width.max(1);
         self.config.height = size.height.max(1);
         self.surface.configure(&self.device, &self.config);
@@ -361,7 +364,7 @@ impl ViewState {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hyg-native-view-blit"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -377,18 +380,27 @@ impl ViewState {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind, &[]);
-            pass.draw(0..6, 0..1);
+            let mut pass = pass.forget_lifetime();
+            self.blit_into(&mut pass);
         }
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
+    }
+
+    /// Record the frame blit into an EXISTING render pass — the shared
+    /// underlay shape: the shell composites its egui pass over this.
+    pub(crate) fn blit_into(&self, pass: &mut wgpu::RenderPass<'static>) {
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &self.bind, &[]);
+        pass.draw(0..6, 0..1);
     }
 }
 
 /// Build the wgpu surface + blit pipeline against the created window.
 #[cfg(feature = "wgpu")]
-async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<ViewState, String> {
+pub(crate) async fn build_blit_view(
+    window: &std::sync::Arc<winit::window::Window>,
+) -> Result<BlitView, String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let surface = instance
         .create_surface(window.clone())
@@ -541,7 +553,7 @@ async fn build_view(window: &std::sync::Arc<winit::window::Window>) -> Result<Vi
             },
         ],
     });
-    let state = ViewState {
+    let state = BlitView {
         surface,
         config,
         device,
@@ -565,7 +577,7 @@ struct ViewHandler {
     sink: FrameSink,
     title: String,
     shared: Arc<Shared>,
-    view: Option<ViewState>,
+    view: Option<BlitView>,
 }
 
 #[cfg(feature = "wgpu")]
@@ -584,7 +596,7 @@ impl winit::application::ApplicationHandler<ViewMessage> for ViewHandler {
                 return;
             }
         };
-        match pollster::block_on(build_view(&window)) {
+        match pollster::block_on(build_blit_view(&window)) {
             Ok(view) => {
                 self.view = Some(view);
                 self.shared.open.store(true, Ordering::SeqCst);

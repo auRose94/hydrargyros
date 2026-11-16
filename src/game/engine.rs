@@ -136,6 +136,27 @@ impl Engine {
         self.entities.iter_mut().find(|e| e.name() == name)
     }
 
+    /// The entity at a tree path — `[root_idx, child_idx, …]` walking
+    /// `children` (the editor's selection addressing; component slots use
+    /// [`slot_at_mut`](super::entity::Entity::slot_at_mut)'s longer paths).
+    /// `None` off the tree.
+    #[must_use]
+    pub fn entity_at(&self, path: &[usize]) -> Option<&Entity> {
+        let [first, rest @ ..] = path else {
+            return None;
+        };
+        walk(&self.entities, *first, rest)
+    }
+
+    /// The mutable twin of [`entity_at`](Self::entity_at) — the editor's
+    /// inspector writes through this.
+    pub fn entity_at_mut(&mut self, path: &[usize]) -> Option<&mut Entity> {
+        let [first, rest @ ..] = path else {
+            return None;
+        };
+        walk_mut(&mut self.entities, *first, rest)
+    }
+
     /// The frame cap in milliseconds; `0` disables it (headless runs).
     pub fn frame_time(&mut self, ms: f64) -> &mut Self {
         self.frame_time = ms;

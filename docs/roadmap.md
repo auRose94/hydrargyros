@@ -628,12 +628,12 @@ The port rung queue is closed; new work branches from these items:
 ## The editor arc — Hydrargyros Studio
 
 The game-editor milestone queue ([game-editor-design.md](game-editor-design.md)):
-M0 scene model, M1 editor core (winit shell + egui + viewport), M2
-manipulation (picking, gizmos, undo), M3 play mode (snapshot/restore, live
-reload), M4 assets, M5 polish (packaging). One binary — the editor *is* the
-engine running with a shell around it; the headless-first pump, the
-registered window backends, and the multi-consumer `FrameSink` are the
-seams it grows through.
+M0 scene model (**landed**), M1 editor core (**landed**), M2 manipulation
+(picking, gizmos, undo), M3 play mode (snapshot/restore, live reload), M4
+assets, M5 polish (packaging). One binary — the editor *is* the engine
+running with a shell around it; the headless-first pump, the registered
+window backends, and the multi-consumer `FrameSink` are the seams it grows
+through.
 
 7. **Studio M0 landed (2026-11-14): the scene model.** Scenes are `.hyg`
    documents and everything about them runs and tests headless. The
@@ -686,6 +686,49 @@ seams it grows through.
    `tests/scene.rs`, 7 in `tests/carrier.rs` (suite 324 green). Next
    rung: **M1 — the editor core** (winit shell + egui panels + viewport
    presenting `FrameSink`).
+
+8. **Studio M1 landed (2026-11-16): the editor core.** The design's open
+   question — winit 0.30 + egui on the same surface — is answered as
+   code, and the version fit was already sitting in the registry:
+   **egui 0.37 depends on wgpu 30 and winit 0.30 exactly** (verified
+   against the vendored manifests before adding; minimal features —
+   `default_fonts`, no clipboard yet). The **`editor` feature** composes
+   the trio with the engine's own `wgpu`/`winit`. The module splits for
+   the headless-first rule: `hyg::game::editor::ui` (feature-free) is the
+   editor's STATE and OPERATIONS — selection (tree paths
+   `[root_idx, child_idx, …]`), hierarchy snapshots
+   (`HierarchyNode` carrying the path that selects each entity back),
+   and the inspector's edits (rename/enable/transform, applied through
+   the new `Engine::entity_at(_mut)` path walk and `Entity::set_name`)
+   — every op answers `false` and touches nothing on an empty or stale
+   selection; `hyg::game::editor::shell` (the feature's payload) is the
+   window: the pump drives the engine on a worker thread through a
+   shared mutex, winit owns the main thread, and each display frame
+   blits the engine's latest `FrameSink` frame (the native view's
+   machinery, extracted to a shared `pub(crate) BlitView`) as an
+   underlay pass, then composites egui panels in a second load pass of
+   the same surface view — the Hierarchy (click to select), the
+   Inspector (name/enabled/transform DragValues, writes land live), the
+   status bar. The layering proof ran on the desktop: panels over the
+   live physics scene, ball mid-fall under the panels. Panels lock the
+   engine while drawing — a value drag can cost the pump a frame;
+   correctness first, noted honestly in the shell docs. Debugger
+   rulings recorded in the design doc (user-approved): breakpoint
+   parking is INDEFINITE (no time limit — safe since the blocking-pool
+   fix), pause-anywhere is in-scope, and a paused graph must never
+   freeze the picture — the shell keeps drawing. **`DebugRun::pause`**
+   landed with the ruling: arming a running graph stops it at the NEXT
+   node entry (mid-execute included), tested with a slow function node
+   under real concurrency. Engine surface additions:
+   `entity_at`/`entity_at_mut`, `Entity::set_name`, `iter_components`
+   made public (the inspector and the scene save share it).
+   `examples/editor_shell.rs` runs the shell over the sandbox scene
+   (`cargo run --example editor_shell --features editor,physics`). 5
+   headless UI-logic tests in `tests/editor.rs` (suite 330 green under
+   `--all-features`, clippy clean). Also: `cargo clean` reclaimed 261G
+   of build cache — the linker had started dying (`ld: Bus error`) on
+   the 100%-full data disk. Next rung: **M2 — manipulation** (picking,
+   transform gizmos, undo/redo, scene save/load from the UI).
 
 ## What hyg will NOT do
 

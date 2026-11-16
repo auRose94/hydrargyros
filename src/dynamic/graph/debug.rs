@@ -309,6 +309,25 @@ impl DebugRun {
         }
     }
 
+    /// Pause a RUNNING run at its next node entry — pause-anywhere, no
+    /// pre-declared breakpoint needed. The armed stop applies from the
+    /// next entry the executing side reaches (mid-`execute` included: the
+    /// current node finishes, the next one pauses). `true` when the
+    /// request was armed (a paused or finished run is already stopped and
+    /// needs no arming).
+    pub fn pause(&self) -> bool {
+        let mut st = self.state.lock().expect("debug run state");
+        if let Phase::Running { skip, .. } = st.phase.clone() {
+            st.phase = Phase::Running {
+                step_once: true,
+                skip,
+            };
+            true
+        } else {
+            false
+        }
+    }
+
     /// Abort a stuck run (a breakpoint nobody resumes must not hold a
     /// frame or a request thread forever). The executing side unwinds
     /// with an explicit error.
