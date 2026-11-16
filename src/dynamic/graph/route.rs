@@ -118,10 +118,22 @@ impl GraphRoute {
                 Err(e) => return Response::text(format!("debug route: {e}")).status(500),
             };
             let id = register_run(Arc::clone(&run));
+            let _unregister = UnregisterOnDrop(id);
             let result = run.run_blocking();
-            unregister_run(id);
             map_result(result)
         }
+    }
+}
+
+/// Unregisters the run when the handler's scope ends — success, error,
+/// or panic. A leaked registry entry pins the run's `Arc` forever (and
+/// pollutes the attach seam's listing); Drop runs during unwind, so a
+/// panicking node call can't strand it.
+struct UnregisterOnDrop(u64);
+
+impl Drop for UnregisterOnDrop {
+    fn drop(&mut self) {
+        unregister_run(self.0);
     }
 }
 

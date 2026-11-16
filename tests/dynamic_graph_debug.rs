@@ -4,6 +4,11 @@
 //! game test steps a graph through the REAL pump (one node per frame);
 //! the gated tests prove the JS path and the interpreter agree, and
 //! that a live route parks mid-flight with its staged request visible.
+//!
+//! Convention: any test whose run can sit parked in `run_blocking`
+//! holds a [`RunGuard`] — a failed assertion must abort the run
+//! (unwinding the parked thread), never strand it: a stranded runner
+//! freezes a tokio worker and the whole test binary hangs in silence.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -91,6 +96,21 @@ fn register_greet() {
             )))
         }))),
     );
+}
+
+/// Aborts the run when dropped — the anti-hang guard. A run parked in
+/// `run_blocking` is woken ONLY by a command (`resume`/`step`/`abort`),
+/// and the parked thread holds a tokio worker: if a test fails between
+/// the pause and the command, the stranded worker freezes the runtime,
+/// the harness's buffered output never flushes, and the binary hangs in
+/// silence forever. Drop runs during panic unwind, so holding a guard
+/// converts every failure path into a visible test failure instead.
+struct RunGuard(Arc<DebugRun>);
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 // ---- breakpoints, watches, resume ----
@@ -227,6 +247,7 @@ fn abort_unwedges_a_stuck_run() {
     register_greet();
     let run = DebugRun::start(&greeting_graph(), demo_input(), vec!["greet1".into()])
         .expect("the graph validates");
+    let _guard = RunGuard(Arc::clone(&run));
     let _ = run.drive().expect("drives to the breakpoint");
 
     // the debugger side observes the pause, then aborts instead of
@@ -522,16 +543,27 @@ mod live_route {
         // real traffic — the request parks mid-flight at the breakpoint
         let client = tokio::spawn(async move { post(&addr, "/dbg", r#"{"who":"Rose"}"#).await });
 
-        // the debugger client polls the registry and attaches
+        // the debugger client polls the registry and attaches — matching
+        // THIS run by its staged input: the registry is process-global and
+        // this binary's other tests register runs concurrently, so a bare
+        // "first run" grab can steal a foreign one
         let mut run = None;
         for _ in 0..500 {
-            if let Some((_, r)) = active_runs().into_iter().next() {
-                run = Some(r);
+            for (_, r) in active_runs() {
+                if r.input().get("body").get("who").as_str() == Some("Rose") {
+                    run = Some(r);
+                    break;
+                }
+            }
+            if run.is_some() {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         let run = run.expect("the debug run is registered while the request is parked");
+        // any failure from here on must abort the parked runner — the
+        // guard unwinds it even through a panic (see RunGuard)
+        let _guard = RunGuard(Arc::clone(&run));
 
         // the pause event, the staged request visible at the breakpoint
         match run.wait_event(Duration::from_secs(5)) {

@@ -86,6 +86,14 @@ included. If something fails, it's yours: fix it or revert.
   axum-server's notify_waiters can be missed between accept-loop iterations —
   if shutdown hangs reappear, suspect lost-notify first. Never double-spawn
   `start()` on one `Server`.
+- **Sync route handlers run on the blocking pool** (`stage_req` →
+  `spawn_blocking`), never inline on a runtime worker: a blocking handler on
+  the worker carrying tokio's driver freezes every timer and IO event in the
+  process — total silence, no panic, no output (the shape that wedged the
+  graph-debug suite; core-dump autopsy 2026-11-15: 33 threads futex-parked,
+  zero in `epoll_wait`). Handlers may block; workers may not. If a suite
+  hangs silently, check for a std-condvar/mutex wait on a runtime thread
+  before blaming the test logic.
 - `o!` returns an `Object` (wrap in `Var::from`); verify batch text edits
   with grep afterwards — blind `str.replace` no-ops silently on needle
   mismatch.

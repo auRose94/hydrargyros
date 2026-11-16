@@ -380,20 +380,32 @@ where
 }
 
 /// Wrap a `Var -> Response` handler in the extractor tuple every route
-/// shares. The handler runs synchronously inside the async block (handlers
-/// are quick in-memory transforms; async handlers are a future step). The
-/// extractor order matters (body-consuming `Bytes` last).
+/// shares. The handler runs on the **blocking pool** — a sync handler is
+/// an arbitrary transform (script evals, the graph debugger's parked
+/// runs), and running it inline on a runtime worker lets it freeze the
+/// driver that worker may carry: with the driver blocked, no timer and no
+/// IO event fires anywhere in the server, and every async wait in the
+/// process stalls forever. A handler that panics becomes a loud 500
+/// instead of tearing down its connection. The extractor order matters
+/// (body-consuming `Bytes` last).
 fn stage_req(
     handler: RouteHandler,
-) -> impl Fn(Method, Uri, RawPathParams, RawQuery, HeaderMap, Bytes) -> std::future::Ready<Response>
+) -> impl Fn(Method, Uri, RawPathParams, RawQuery, HeaderMap, Bytes)
+    -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
 + Clone
 + Send
 + Sync
 + 'static {
     move |method, uri, params: RawPathParams, query: RawQuery, headers: HeaderMap, bytes: Bytes| {
+        let handler = Arc::clone(&handler);
         let params = params.iter().map(|(k, v)| (k.to_string(), v.to_string()));
         let req = build_req(&method, &uri, params, query.0.as_deref(), &headers, &bytes);
-        std::future::ready(handler(req))
+        Box::pin(async move {
+            match tokio::task::spawn_blocking(move || handler(req)).await {
+                Ok(response) => response,
+                Err(e) => Response::text(format!("route handler failed: {e}")).status(500),
+            }
+        })
     }
 }
 

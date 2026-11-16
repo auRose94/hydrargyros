@@ -549,7 +549,20 @@ The port rung queue is closed; new work branches from these items:
    (panicked task vs stalled dispatch) and M4's generated-crate builds
    moved to their own target dir — the intermittent 5s-window flake
    under full-suite load is retired with evidence. Next rung: M6 (the
-   WASM tier).
+   WASM tier). **Post-landing fix (2026-11-15): the live-route test's
+   intermittent eternal hang, core-dump autopsied.** The web layer ran
+   sync route handlers INLINE on runtime workers — and a handler that
+   blocks (a debug run parked at a breakpoint) freezes the worker
+   carrying tokio's driver: no timer and no IO event fires anywhere in
+   the process, every async wait stalls forever, no panic, no output —
+   the binary wedged ~1-in-5 hammer runs. `stage_req` now runs handlers
+   on the **blocking pool** (`spawn_blocking`; a panicking handler is a
+   loud 500, not a torn-down connection), the test matches its run by
+   staged input (a process-global registry + parallel tests = a bare
+   first-run grab steals foreign runs), an abort-on-drop `RunGuard`
+   makes any failed assertion unwind the parked runner instead of
+   stranding it, and `debug_handler` unregisters its run on unwind.
+   The trap lives in AGENTS.md: handlers may block; workers may not.
 
 6g. **The `dynamic` module — M6 landed (2026-11-14): the WASM tier, the
    milestone queue complete.** `hyg::dynamic::wasm` (behind
