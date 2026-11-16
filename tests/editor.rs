@@ -569,6 +569,69 @@ fn scene_io_round_trips_through_the_engine() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+// ---- round 3: the editor camera + the view basis ----
+
+/// The view basis's `right` matches the SCREEN's right: projecting a
+/// step along it lands at larger pixel x. (The forward×up order built
+/// the LEFT vector and inverted every view-plane drag — the gold center
+/// square moved opposite the cursor.)
+#[test]
+fn view_basis_right_matches_the_screen() {
+    use hyg::game::editor::gizmo::view_basis;
+
+    let camera = pick_camera();
+    let (_, right, up) = view_basis(&camera);
+    let view = view();
+    let origin_px = pick::project_point(&camera, &view, Vec3::new(0.0, 0.0, 0.0))
+        .expect("origin projects");
+    let right_px = pick::project_point(&camera, &view, right)
+        .expect("the step stays in front");
+    assert!(
+        right_px[0] > origin_px[0],
+        "a step along `right` must move screen-x positive: {origin_px:?} -> {right_px:?}"
+    );
+    // and up moves screen-y NEGATIVE (pixel y grows down)
+    let up_px = pick::project_point(&camera, &view, up).expect("projects");
+    assert!(
+        up_px[1] < origin_px[1],
+        "a step along `up` must move screen-y negative: {origin_px:?} -> {up_px:?}"
+    );
+}
+
+/// The orbit camera's default looks at its target from above/behind
+/// along +z (the scenes' build axis): target at clip center, eye on the
+/// -z side, elevated.
+#[test]
+fn orbit_default_frames_the_target() {
+    use hyg::game::editor::camera_ctl::Orbit;
+
+    let orbit = Orbit::default();
+    let camera = orbit.camera(16.0 / 9.0);
+    // the view basis's right/up contract carries to the orbit camera too
+    let (_, right, up) = gizmo::view_basis(&camera);
+    let view = Viewport::new(0.0, 0.0, 960.0, 540.0);
+    let center = pick::project_point(&camera, &view, orbit.target).expect("target projects");
+    let right_px = pick::project_point(&camera, &view, orbit.target + right).expect("projects");
+    let up_px = pick::project_point(&camera, &view, orbit.target + up).expect("projects");
+    assert!(right_px[0] > center[0], "orbit right = screen right");
+    assert!(up_px[1] < center[1], "orbit up = screen up");
+    // elevated and behind: eye z < target z, eye y > target y
+    assert!(camera.position.z < orbit.target.z);
+    assert!(camera.position.y > orbit.target.y);
+
+    // orbit_by pans the view around; zoom_by dollies in
+    let mut orbit = Orbit::default();
+    let d0 = orbit.distance;
+    orbit.zoom_by(100.0); // wheel up = zoom in
+    assert!(orbit.distance < d0);
+    orbit.orbit_by(100.0, 0.0); // drag right
+    let camera = orbit.camera(16.0 / 9.0);
+    assert!(
+        camera.position.x > Orbit::default().camera(16.0 / 9.0).position.x,
+        "dragging right orbits the EYE toward +x"
+    );
+}
+
 // ---- M2 fix round: the history panel's timeline ----
 
 /// The history panel: entries describe the timeline (applied vs

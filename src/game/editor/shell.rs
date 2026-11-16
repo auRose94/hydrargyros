@@ -43,6 +43,7 @@ use crate::game::editor::pick::{self, Viewport};
 use crate::game::editor::style;
 use crate::game::editor::ui::EditorUi;
 use crate::game::engine::Engine;
+use crate::game::entity::Entity;
 use crate::game::render::FrameSink;
 use crate::game::scene::Scene;
 use crate::var::{Quat, Vec3};
@@ -137,13 +138,16 @@ fn run_shell(
     let event_loop = builder
         .build()
         .map_err(|e| format!("studio: event loop: {e} (no display server?)"))?;
+    let scene_camera = engine.lock().map(|engine| *engine.camera()).unwrap_or_default();
+    let quit = Arc::new(AtomicBool::new(false));
     let mut handler = ShellHandler {
         engine,
         sink,
         title,
         playing,
         dirty,
-        state: EditorState::new(),
+        quit,
+        state: EditorState::new(scene_camera),
         window: None,
         view: None,
         egui_ctx: None,
@@ -162,6 +166,9 @@ enum ShellMessage {}
 struct ShellShared {
     playing: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    /// File > Quit — the event loop watches it (egui's viewport Close
+    /// command does not reach winit 0.30 through this embed).
+    quit: Arc<AtomicBool>,
 }
 
 impl ShellShared {
@@ -181,6 +188,8 @@ struct ShellHandler {
     playing: Arc<AtomicBool>,
     /// The pump's re-render gate while paused (set by every edit).
     dirty: Arc<AtomicBool>,
+    /// File > Quit (watched in about_to_wait).
+    quit: Arc<AtomicBool>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -218,10 +227,18 @@ struct EditorState {
     /// pressed — Stop/Restart restore it, so play never dirties the edit
     /// state).
     snapshot: Option<crate::Var>,
+    /// The SCENE's camera — what the document saves and play mode uses.
+    /// The editor's viewport uses its own orbit camera instead; this is
+    /// the source of truth for save/play.
+    scene_camera: crate::game::Camera,
+    /// The editor's viewport camera (orbit).
+    orbit: crate::game::editor::camera_ctl::Orbit,
     /// The history panel's open flag.
     show_history: bool,
     /// The file dialog (None until first opened).
     files: Option<FileDialog>,
+    /// The + component combo's pending choice (None = nothing picked).
+    add_pick: Option<String>,
 }
 
 /// One open scene (a tab): its label, its path once saved/loaded, and
@@ -245,8 +262,10 @@ struct FileDialog {
 }
 
 impl EditorState {
-    fn new() -> EditorState {
+    fn new(scene_camera: crate::game::Camera) -> EditorState {
         EditorState {
+            scene_camera,
+            orbit: crate::game::editor::camera_ctl::Orbit::default(),
             ui: EditorUi::new(),
             mode: GizmoMode::Translate,
             drag: None,
@@ -269,6 +288,7 @@ impl EditorState {
             snapshot: None,
             show_history: false,
             files: None,
+            add_pick: None,
         }
     }
 
@@ -419,6 +439,10 @@ impl winit::application::ApplicationHandler<ShellMessage> for ShellHandler {
     }
 
     fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        if self.quit.load(Ordering::SeqCst) {
+            event_loop.exit();
+            return;
+        }
         // pull the newest engine frame into the underlay texture; egui
         // repaints every display frame either way
         if let (Some(view), Some(window)) = (self.view.as_mut(), self.window.as_ref()) {
@@ -465,6 +489,7 @@ impl ShellHandler {
             let shared = ShellShared {
                 playing: Arc::clone(&self.playing),
                 dirty: Arc::clone(&self.dirty),
+                quit: Arc::clone(&self.quit),
             };
             draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, surface, &shared);
         }
@@ -618,6 +643,14 @@ fn draw_ui(
         }
     }
 
+    // the editor's viewport camera: the orbit, not the scene's camera
+    // (play mode swaps the scene camera in; save always writes
+    // state.scene_camera)
+    if !shared.playing.load(Ordering::SeqCst) {
+        let aspect = frame_dims[0].max(1) as f32 / frame_dims[1].max(1) as f32;
+        engine.set_camera(state.orbit.camera(aspect));
+    }
+
     let ppp = ctx.pixels_per_point();
     ctx.root_ui(|root| {
         // the menu bar spans the top (File / Edit / View)
@@ -644,7 +677,7 @@ fn draw_ui(
                         }
                         file.separator();
                         if file.button("Quit").clicked() {
-                            file.send_viewport_cmd(egui::ViewportCommand::Close);
+                            shared.quit.store(true, Ordering::SeqCst);
                         }
                     });
                     menu.menu_button("Edit", |edit| {
@@ -672,6 +705,19 @@ fn draw_ui(
                             shared.touch();
                             edit.close();
                         }
+                        if edit
+                            .add_enabled(
+                                state.ui.selection().is_some(),
+                                egui::Button::new("Delete"),
+                            )
+                            .clicked()
+                            && state.ui.delete_selected(engine, state.now())
+                        {
+                            state.status = "deleted (Ctrl+Z restores)".to_string();
+                            mark_tab_dirty(state);
+                            shared.touch();
+                            edit.close();
+                        }
                         edit.separator();
                         if edit.button("History").clicked() {
                             state.show_history = !state.show_history;
@@ -689,19 +735,104 @@ fn draw_ui(
                         }
                     });
                 });
+
+                // the transport lives HERE, far right of the menu bar —
+                // color coded (green play, amber pause, red stop, blue
+                // restart), above the fps readout
+                bar.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |right| {
+                        let playing_now = shared.playing.load(Ordering::SeqCst);
+                        if right
+                            .add(
+                                egui::Button::new(egui::RichText::new("restart").color(style::dark::TEXT))
+                                    .fill(style::ACCENT_DIM),
+                            )
+                            .clicked()
+                        {
+                            restart(state, engine, shared);
+                        }
+                        if right
+                            .add(
+                                egui::Button::new(egui::RichText::new("stop").color(style::dark::TEXT))
+                                    .fill(style::DANGER_DIM),
+                            )
+                            .clicked()
+                        {
+                            stop(state, engine, shared);
+                        }
+                        let pause_fill = if playing_now {
+                            style::GOLD_DIM
+                        } else {
+                            style::ACCENT_DIM
+                        };
+                        if right
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("pause").color(style::dark::TEXT),
+                                )
+                                .fill(pause_fill),
+                            )
+                            .on_hover_text("pause the sim, keep the played state")
+                            .clicked()
+                        {
+                            pause(state, shared);
+                        }
+                        let play_fill = if playing_now {
+                            style::GOLD_DIM
+                        } else {
+                            style::GREEN_DIM
+                        };
+                        if right
+                            .add(
+                                egui::Button::new(egui::RichText::new("play").color(style::dark::TEXT))
+                                    .fill(play_fill),
+                            )
+                            .on_hover_text("snapshot the edit state and run")
+                            .clicked()
+                        {
+                            if playing_now {
+                                pause(state, shared);
+                            } else {
+                                play(state, engine, shared);
+                            }
+                        }
+                    },
+                );
             });
 
-        // the toolbar: transport, gizmo modes, scene tabs, fps
+        // the toolbar: gizmo modes, scene tabs, fps (transport moved to
+        // the menu bar's right end)
         egui::containers::Panel::top("studio-toolbar")
-            .exact_size(30.0)
+            .exact_size(28.0)
             .show(root, |bar| {
                 draw_toolbar(bar, state, engine, shared);
             });
 
         egui::containers::Panel::left("studio-hierarchy")
+            .resizable(true)
+            .size_range(160.0..=560.0)
             .default_size(240.0)
             .show(root, |panel| {
-                panel.heading("Hierarchy");
+                panel.horizontal(|head| {
+                    head.heading("Hierarchy");
+                    if head.small_button("+ entity").clicked() {
+                        // a child of the selection when one is live, else
+                        // a new root
+                        let name = format!("entity-{}", engine.entities().len() + 1);
+                        let entity = Entity::new(name);
+                        match state.ui.selection().map(|p| p.to_vec()) {
+                            Some(path) if engine.entity_at(&path).is_some() => {
+                                engine.entity_at_mut(&path).unwrap().add_child(entity);
+                            }
+                            _ => {
+                                engine.add_entity(entity);
+                            }
+                        }
+                        mark_tab_dirty(state);
+                        shared.touch();
+                    }
+                });
                 let nodes = EditorUi::hierarchy(engine);
                 egui::ScrollArea::vertical().show(panel, |scroll| {
                     for node in &nodes {
@@ -711,13 +842,23 @@ fn draw_ui(
             });
 
         egui::containers::Panel::right("studio-inspector")
-            .default_size(280.0)
+            .resizable(true)
+            .size_range(200.0..=620.0)
+            .default_size(300.0)
             .show(root, |panel| {
                 draw_inspector(panel, state, engine, shared);
             });
 
+        // the loaded-scene strip (16px, monospace path) sits above the
+        // status line
+        egui::containers::Panel::bottom("studio-scenebar")
+            .exact_size(16.0)
+            .show(root, |bar| {
+                bar.monospace(egui::RichText::new(&state.scene_path).small());
+            });
+
         egui::containers::Panel::bottom("studio-status")
-            .exact_size(22.0)
+            .exact_size(20.0)
             .show(root, |panel| {
                 panel.horizontal(|bar| {
                     bar.label(&state.status);
@@ -735,6 +876,7 @@ fn draw_ui(
                     FrameGeometry { frame_dims, surface },
                     ppp,
                     shared,
+                    ctx,
                 );
             });
     });
@@ -755,13 +897,15 @@ fn draw_ui(
 
 /// Play: snapshot the edit state, then run. The snapshot is the scene's
 /// document Var — Stop/Restart restore it, so play never dirties edits.
-fn play(state: &mut EditorState, engine: &Engine, shared: &ShellShared) {
+fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     let label = state
         .tabs
         .get(state.active_tab)
         .map(|t| t.label.clone())
         .unwrap_or_else(|| "scene".to_string());
-    state.snapshot = Some(Scene::document(&label, engine.camera(), engine.entities()));
+    state.snapshot = Some(Scene::document(&label, &state.scene_camera, engine.entities()));
+    // play runs through the SCENE's camera (the editor orbit is edit-only)
+    engine.set_camera(state.scene_camera);
     shared.playing.store(true, Ordering::SeqCst);
     state.status = "playing — Space or pause to edit".to_string();
 }
@@ -801,6 +945,8 @@ fn restore_snapshot(state: &mut EditorState, engine: &mut Engine) {
 
 /// New Scene: a fresh untitled tab over an empty world.
 fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+    shared.playing.store(false, Ordering::SeqCst);
+    state.snapshot = None;
     let n = state.tabs.len() + 1;
     state.tabs.push(SceneTab {
         label: format!("untitled-{n}"),
@@ -816,6 +962,10 @@ fn activate_tab(state: &mut EditorState, engine: &mut Engine, index: usize) {
     let Some(tab) = state.tabs.get(index) else {
         return;
     };
+    // switching tabs leaves play mode — the snapshot belongs to the
+    // scene it was taken from (restart-after-switch used to replay the
+    // PREVIOUS scene's snapshot)
+    state.snapshot = None;
     state.active_tab = index;
     match &tab.path {
         Some(path) => {
@@ -836,7 +986,7 @@ fn save_active_tab(state: &mut EditorState, engine: &mut Engine) {
     let path = state.tabs.get(state.active_tab).and_then(|t| t.path.clone());
     match path {
         Some(path) => {
-            match save_scene(&path, engine) {
+            match save_scene(&path, &state.scene_camera.clone(), engine) {
                 Ok(()) => {
                     state.scene_path = path.to_string_lossy().to_string();
                     if let Some(tab) = state.tabs.get_mut(state.active_tab) {
@@ -1000,6 +1150,7 @@ fn draw_viewport(
     frame: FrameGeometry,
     ppp: f32,
     shared: &ShellShared,
+    ctx: &egui::Context,
 ) {
     let response = vp.allocate_rect(vp.max_rect(), egui::Sense::click_and_drag());
     let vp_rect = surface_viewport(frame.surface, frame.frame_dims);
@@ -1019,6 +1170,24 @@ fn draw_viewport(
         .map(|p| [p.x * ppp, p.y * ppp]);
     let drag_px = response.drag_delta();
     let drag_phys = [drag_px.x * ppp, drag_px.y * ppp];
+
+    // the editor camera: right-drag orbits, middle-drag pans, the wheel
+    // zooms (while the pointer is over the viewport)
+    if response.dragged_by(egui::PointerButton::Secondary) {
+        state.orbit.orbit_by(drag_px.x, drag_px.y);
+        shared.touch();
+    }
+    if response.dragged_by(egui::PointerButton::Middle) {
+        state.orbit.pan_by(&camera, drag_px.x, drag_px.y);
+        shared.touch();
+    }
+    if response.hovered() {
+        let wheel = ctx_input_wheel(ctx);
+        if wheel != 0.0 {
+            state.orbit.zoom_by(wheel);
+            shared.touch();
+        }
+    }
 
     // the press decides its claim: a gizmo handle claims the drag, empty
     // space claims the pick on release
@@ -1173,6 +1342,11 @@ fn draw_viewport(
     }
 }
 
+/// The viewport's wheel delta (points), 0 when none.
+fn ctx_input_wheel(ctx: &egui::Context) -> f32 {
+    ctx.input(|input| input.smooth_scroll_delta.y)
+}
+
 /// The pointer's angle around a center (atan2 in y-down screen space —
 /// the rotation ring's contract).
 #[must_use]
@@ -1228,6 +1402,21 @@ pub fn paint_gizmo(
                 color,
                 egui::Stroke::NONE,
             ));
+            // the axis's letter just past its tip — with overlapping
+            // perspectives, color alone is not enough to know which
+            // arrow is which
+            let letter = ["X", "Y", "Z"][handle.axis];
+            let label_pos = egui::pos2(
+                end.x + handle.screen_dir[0] * 12.0,
+                end.y + handle.screen_dir[1] * 12.0,
+            );
+            painter.text(
+                label_pos,
+                egui::Align2::CENTER_CENTER,
+                letter,
+                egui::FontId::proportional(12.0),
+                color,
+            );
         }
     }
     match mode {
@@ -1306,16 +1495,78 @@ fn axis_row(
                 (line.available_width() - 8.0 * (chunk.len() as f32 - 1.0)) / chunk.len() as f32;
             for (value, label) in chunk.iter_mut().zip(row_labels) {
                 let mut v = f64::from(*value);
-                let drag = egui::DragValue::new(&mut v)
-                    .speed(speed)
-                    .prefix(format!("{label} "));
-                let response = line.add_sized([width.max(44.0), 18.0], drag);
+                let drag = egui::DragValue::new(&mut v).speed(speed);
+                // the axis letter rides OUTSIDE the field, color-coded
+                // (x red, y green, z blue, w amber) — matching the gizmo
+                let axis_color = match *label {
+                    "x" => egui::Color32::from_rgb(232, 85, 95),
+                    "y" => egui::Color32::from_rgb(105, 212, 107),
+                    "z" => egui::Color32::from_rgb(91, 141, 240),
+                    _ => style::dark::GOLD,
+                };
+                line.label(
+                    egui::RichText::new(format!(" {label}"))
+                        .color(axis_color)
+                        .strong(),
+                );
+                let response = line.add_sized(
+                    [(width - 14.0).max(36.0), 18.0],
+                    drag,
+                );
                 if response.changed() {
                     *value = v as f32;
                     *changed = true;
                 }
             }
         });
+    }
+}
+
+/// The + component combo: picks a registered type, spawns it on the
+/// selected entity with default params. `true` when one landed.
+fn add_component_ui(
+    scroll: &mut egui::Ui,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    path: &[usize],
+) -> bool {
+    let types: Vec<String> = crate::game::scene::registered_component_types()
+        .into_iter()
+        .filter(|t| t != "script")
+        .collect();
+    let mut picked = state.add_pick.clone();
+    egui::ComboBox::from_id_salt("studio-add-component")
+        .selected_text(picked.clone().unwrap_or_else(|| "+ component".to_string()))
+        .width(scroll.available_width())
+        .show_ui(scroll, |combo| {
+            for ty in &types {
+                combo.selectable_value(&mut picked, Some(ty.clone()), ty);
+            }
+        });
+    state.add_pick = picked.clone();
+    let Some(ty) = picked else {
+        return false;
+    };
+    let Some(name) = engine.entity_at(path).map(|e| e.name().to_string()) else {
+        return false;
+    };
+    let ctx = crate::game::scene::ComponentContext::new(name);
+    let default_params = crate::Var::from(crate::Object::new());
+    match crate::game::scene::create_component(&ty, &default_params, &ctx) {
+        Ok(component) => {
+            if let Some(entity) = engine.entity_at_mut(path) {
+                entity.add_component(component);
+                state.status = format!("added {ty}");
+                state.add_pick = None;
+                true
+            } else {
+                false
+            }
+        }
+        Err(e) => {
+            state.status = format!("{ty} needs more than defaults: {e}");
+            false
+        }
     }
 }
 
@@ -1441,6 +1692,14 @@ fn draw_inspector(
                 }
             }
 
+            // add a component: the scene registry's types, spawned with
+            // DEFAULT params (script is file-backed — it comes with the
+            // script editor milestone, not a default-params spawn)
+            if add_component_ui(scroll, state, engine, &path) {
+                mark_tab_dirty(state);
+                shared.touch();
+            }
+
             scroll.separator();
             if scroll
                 .add(egui::Button::new("delete").fill(style::dark::DANGER))
@@ -1464,14 +1723,15 @@ fn mark_tab_dirty(state: &mut EditorState) {
 /// The scene save (path from the dialog): the M0 canonical document of
 /// the live tree, the name from the path stem, the format from the
 /// filename.
-fn save_scene(path: &Path, engine: &Engine) -> Result<(), String> {
+fn save_scene(path: &Path, scene_camera: &crate::game::Camera, engine: &Engine) -> Result<(), String> {
     let name = path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or("untitled")
         .trim_end_matches(".json")
         .to_string();
-    let doc = Scene::document(&name, engine.camera(), engine.entities());
+    // the SCENE camera, never the editor's orbit view
+    let doc = Scene::document(&name, scene_camera, engine.entities());
     carrier::write(path, &doc).map_err(|e| e.to_string())
 }
 
@@ -1481,6 +1741,7 @@ fn save_scene(path: &Path, engine: &Engine) -> Result<(), String> {
 /// and the selection resets.
 fn load_scene(state: &mut EditorState, engine: &mut Engine) -> Result<(), String> {
     let scene = Scene::load(Path::new(&state.scene_path)).map_err(|e| e.to_string())?;
+    state.scene_camera = scene.camera;
     engine.set_camera(scene.camera);
     engine.set_roots(scene.entities);
     state.ui = EditorUi::new();
@@ -1685,7 +1946,7 @@ fn draw_file_dialog(
                             dialog.error = Some("name the scene first".to_string());
                         } else {
                             let path = dialog.dir.join(ensure_hyg_suffix(&trimmed));
-                            match save_scene(&path, engine) {
+                            match save_scene(&path, &state.scene_camera.clone(), engine) {
                                 Ok(()) => {
                                     state.scene_path = path.to_string_lossy().to_string();
                                     // a Save-As rebinds/creates the active tab

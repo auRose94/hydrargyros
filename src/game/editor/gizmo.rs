@@ -88,12 +88,21 @@ pub struct GizmoLayout {
 }
 
 /// The camera's view-plane basis in world space: (forward, right, up),
-/// all unit. Perspective looks from position at target; the ortho
-/// camera's sight is its -z (GL-style), so its view forward is +z.
+/// all unit — `right` matches the SCREEN's right (a step along it
+/// projects toward larger pixel x; `up` toward smaller pixel y). The
+/// cross order is `right = forward × world_up`, `up = right × forward` —
+/// pinned by tests/editor.rs (`view_basis_right_matches_the_screen`)
+/// after a would-be "fix" flipped it and broke every view-plane drag.
+/// The ortho camera's sight is its -z (GL-style), so its view forward is
+/// +z with the plain x/y basis.
 #[must_use]
 pub fn view_basis(camera: &Camera) -> (Vec3, Vec3, Vec3) {
     match camera.projection {
-        Projection::Orthographic { .. } => (Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)),
+        Projection::Orthographic { .. } => (
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        ),
         Projection::Perspective { .. } => {
             let forward = camera.target - camera.position;
             let forward = if forward.length() > 0.0 {
@@ -164,14 +173,17 @@ pub fn layout(
             }
         }
         // nearly parallel to the view direction: the axis collapses on
-        // screen; it stays grabbable along whatever direction survives
+        // screen; shrink it (overlap relief — a full-length axis pointing
+        // at the camera reads as a blob over its siblings) and keep it
+        // grabbable along whatever direction survives
         let foreshortened = px_per < 1.0;
+        let len = if foreshortened { GIZMO_LEN_PX * 0.6 } else { GIZMO_LEN_PX };
         axes[i] = Some(AxisHandle {
             axis: *axis,
             world_dir,
             screen_end: [
-                center[0] + screen_dir[0] * GIZMO_LEN_PX,
-                center[1] + screen_dir[1] * GIZMO_LEN_PX,
+                center[0] + screen_dir[0] * len,
+                center[1] + screen_dir[1] * len,
             ],
             screen_dir,
             px_per_unit: px_per.max(0.05),
@@ -210,9 +222,14 @@ pub fn hit_test(layout: &GizmoLayout, pointer: [f32; 2]) -> GizmoHit {
         return GizmoHit::Center;
     }
     // axes: distance from the pointer to each SEGMENT (center → end),
-    // nearest wins
+    // nearest wins — with an overlap TIE-BREAK: when two axes cover the
+    // pointer nearly equally (a perspective view stacks Y over Z), the
+    // axis more perpendicular to the view wins (larger px_per_unit) —
+    // that one's drag is the meaningful motion, the other mostly points
+    // at the camera
     let mut best_axis = None;
     let mut best_dist = GRAB_PX;
+    let mut best_px_per = 0.0f32;
     for handle in &layout.axes {
         let end = handle.screen_end;
         let seg = [end[0] - layout.center[0], end[1] - layout.center[1]];
@@ -226,8 +243,15 @@ pub fn hit_test(layout: &GizmoLayout, pointer: [f32; 2]) -> GizmoHit {
         let dx = pointer[0] - px;
         let dy = pointer[1] - py;
         let distance = (dx * dx + dy * dy).sqrt();
-        if distance <= best_dist {
-            best_dist = distance;
+        if distance > GRAB_PX {
+            continue;
+        }
+        let takes = best_axis.is_none()
+            || distance < best_dist - 2.0
+            || (distance <= best_dist + 2.0 && handle.px_per_unit > best_px_per);
+        if takes {
+            best_dist = distance.min(best_dist);
+            best_px_per = handle.px_per_unit;
             best_axis = Some(handle.axis);
         }
     }

@@ -7,6 +7,14 @@
 
 use egui::{Color32, Context, ThemePreference, Visuals};
 
+// chrome colors (dim button fills — text stays the palette's TEXT on
+// them). Single source for the transport's color coding and any future
+// accent widgets.
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2e, 0x45, 0x62);
+pub const GOLD_DIM: Color32 = Color32::from_rgb(0x5e, 0x4c, 0x21);
+pub const GREEN_DIM: Color32 = Color32::from_rgb(0x27, 0x4a, 0x2c);
+pub const DANGER_DIM: Color32 = Color32::from_rgb(0x54, 0x27, 0x2b);
+
 /// The dark palette: quicksilver on deep space.
 pub mod dark {
     use egui::Color32;
