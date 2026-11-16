@@ -26,6 +26,9 @@ pub struct Orbit {
     pub target: Vec3,
     /// Vertical fov (degrees) for the built camera.
     pub fov_y_degrees: f32,
+    /// Orthographic view (the 2D editing mode): half-extents derive
+    /// from the distance (zoom dollies the same knob either way).
+    pub ortho: bool,
 }
 
 impl Default for Orbit {
@@ -33,6 +36,7 @@ impl Default for Orbit {
     /// down the +z axis the scenes are built along.
     fn default() -> Self {
         Orbit {
+            ortho: false,
             // yaw π views from +z looking −z: world +x renders
             // screen-RIGHT — the gizmo convention every other editor
             // trains (yaw 0 views from behind +z and mirrors it)
@@ -59,15 +63,24 @@ impl Orbit {
             self.yaw.cos() * cos_p,
         );
         let position = self.target - forward.scaled(Vec3::splat(self.distance));
-        Camera {
-            position,
-            target: self.target,
-            projection: Projection::Perspective {
+        let projection = if self.ortho {
+            // the same zoom knob: half-extents grow with distance
+            let half_y = self.distance * (self.fov_y_degrees.to_radians() * 0.5).tan();
+            Projection::Orthographic {
+                half_extents: Vec3::new(half_y * aspect.max(0.1), half_y, 500.0),
+            }
+        } else {
+            Projection::Perspective {
                 fov_y_degrees: self.fov_y_degrees,
                 near: 0.05,
                 far: 500.0,
                 aspect: aspect.max(0.1),
-            },
+            }
+        };
+        Camera {
+            position,
+            target: self.target,
+            projection,
         }
     }
 

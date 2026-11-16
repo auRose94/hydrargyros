@@ -569,6 +569,102 @@ fn scene_io_round_trips_through_the_engine() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+// ---- round 5: the orthographic gizmo is 2D ----
+
+/// Under an orthographic camera the gizmo is the 2D variant: exactly two
+/// screen-aligned axes (X right, Y up), no Z handle.
+#[test]
+fn ortho_gizmo_is_two_screen_aligned_axes() {
+    let camera = Camera {
+        position: Vec3::new(0.0, 0.0, 0.0),
+        target: Vec3::new(0.0, 0.0, -1.0),
+        projection: Projection::Orthographic {
+            half_extents: Vec3::new(8.0, 4.5, 64.0),
+        },
+    };
+    let view = view();
+    let layout = gizmo::layout(
+        GizmoMode::Translate,
+        &camera,
+        &view,
+        Vec3::new(0.0, 0.0, 0.0),
+        hyg::var::Quat::new(0.0, 0.0, 0.0, 1.0),
+    )
+    .expect("lays out under ortho");
+
+    assert_eq!(layout.axes.len(), 2, "the 2D gizmo: X and Y only, no Z");
+    assert!(layout.axes.iter().all(|h| !h.foreshortened));
+    let x = &layout.axes[0];
+    let y = &layout.axes[1];
+    assert!(x.screen_dir[0] > 0.9, "X points screen-right: {:?}", x.screen_dir);
+    assert!(y.screen_dir[1] < -0.9, "Y points screen-up (pixel y down): {:?}", y.screen_dir);
+
+    // uniform window scale: px/unit = viewport / (2 * half_extent)
+    let px_x = view.width / (2.0 * 8.0);
+    assert!((x.px_per_unit - px_x).abs() < 0.01, "{} vs {px_x}", x.px_per_unit);
+
+    // and the drag chain holds: 30px along X moves the entity 30px right
+    let delta = gizmo::translate_delta(x, [30.0, 0.0]);
+    let before = pick::project_point(&camera, &view, Vec3::new(0.0, 0.0, 0.0)).unwrap();
+    let after = pick::project_point(&camera, &view, Vec3::new(0.0, 0.0, 0.0) + delta).unwrap();
+    assert!((after[0] - before[0] - 30.0).abs() < 0.5, "ortho drags map 1:1");
+}
+
+// ---- round 5: the inspector growth probe ----
+
+/// THE ballooning bug, reproduced against the REAL panel: a widget
+/// desiring available+k px per frame grows the resizable panel a few px
+/// at a time until its cap (~3s of frames). This drives the actual
+/// inspector panel headlessly for 240 frames with an entity selected
+/// and asserts the width stays put.
+#[cfg(feature = "editor")]
+#[test]
+fn inspector_panel_does_not_grow_over_time() {
+    use hyg::game::editor::shell::{draw_inspector_panel, EditorState, ShellShared};
+
+    let mut engine = demo_engine();
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.ui.select(vec![0, 0]); // stack (physics + a child with a renderer)
+    let shared = ShellShared {
+        playing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1280.0, 800.0));
+    let mut widths = Vec::new();
+    for _ in 0..240 {
+        ctx.begin_pass(egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(0.0),
+            ..egui::RawInput::default()
+        });
+        let mut output = ctx.end_pass();
+        // consume texture deltas (egui asserts at drop otherwise)
+        let _ = std::mem::take(&mut output.textures_delta.set);
+        let _ = std::mem::take(&mut output.textures_delta.free);
+        // the panel needs the pass ALIVE while drawing — redo properly:
+        // begin, draw into root_ui, end
+        ctx.begin_pass(egui::RawInput {
+            screen_rect: Some(screen),
+            time: Some(0.0),
+            ..egui::RawInput::default()
+        });
+        let width = ctx.root_ui(|root| draw_inspector_panel(root, &mut state, &mut engine, &shared));
+        let mut output = ctx.end_pass();
+        let _ = std::mem::take(&mut output.textures_delta.set);
+        let _ = std::mem::take(&mut output.textures_delta.free);
+        widths.push(width);
+    }
+    let first = widths[10];
+    let last = *widths.last().unwrap();
+    assert!(
+        (last - first).abs() < 2.0,
+        "the inspector must not grow over time: frame 10 = {first}, frame 240 = {last}"
+    );
+}
+
 // ---- round 4: reparenting ----
 
 /// Drag-to-reparent: subtrees move (children ride along), cycles are

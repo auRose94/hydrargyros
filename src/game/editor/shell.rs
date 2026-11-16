@@ -38,6 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::carrier;
+use crate::{a, o, Var};
 use crate::game::editor::gizmo::{self, GizmoHit, GizmoLayout, GizmoMode};
 use crate::game::editor::pick::{self, Viewport};
 use crate::game::editor::style;
@@ -163,12 +164,16 @@ fn run_shell(
 enum ShellMessage {}
 
 /// The pump-shared gates, passed through the UI pass.
-struct ShellShared {
-    playing: Arc<AtomicBool>,
-    dirty: Arc<AtomicBool>,
+#[doc(hidden)]
+pub struct ShellShared {
+    #[doc(hidden)]
+    pub playing: Arc<AtomicBool>,
+    #[doc(hidden)]
+    pub dirty: Arc<AtomicBool>,
     /// File > Quit — the event loop watches it (egui's viewport Close
     /// command does not reach winit 0.30 through this embed).
-    quit: Arc<AtomicBool>,
+    #[doc(hidden)]
+    pub quit: Arc<AtomicBool>,
 }
 
 impl ShellShared {
@@ -198,8 +203,11 @@ struct ShellHandler {
 }
 
 /// The editor-side state (everything that is not a wgpu resource).
-struct EditorState {
-    ui: EditorUi,
+/// `pub` for the headless growth-probe test only.
+#[doc(hidden)]
+pub struct EditorState {
+    #[doc(hidden)]
+    pub ui: EditorUi,
     mode: GizmoMode,
     drag: Option<DragState>,
     /// What the PRESS landed on (a gizmo handle claims the drag; empty
@@ -235,8 +243,8 @@ struct EditorState {
     orbit: crate::game::editor::camera_ctl::Orbit,
     /// The history panel's open flag.
     show_history: bool,
-    /// The file dialog (None until first opened).
-    files: Option<FileDialog>,
+    /// The native file dialog in flight (None when idle).
+    files: Option<NativeDialog>,
     /// The + component combo's pending choice (None = nothing picked).
     add_pick: Option<String>,
     /// The editor log (every status line, newest last, capped) — the
@@ -268,20 +276,18 @@ struct SceneTab {
     dirty: bool,
 }
 
-/// The in-app file dialog (the Godot way — themable, no toolkit deps):
-/// a directory browser over `.hyg` documents with save/load modes.
-struct FileDialog {
+/// A native file dialog in flight (rfd — xdg-desktop-portal on Linux,
+/// the platform dialog everywhere else). The blocking call runs on a
+/// worker thread; the UI polls `done` each frame.
+struct NativeDialog {
     save: bool,
-    dir: std::path::PathBuf,
-    /// The save-mode name field.
-    name: String,
-    /// The load-mode selected file.
-    selected: Option<std::path::PathBuf>,
-    error: Option<String>,
+    result: Arc<Mutex<Option<Option<std::path::PathBuf>>>>,
+    done: Arc<AtomicBool>,
 }
 
 impl EditorState {
-    fn new(scene_camera: crate::game::Camera) -> EditorState {
+    #[doc(hidden)]
+    pub fn new(scene_camera: crate::game::Camera) -> EditorState {
         EditorState {
             scene_camera,
             orbit: crate::game::editor::camera_ctl::Orbit::default(),
@@ -760,6 +766,19 @@ fn draw_ui(
                         });
                         menu.menu_button("View", |view| {
                             if view
+                                .button(if state.orbit.ortho {
+                                    "Projection: Orthographic"
+                                } else {
+                                    "Projection: Perspective"
+                                })
+                                .clicked()
+                            {
+                                state.orbit.ortho = !state.orbit.ortho;
+                                shared.touch();
+                                view.close();
+                            }
+                            view.separator();
+                            if view
                                 .button(if state.dark { "Light theme" } else { "Dark theme" })
                                 .clicked()
                             {
@@ -930,13 +949,7 @@ fn draw_ui(
                     });
             });
 
-        egui::containers::Panel::right("studio-inspector")
-            .resizable(true)
-            .size_range(200.0..=620.0)
-            .default_size(300.0)
-            .show(root, |panel| {
-                draw_inspector(panel, state, engine, shared);
-            });
+        draw_inspector_panel(root, state, engine, shared);
 
         // the bottom DOCK: log / stats / console / debugger / profiler —
         // the editor's output floor (Log and Stats live now; the others
@@ -969,12 +982,7 @@ fn draw_ui(
     if state.show_history {
         draw_history_window(ctx, state, engine, shared);
     }
-    if let Some(mut dialog) = state.files.take() {
-        let keep = draw_file_dialog(ctx, state, engine, &mut dialog, shared);
-        if keep {
-            state.files = Some(dialog);
-        }
-    }
+    poll_file_dialog(state, engine, shared);
 }
 
 // ---- transport: edit / play / stop / restart ----
@@ -1491,6 +1499,36 @@ fn draw_viewport(
         }
     }
 
+    // the viewport options, top-right: the projection switch (live) and
+    // the render modes (staged — named for their milestone until the
+    // renderer grows them)
+    let corner = egui::Rect::from_min_size(
+        egui::pos2(vp.max_rect().right() - 158.0, vp.max_rect().top() + 4.0),
+        egui::vec2(154.0, 20.0),
+    );
+    let current = if state.orbit.ortho { "ortho" } else { "persp" };
+    let button = vp.put(
+        corner,
+        egui::Button::new(format!("view: {current}")),
+    );
+    egui::Popup::menu(&button).show(|popup| {
+        if popup
+            .selectable_label(!state.orbit.ortho, "perspective")
+            .clicked()
+        {
+            state.orbit.ortho = false;
+            shared.touch();
+        }
+        if popup.selectable_label(state.orbit.ortho, "orthographic (2D)").clicked() {
+            state.orbit.ortho = true;
+            shared.touch();
+        }
+        popup.separator();
+        popup.add_enabled(false, egui::Button::new("wireframe (render modes: M5)"));
+        popup.add_enabled(false, egui::Button::new("normals (render modes: M5)"));
+        popup.add_enabled(false, egui::Button::new("ambient occlusion (M5)"));
+    });
+
     // paint the gizmo (points = physical ÷ ppp; the painter clips to the
     // viewport ui)
     if let Some(layout) = &layout {
@@ -1666,8 +1704,13 @@ fn axis_row(
     for (row, chunk) in values.chunks_mut(per_row).enumerate() {
         let row_labels = &labels[row * per_row..row * per_row + chunk.len()];
         scroll.horizontal(|line| {
-            let width =
-                (line.available_width() - 8.0 * (chunk.len() as f32 - 1.0)) / chunk.len() as f32;
+            // FIXED field width — any width derived from
+            // available_width inside a resizable panel chases the
+            // panel's own chrome every frame (the growth loop; the
+            // label column + spacing under-counted and ballooned the
+            // panel to its cap). Constants can't feed back; 72px fits
+            // "-123.45".
+            let width = 72.0;
             for (value, label) in chunk.iter_mut().zip(row_labels) {
                 let mut v = f64::from(*value);
                 let drag = egui::DragValue::new(&mut v).speed(speed);
@@ -1684,7 +1727,7 @@ fn axis_row(
                         .color(axis_color)
                         .strong(),
                 );
-                let response = line.add_sized([(width - 14.0).max(26.0), 18.0], drag);
+                let response = line.add_sized([width, 18.0], drag);
                 if response.changed() {
                     *value = v as f32;
                     *changed = true;
@@ -1709,7 +1752,7 @@ fn add_component_ui(
     let mut picked = state.add_pick.clone();
     egui::ComboBox::from_id_salt("studio-add-component")
         .selected_text(picked.clone().unwrap_or_else(|| "+ component".to_string()))
-        .width(scroll.available_width().min(200.0))
+        .width(160.0)
         .show_ui(scroll, |combo| {
             for ty in &types {
                 combo.selectable_value(&mut picked, Some(ty.clone()), ty);
@@ -1723,7 +1766,17 @@ fn add_component_ui(
         return false;
     };
     let ctx = crate::game::scene::ComponentContext::new(name);
-    let default_params = crate::Var::from(crate::Object::new());
+    // the editor's spawn defaults — the FACTORIES stay strict (documents
+    // must be complete); the UI fills the minimum viable params so a
+    // fresh component lands ready to edit
+    let default_params = match ty.as_str() {
+        "physics_body" => Var::from(o! {
+            "shape": Var::from("box"),
+            "half_extents": Var::from(a![Var::from(0.5), Var::from(0.5), Var::from(0.5)]),
+        }),
+        "mesh_renderer" => Var::from(o! { "shape": Var::from("rect") }),
+        _ => crate::Var::from(crate::Object::new()),
+    };
     match crate::game::scene::create_component(&ty, &default_params, &ctx) {
         Ok(component) => {
             if let Some(entity) = engine.entity_at_mut(path) {
@@ -1745,6 +1798,27 @@ fn add_component_ui(
 /// The inspector: name, enabled, transform (one row per vec3, 2×2 for
 /// the quaternion — filling the panel), components with their params,
 /// delete. Every write is an undo step. Scrolled.
+/// The inspector's right panel (separate so the growth-probe test can
+/// drive the REAL panel headlessly). Returns the panel's width.
+#[doc(hidden)]
+pub fn draw_inspector_panel(
+    root: &mut egui::Ui,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) -> f32 {
+    egui::containers::Panel::right("studio-inspector")
+        .resizable(true)
+        .size_range(200.0..=620.0)
+        .default_size(300.0)
+        .show(root, |panel| {
+            draw_inspector(panel, state, engine, shared);
+        })
+        .response
+        .rect
+        .width()
+}
+
 fn draw_inspector(
     panel: &mut egui::Ui,
     state: &mut EditorState,
@@ -1777,9 +1851,11 @@ fn draw_inspector(
             let mut buf = state.name_edit.clone().unwrap_or_else(|| name.clone());
             // finite width — an INFINITY desired width balloons a
             // resizable panel to its max
+            // FIXED desired width — anything derived from
+            // available_width inside a resizable panel chases the
+            // panel's own chrome every frame (the growth loop)
             let edit = scroll.add(
-                egui::TextEdit::singleline(&mut buf)
-                    .desired_width((scroll.available_width() - 8.0).max(80.0)),
+                egui::TextEdit::singleline(&mut buf).desired_width(180.0),
             );
             if edit.has_focus() {
                 state.name_edit = Some(buf.clone());
@@ -1939,9 +2015,10 @@ pub fn ensure_hyg_suffix(name: &str) -> String {
     }
 }
 
-/// Open the file dialog in save (defaulting the name) or load mode.
+/// Open the NATIVE file dialog (save or load) on a worker thread; the
+/// UI polls for the result each frame.
 fn open_file_dialog(state: &mut EditorState, save: bool) {
-    let name = if save {
+    let default_name = if save {
         state
             .tabs
             .get(state.active_tab)
@@ -1956,13 +2033,77 @@ fn open_file_dialog(state: &mut EditorState, save: bool) {
     } else {
         String::new()
     };
-    state.files = Some(FileDialog {
-        save,
-        dir: std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()),
-        name,
-        selected: None,
-        error: None,
-    });
+    let result: Arc<Mutex<Option<Option<std::path::PathBuf>>>> = Arc::new(Mutex::new(None));
+    let done = Arc::new(AtomicBool::new(false));
+    let worker = {
+        let result = Arc::clone(&result);
+        let done = Arc::clone(&done);
+        std::thread::Builder::new()
+            .name("hyg-studio-file-dialog".to_string())
+            .spawn(move || {
+                let picked = if save {
+                    rfd::FileDialog::new()
+                        .add_filter("hyg scene", &["hyg"])
+                        .set_file_name(&default_name)
+                        .save_file()
+                } else {
+                    rfd::FileDialog::new()
+                        .add_filter("hyg scene", &["hyg"])
+                        .pick_file()
+                };
+                *result.lock().unwrap() = Some(picked);
+                done.store(true, Ordering::SeqCst);
+            })
+            .ok()
+    };
+    if worker.is_none() {
+        state.set_status("file dialog thread failed to spawn");
+        return;
+    }
+    state.files = Some(NativeDialog { save, result, done });
+}
+
+/// Poll the in-flight dialog; on completion, run the save/load. Returns
+/// while it stays open (harmless — the frame just re-polls).
+fn poll_file_dialog(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+    let Some(task) = state.files.as_ref() else {
+        return;
+    };
+    if !task.done.load(Ordering::SeqCst) {
+        return;
+    }
+    let task = state.files.take().expect("checked done");
+    let picked = task.result.lock().unwrap().take().flatten();
+    match picked {
+        Some(path) if task.save => {
+            // the carrier owns the suffix rule — repair what the OS
+            // dialog let through
+            let name = ensure_hyg_suffix(&path.to_string_lossy());
+            let path = path.with_file_name(name);
+            match save_scene(&path, &state.scene_camera, engine) {
+                Ok(()) => {
+                    state.scene_path = path.to_string_lossy().to_string();
+                    if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                        tab.path = Some(path.clone());
+                        tab.label = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("scene")
+                            .trim_end_matches(".json")
+                            .to_string();
+                        tab.dirty = false;
+                    }
+                    state.set_status(format!("saved {}", path.to_string_lossy()));
+                }
+                Err(e) => state.set_status(format!("save failed: {e}")),
+            }
+        }
+        Some(path) => {
+            open_scene_path(state, engine, &path, shared);
+            state.set_status(format!("loaded {}", path.to_string_lossy()));
+        }
+        None => state.set_status("cancelled"),
+    }
 }
 
 /// The history panel (Godot-style): the command timeline, newest last;
@@ -2017,164 +2158,3 @@ fn draw_history_window(
     let _ = result;
 }
 
-/// The in-app file dialog (the Godot way — themable, no toolkit deps):
-/// a directory browser over `.hyg` documents. Save mode has a name
-/// field (the suffix auto-repairs); Load mode selects a file. ".."
-/// climbs; double-clicking a directory enters it.
-fn draw_file_dialog(
-    ctx: &egui::Context,
-    state: &mut EditorState,
-    engine: &mut Engine,
-    dialog: &mut FileDialog,
-    shared: &ShellShared,
-) -> bool {
-    // returns whether the dialog stays open (false = confirmed/cancelled);
-    // `confirmed` crosses the egui closures (a `return` would only exit
-    // the closure)
-    let mut open = true;
-    let mut confirmed = false;
-    egui::Window::new(if dialog.save { "Save scene" } else { "Open scene" })
-        .open(&mut open)
-        .resizable(true)
-        .default_size([460.0, 380.0])
-        .show(ctx, |win| {
-            // the current directory, clickable parent segments
-            win.horizontal(|row| {
-                if row.small_button("up").clicked() {
-                    if let Some(parent) = dialog.dir.parent() {
-                        dialog.dir = parent.to_path_buf();
-                    }
-                    dialog.selected = None;
-                    dialog.error = None;
-                }
-                row.monospace(display_dir(&dialog.dir));
-            });
-            win.separator();
-
-            // entries: directories first, then .hyg files, both sorted
-            let mut dirs: Vec<String> = Vec::new();
-            let mut files: Vec<String> = Vec::new();
-            if let Ok(read) = std::fs::read_dir(&dialog.dir) {
-                for entry in read.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-                    if is_dir {
-                        if !name.starts_with('.') {
-                            dirs.push(format!("{name}/"));
-                        }
-                    } else if name.ends_with(".hyg") {
-                        files.push(name);
-                    }
-                }
-            }
-            dirs.sort();
-            files.sort();
-
-            let mut entered: Option<String> = None;
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(win, |scroll| {
-                    for name in dirs.iter().chain(files.iter()) {
-                        let is_file = !name.ends_with('/');
-                        let selected = dialog
-                            .selected
-                            .as_ref()
-                            .and_then(|p| p.file_name())
-                            .map(|n| n.to_string_lossy() == *name)
-                            .unwrap_or(false);
-                        let response = scroll.selectable_label(selected, name);
-                        if response.clicked() || response.double_clicked() {
-                            if is_file {
-                                dialog.selected =
-                                    Some(dialog.dir.join(name.trim_end_matches('/')));
-                                if dialog.save {
-                                    dialog.name = name.trim_end_matches('/').to_string();
-                                }
-                            } else {
-                                entered = Some(name.trim_end_matches('/').to_string());
-                            }
-                        }
-                    }
-                });
-            if let Some(dir) = entered {
-                dialog.dir = dialog.dir.join(dir);
-                dialog.selected = None;
-                dialog.error = None;
-            }
-
-            win.separator();
-            if dialog.save {
-                win.horizontal(|row| {
-                    row.label("name");
-                    row.text_edit_singleline(&mut dialog.name);
-                });
-            }
-            if let Some(error) = &dialog.error {
-                win.colored_label(style::dark::DANGER, error.clone());
-            }
-
-            win.horizontal(|row| {
-                let confirm_label = if dialog.save { "save" } else { "open" };
-                if row.button(confirm_label).clicked() {
-                    if dialog.save {
-                        let trimmed = dialog.name.trim().to_string();
-                        if trimmed.is_empty() {
-                            dialog.error = Some("name the scene first".to_string());
-                        } else {
-                            let path = dialog.dir.join(ensure_hyg_suffix(&trimmed));
-                            match save_scene(&path, &state.scene_camera.clone(), engine) {
-                                Ok(()) => {
-                                    state.scene_path = path.to_string_lossy().to_string();
-                                    // a Save-As rebinds/creates the active tab
-                                    if let Some(tab) = state.tabs.get_mut(state.active_tab) {
-                                        tab.path = Some(path.clone());
-                                        tab.label = path
-                                            .file_stem()
-                                            .and_then(|s| s.to_str())
-                                            .unwrap_or("scene")
-                                            .trim_end_matches(".json")
-                                            .to_string();
-                                        tab.dirty = false;
-                                    }
-                                    state.set_status(format!("saved {}", path.to_string_lossy()));
-                                    confirmed = true;
-                                }
-                                Err(e) => dialog.error = Some(e),
-                            }
-                        }
-                    } else {
-                        match dialog.selected.clone() {
-                            Some(path) => {
-                                open_scene_path(state, engine, &path, shared);
-                                state.set_status(format!("loaded {}", path.to_string_lossy()));
-                                confirmed = true;
-                            }
-                            None => {
-                                dialog.error = Some("pick a .hyg scene".to_string());
-                            }
-                        }
-                    }
-                }
-                if row.button("cancel").clicked() {
-                    confirmed = true;
-                }
-                true
-            });
-        });
-    open && !confirmed
-}
-
-/// A short, readable directory label (home → ~).
-fn display_dir(dir: &Path) -> String {
-    let text = dir.to_string_lossy().to_string();
-    if let Some(home) = std::env::home_dir() {
-        let home = home.to_string_lossy().to_string();
-        if text == home {
-            return "~".to_string();
-        }
-        if let Some(rest) = text.strip_prefix(&format!("{home}/")) {
-            return format!("~/{rest}");
-        }
-    }
-    text
-}

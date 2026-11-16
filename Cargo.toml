@@ -81,6 +81,9 @@ wasmtime = { version = "48", optional = true, default-features = false, features
 # atlas, no clipboard yet (M2 polish); winit's backend defaults come from
 # this crate's own `winit` dep, not through egui-winit
 egui = { version = "0.37", default-features = false, features = ["default_fonts"], optional = true }
+# editor: native file dialogs (xdg-desktop-portal on Linux, no GTK) —
+# the system navigator instead of reinventing one
+rfd = { version = "0.18", optional = true }
 egui-wgpu = { version = "0.37", default-features = false, optional = true }
 egui-winit = { version = "0.37", default-features = false, optional = true }
 
@@ -125,7 +128,8 @@ dynamic-ffi = ["dep:abi_stable", "dep:libloading", "dep:tempfile", "dep:hyg-plug
 # with no ambient authority wired (no WASI: no fs, no net, no clock)
 dynamic-wasm = ["dep:wasmtime", "dep:hyg-plugin-api"]
 # editor: the Studio shell — egui panels composited over the engine's frame
-editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "wgpu", "winit"]
+editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:rfd", "wgpu", "winit"]
+rfd = ["dep:rfd"]
 
 [dev-dependencies]
 serde_json = "1"
