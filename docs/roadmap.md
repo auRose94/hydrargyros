@@ -840,8 +840,29 @@ seams it grows through.
    loaded document. New Scene/tab switches stop play and clear the
    play snapshot (restart used to replay the previous scene's state).
    22 editor tests; suite 224 core / 347 `--all-features`, clippy
-   clean. Next rung: **M3 — play mode** (script live reload, console,
-   per-scene snapshots tied to tabs).
+   clean. **Round 4 (fourth review): the gizmo mystery closed.** An
+   end-to-end test (layout → delta → projection) caught the real bug:
+   an axis pointing at the lens collapses toward 0 px/unit and the raw
+   floor turned a 30px drag into 600 world units toward the camera —
+   reading as reversed. The drag scale now clamps to ≥15% of the
+   healthiest axis, and the default view flipped to the industry
+   convention (orbit yaw π: world +x renders screen-RIGHT). The orbit
+   drag sign is now view-invariant (drag right = the eye along the
+   camera's CURRENT screen-right — the old sign inverted at the default
+   view). Orthographic cameras get a proper **2D gizmo** (screen-aligned
+   X/Y at uniform scale). The transport sits on the menu bar's far
+   right in the user's color language (play green, stop red, restart
+   orange; move/rotate/scale red/green/blue), the hierarchy grew
+   **drag-to-reparent** (cycle-refusing `Engine::reparent` with
+   sibling-shift adjustment) and click-again-deselect (viewport too),
+   and the bottom bar became the **dock**: Log (status history) | Stats
+   (live counts) | Console | Debugger | Profiler (staged for their
+   milestones — the dock is the extension point). The inspector stopped
+   ballooning (a `desired_width(INFINITY)` rename field was maxing the
+   panel — that was the phantom inside-the-panel resize line), and
+   "+ entity" is an obvious green +. 24 editor tests; suite 226 core /
+   349 `--all-features`, clippy clean. Next rung: **M3 — play mode**
+   (script live reload, console, per-scene snapshots tied to tabs).
 
 ## What hyg will NOT do
 
