@@ -819,8 +819,29 @@ seams it grows through.
    globally (`interaction.selectable_labels = false`), the history
    window resizes on both axes, and the inspector's vectors fill their
    rows (3-in-a-row for vec3, 2×2 for the quaternion, shrinking with
-   the panel). Next rung: **M3 — play mode** (per-scene snapshots into
-   tabs, script live reload, console).
+   the panel). **Round 3 (same day, third review): the editor gets its
+   own eyes and hands.** The **editor orbit camera** landed
+   (`editor::camera_ctl`, feature-free): right-drag orbits, wheel
+   zooms, middle-drag pans — and the viewport's view is now distinct
+   from the SCENE's camera (edit = orbit, save/play = the scene
+   camera; editing the view never dirties the document). Stacked-perspective
+   gizmo grabs are fixed (overlap tie-break toward the axis more
+   perpendicular to the view, foreshortened axes shrink, every arrow
+   lettered X/Y/Z), and `view_basis`'s screen contract is TEST-PINNED
+   after a would-be fix flipped a cross product and broke every
+   view-plane drag — the empirical test now guards it forever. The
+   transport moved to the menu bar's far right, color-coded; Delete
+   sits under Edit; File > Quit works (a shared exit flag). Creation
+   flows: **+ entity** (child of the selection or root) and **+
+   component** (the scene registry's types, default params — script
+   waits for the script editor). Inspector axis letters are
+   color-coded to match the gizmo, the side panels resize over a
+   continuous range, and a 16px scene bar under the viewport names the
+   loaded document. New Scene/tab switches stop play and clear the
+   play snapshot (restart used to replay the previous scene's state).
+   22 editor tests; suite 224 core / 347 `--all-features`, clippy
+   clean. Next rung: **M3 — play mode** (script live reload, console,
+   per-scene snapshots tied to tabs).
 
 ## What hyg will NOT do
 
