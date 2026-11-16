@@ -2,3 +2,4 @@
 Cargo.lock
 # library crate: let downstream pick versions
 /public
+scene.json.hyg
