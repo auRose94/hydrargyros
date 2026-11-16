@@ -45,6 +45,7 @@ use crate::game::editor::ui::EditorUi;
 use crate::game::engine::Engine;
 use crate::game::render::FrameSink;
 use crate::game::scene::Scene;
+use crate::var::{Quat, Vec3};
 
 /// Launch the Studio shell: spawn the engine pump on a worker thread and
 /// run the winit event loop on THIS thread (winit's main-thread rule —
@@ -67,21 +68,31 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
     // reverted by the physics sync a frame later. Paused still draws +
     // renders: the viewport is live, only the update pass is gated.
     let playing = Arc::new(AtomicBool::new(false));
+    // scene-dirty gate: while paused, the pump only re-renders when an
+    // edit landed (a paused, clean scene re-uploading + reading back the
+    // offscreen frame every 16ms starves the UI thread of the engine
+    // lock — the sluggish-resize feel)
+    let dirty = Arc::new(AtomicBool::new(true));
     let pump = {
         let engine = Arc::clone(&engine);
         let pumping = Arc::clone(&pumping);
         let playing = Arc::clone(&playing);
+        let dirty = Arc::clone(&dirty);
         std::thread::Builder::new()
             .name("hyg-studio-pump".to_string())
             .spawn(move || {
                 while pumping.load(Ordering::SeqCst) {
                     let started = Instant::now();
-                    if let Ok(mut engine) = engine.lock() {
-                        if playing.load(Ordering::SeqCst) {
-                            engine.update(1.0 / 60.0);
+                    let run_frame =
+                        playing.load(Ordering::SeqCst) || dirty.swap(false, Ordering::SeqCst);
+                    if run_frame {
+                        if let Ok(mut engine) = engine.lock() {
+                            if playing.load(Ordering::SeqCst) {
+                                engine.update(1.0 / 60.0);
+                            }
+                            engine.draw();
+                            engine.render();
                         }
-                        engine.draw();
-                        engine.render();
                     }
                     // pace to ~60 fps of pump work; the display loop
                     // presents at its own cadence
@@ -92,7 +103,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
             .map_err(|e| format!("studio pump thread: {e}"))?
     };
 
-    let result = run_shell(engine, sink, title.into(), playing);
+    let result = run_shell(engine, sink, title.into(), playing, dirty);
     pumping.store(false, Ordering::SeqCst);
     let _ = pump.join();
     result
@@ -104,6 +115,7 @@ fn run_shell(
     sink: FrameSink,
     title: String,
     playing: Arc<AtomicBool>,
+    dirty: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut builder = winit::event_loop::EventLoop::<ShellMessage>::with_user_event();
     // the editor normally owns the main thread; the escape hatches cost
@@ -130,6 +142,7 @@ fn run_shell(
         sink,
         title,
         playing,
+        dirty,
         state: EditorState::new(),
         window: None,
         view: None,
@@ -145,6 +158,19 @@ fn run_shell(
 /// control messages ride winit's user events; nothing needs them yet).
 enum ShellMessage {}
 
+/// The pump-shared gates, passed through the UI pass.
+struct ShellShared {
+    playing: Arc<AtomicBool>,
+    dirty: Arc<AtomicBool>,
+}
+
+impl ShellShared {
+    /// Mark the scene changed — the paused pump re-renders once.
+    fn touch(&self) {
+        self.dirty.store(true, Ordering::SeqCst);
+    }
+}
+
 /// The running shell: the wgpu view, the egui halves, and the editor
 /// state.
 struct ShellHandler {
@@ -153,6 +179,8 @@ struct ShellHandler {
     title: String,
     /// The pump's play gate (edit mode = paused; the UI toggles it).
     playing: Arc<AtomicBool>,
+    /// The pump's re-render gate while paused (set by every edit).
+    dirty: Arc<AtomicBool>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -182,10 +210,26 @@ struct EditorState {
     /// focused — rebuilt-from-entity each frame would eat every
     /// keystroke).
     name_edit: Option<String>,
+    /// Open scenes (tabs). One engine, one active scene at a time;
+    /// switching loads the tab's document.
+    tabs: Vec<SceneTab>,
+    active_tab: usize,
+    /// The play snapshot (the scene's document Var taken when Play was
+    /// pressed — Stop/Restart restore it, so play never dirties the edit
+    /// state).
+    snapshot: Option<crate::Var>,
     /// The history panel's open flag.
     show_history: bool,
     /// The file dialog (None until first opened).
     files: Option<FileDialog>,
+}
+
+/// One open scene (a tab): its label, its path once saved/loaded, and
+/// whether it has unsaved edits.
+struct SceneTab {
+    label: String,
+    path: Option<std::path::PathBuf>,
+    dirty: bool,
 }
 
 /// The in-app file dialog (the Godot way — themable, no toolkit deps):
@@ -216,6 +260,13 @@ impl EditorState {
             fps: 0,
             viewport: None,
             name_edit: None,
+            tabs: vec![SceneTab {
+                label: "untitled".to_string(),
+                path: None,
+                dirty: false,
+            }],
+            active_tab: 0,
+            snapshot: None,
             show_history: false,
             files: None,
         }
@@ -355,6 +406,12 @@ impl winit::application::ApplicationHandler<ShellMessage> for ShellHandler {
                 if let Some(view) = self.view.as_mut() {
                     view.resize(size);
                 }
+                // redraw NOW — resize edges track the mouse instead of
+                // waiting for the next 16ms tick
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                self.dirty.store(true, Ordering::SeqCst);
             }
             winit::event::WindowEvent::RedrawRequested => self.redraw(),
             _ => {}
@@ -404,8 +461,12 @@ impl ShellHandler {
         {
             let mut engine = self.engine.lock().expect("studio engine");
             let frame_dims = view.frame_dims;
-            let playing = Arc::clone(&self.playing);
-            draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, &playing);
+            let surface = [view.blit.config.width, view.blit.config.height];
+            let shared = ShellShared {
+                playing: Arc::clone(&self.playing),
+                dirty: Arc::clone(&self.dirty),
+            };
+            draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, surface, &shared);
         }
         let mut output = egui_ctx.end_pass();
         egui_state.handle_platform_output(window, output.platform_output);
@@ -496,16 +557,18 @@ impl ShellHandler {
     }
 }
 
-/// Everything egui — one `root_ui` pass: hierarchy left, inspector right,
-/// status bottom, and the transparent viewport LAST (the panels carve the
-/// sides; what remains is the scene's window). The engine lock is held
-/// across the whole pass; `frame_dims` letterboxes the pick viewport.
+/// Everything egui, top to bottom: the MENU BAR (File/Edit/View), the
+/// TOOLBAR (transport, gizmo modes, scene tabs, fps), hierarchy left,
+/// inspector right, a thin status bar bottom, and the transparent
+/// viewport LAST (the panels carve the sides; what remains is the
+/// scene's window). The engine lock is held across the whole pass.
 fn draw_ui(
     ctx: &egui::Context,
     state: &mut EditorState,
     engine: &mut Engine,
     frame_dims: [u32; 2],
-    playing: &AtomicBool,
+    surface: [u32; 2],
+    shared: &ShellShared,
 ) {
     // undo/redo + mode + delete keys — skipped while a text field owns
     // the keyboard
@@ -530,26 +593,111 @@ fn draw_ui(
         });
         if undo_hit && state.ui.undo(engine) {
             state.status = "undo".to_string();
+            shared.touch();
         }
         if redo_hit && state.ui.redo(engine) {
             state.status = "redo".to_string();
+            shared.touch();
         }
         if let Some(mode) = mode_key {
             state.mode = mode;
         }
         if delete_hit && state.ui.delete_selected(engine, state.now()) {
             state.status = "deleted (Ctrl+Z restores)".to_string();
+            shared.touch();
         }
     }
     // Space toggles edit/play (guarded above — never while typing)
     let space_hit = !ctx.egui_wants_keyboard_input()
         && ctx.input(|input| input.key_pressed(egui::Key::Space) && !ctx.is_pointer_over_egui());
     if space_hit {
-        playing.store(!playing.load(Ordering::SeqCst), Ordering::SeqCst);
+        if shared.playing.load(Ordering::SeqCst) {
+            pause(state, shared);
+        } else {
+            play(state, engine, shared);
+        }
     }
 
     let ppp = ctx.pixels_per_point();
     ctx.root_ui(|root| {
+        // the menu bar spans the top (File / Edit / View)
+        egui::containers::Panel::top("studio-menu")
+            .exact_size(24.0)
+            .show(root, |bar| {
+                egui::MenuBar::new().ui(bar, |menu| {
+                    menu.menu_button("File", |file| {
+                        if file.button("New Scene").clicked() {
+                            new_scene(state, engine, shared);
+                            file.close();
+                        }
+                        if file.button("Open...").clicked() {
+                            open_file_dialog(state, false);
+                            file.close();
+                        }
+                        if file.button("Save").clicked() {
+                            save_active_tab(state, engine);
+                            file.close();
+                        }
+                        if file.button("Save As...").clicked() {
+                            open_file_dialog(state, true);
+                            file.close();
+                        }
+                        file.separator();
+                        if file.button("Quit").clicked() {
+                            file.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
+                    menu.menu_button("Edit", |edit| {
+                        if edit
+                            .add_enabled(
+                                state.ui.undo_stack().can_undo(),
+                                egui::Button::new("Undo"),
+                            )
+                            .clicked()
+                            && state.ui.undo(engine)
+                        {
+                            state.status = "undo".to_string();
+                            shared.touch();
+                            edit.close();
+                        }
+                        if edit
+                            .add_enabled(
+                                state.ui.undo_stack().can_redo(),
+                                egui::Button::new("Redo"),
+                            )
+                            .clicked()
+                            && state.ui.redo(engine)
+                        {
+                            state.status = "redo".to_string();
+                            shared.touch();
+                            edit.close();
+                        }
+                        edit.separator();
+                        if edit.button("History").clicked() {
+                            state.show_history = !state.show_history;
+                            edit.close();
+                        }
+                    });
+                    menu.menu_button("View", |view| {
+                        if view
+                            .button(if state.dark { "Light theme" } else { "Dark theme" })
+                            .clicked()
+                        {
+                            state.dark = !state.dark;
+                            style::apply(view.ctx(), state.dark);
+                            view.close();
+                        }
+                    });
+                });
+            });
+
+        // the toolbar: transport, gizmo modes, scene tabs, fps
+        egui::containers::Panel::top("studio-toolbar")
+            .exact_size(30.0)
+            .show(root, |bar| {
+                draw_toolbar(bar, state, engine, shared);
+            });
+
         egui::containers::Panel::left("studio-hierarchy")
             .default_size(240.0)
             .show(root, |panel| {
@@ -565,73 +713,296 @@ fn draw_ui(
         egui::containers::Panel::right("studio-inspector")
             .default_size(280.0)
             .show(root, |panel| {
-                draw_inspector(panel, state, engine);
+                draw_inspector(panel, state, engine, shared);
             });
 
         egui::containers::Panel::bottom("studio-status")
-            .default_size(56.0)
+            .exact_size(22.0)
             .show(root, |panel| {
-                draw_bottom_bar(panel, state, engine, ctx, playing);
+                panel.horizontal(|bar| {
+                    bar.label(&state.status);
+                });
             });
 
         // the viewport: LAST, frameless so the blit shows through
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |vp| {
-                draw_viewport(vp, state, engine, ctx, frame_dims, ppp);
+                draw_viewport(
+                    vp,
+                    state,
+                    engine,
+                    FrameGeometry { frame_dims, surface },
+                    ppp,
+                    shared,
+                );
             });
     });
 
     // floating windows (history, files) live on the context, after panels
     if state.show_history {
-        draw_history_window(ctx, state, engine);
+        draw_history_window(ctx, state, engine, shared);
     }
     if let Some(mut dialog) = state.files.take() {
-        let keep = draw_file_dialog(ctx, state, engine, &mut dialog);
+        let keep = draw_file_dialog(ctx, state, engine, &mut dialog, shared);
         if keep {
             state.files = Some(dialog);
         }
     }
 }
 
-/// The letterboxed pick viewport inside a central rect: the frame fills
-/// one axis (the blit's fit rule — [`fit_extents`](crate::game::fit_extents)),
-/// centered on the other.
+// ---- transport: edit / play / stop / restart ----
+
+/// Play: snapshot the edit state, then run. The snapshot is the scene's
+/// document Var — Stop/Restart restore it, so play never dirties edits.
+fn play(state: &mut EditorState, engine: &Engine, shared: &ShellShared) {
+    let label = state
+        .tabs
+        .get(state.active_tab)
+        .map(|t| t.label.clone())
+        .unwrap_or_else(|| "scene".to_string());
+    state.snapshot = Some(Scene::document(&label, engine.camera(), engine.entities()));
+    shared.playing.store(true, Ordering::SeqCst);
+    state.status = "playing — Space or pause to edit".to_string();
+}
+
+/// Pause: stop the sim, keep the played state (resume from here).
+fn pause(state: &mut EditorState, shared: &ShellShared) {
+    shared.playing.store(false, Ordering::SeqCst);
+    state.status = "paused — edits stick; play resumes".to_string();
+    shared.touch();
+}
+
+/// Stop: back to the edit state (restore the play snapshot), sim off.
+fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+    shared.playing.store(false, Ordering::SeqCst);
+    restore_snapshot(state, engine);
+    state.status = "stopped — back to the edit state".to_string();
+    shared.touch();
+}
+
+/// Restart: restore the snapshot, then play again from the top.
+fn restart(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+    restore_snapshot(state, engine);
+    play(state, engine, shared);
+}
+
+fn restore_snapshot(state: &mut EditorState, engine: &mut Engine) {
+    if let Some(snapshot) = state.snapshot.clone() {
+        if let Ok(scene) = Scene::from_var(&snapshot) {
+            engine.set_camera(scene.camera);
+            engine.set_roots(scene.entities);
+            state.name_edit = None;
+        }
+    }
+}
+
+// ---- scene tabs ----
+
+/// New Scene: a fresh untitled tab over an empty world.
+fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+    let n = state.tabs.len() + 1;
+    state.tabs.push(SceneTab {
+        label: format!("untitled-{n}"),
+        path: None,
+        dirty: false,
+    });
+    activate_tab(state, engine, state.tabs.len() - 1);
+    shared.touch();
+}
+
+/// Activate a tab: load its document (an untitled tab is an empty world).
+fn activate_tab(state: &mut EditorState, engine: &mut Engine, index: usize) {
+    let Some(tab) = state.tabs.get(index) else {
+        return;
+    };
+    state.active_tab = index;
+    match &tab.path {
+        Some(path) => {
+            state.scene_path = path.to_string_lossy().to_string();
+            if load_scene(state, engine).is_err() {
+                engine.set_roots(Vec::new());
+            }
+        }
+        None => {
+            engine.set_roots(Vec::new());
+        }
+    }
+    state.name_edit = None;
+}
+
+/// Save the active tab: to its path when it has one, else Save As.
+fn save_active_tab(state: &mut EditorState, engine: &mut Engine) {
+    let path = state.tabs.get(state.active_tab).and_then(|t| t.path.clone());
+    match path {
+        Some(path) => {
+            match save_scene(&path, engine) {
+                Ok(()) => {
+                    state.scene_path = path.to_string_lossy().to_string();
+                    if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                        tab.dirty = false;
+                    }
+                    state.status = format!("saved {}", path.to_string_lossy());
+                }
+                Err(e) => state.status = format!("save failed: {e}"),
+            }
+        }
+        None => {
+            state.status = "save as — name the scene".to_string();
+            open_file_dialog(state, true);
+        }
+    }
+}
+
+/// A scene landed on disk (from the dialog): open it as a NEW tab and
+/// activate it.
+fn open_scene_path(state: &mut EditorState, engine: &mut Engine, path: &Path, shared: &ShellShared) {
+    let label = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("scene")
+        .trim_end_matches(".json")
+        .to_string();
+    state.tabs.push(SceneTab {
+        label,
+        path: Some(path.to_path_buf()),
+        dirty: false,
+    });
+    activate_tab(state, engine, state.tabs.len() - 1);
+    shared.touch();
+}
+
+/// The toolbar: transport buttons, gizmo modes, scene tabs, fps.
+fn draw_toolbar(
+    bar: &mut egui::Ui,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) {
+    bar.horizontal(|row| {
+        let playing_now = shared.playing.load(Ordering::SeqCst);
+        if row
+            .selectable_label(playing_now, if playing_now { "pause" } else { "play" })
+            .clicked()
+        {
+            if playing_now {
+                pause(state, shared);
+            } else {
+                play(state, engine, shared);
+            }
+        }
+        if row.button("stop").clicked() {
+            stop(state, engine, shared);
+        }
+        if row.button("restart").clicked() {
+            restart(state, engine, shared);
+        }
+
+        row.separator();
+        for mode in [GizmoMode::Translate, GizmoMode::Rotate, GizmoMode::Scale] {
+            let label = egui::RichText::new(mode.name());
+            let label = if state.mode == mode {
+                label.strong().color(style::dark::GOLD)
+            } else {
+                label
+            };
+            if row.selectable_label(state.mode == mode, label).clicked() {
+                state.mode = mode;
+            }
+        }
+
+        row.separator();
+        // scene tabs: click to switch, x to close, + to open
+        let mut close_tab: Option<usize> = None;
+        let mut switch_tab: Option<usize> = None;
+        for (i, tab) in state.tabs.iter().enumerate() {
+            let label = if tab.dirty {
+                egui::RichText::new(format!("{} *", tab.label))
+            } else {
+                egui::RichText::new(&tab.label)
+            };
+            if row
+                .selectable_label(i == state.active_tab, label)
+                .clicked()
+            {
+                switch_tab = Some(i);
+            }
+            if row.small_button("x").clicked() {
+                close_tab = Some(i);
+            }
+        }
+        if row.small_button("+").clicked() {
+            open_file_dialog(state, false);
+        }
+        if let Some(i) = switch_tab {
+            if i != state.active_tab {
+                let dirty_warning = state
+                    .tabs
+                    .get(state.active_tab)
+                    .map(|t| t.dirty)
+                    .unwrap_or(false);
+                activate_tab(state, engine, i);
+                if dirty_warning {
+                    state.status = "switched tabs — the previous tab had unsaved edits".to_string();
+                }
+            }
+        }
+        if let Some(i) = close_tab {
+            if state.tabs.len() > 1 {
+                state.tabs.remove(i);
+                let next = i.min(state.tabs.len() - 1);
+                activate_tab(state, engine, next);
+            } else {
+                state.status = "the last tab stays — File > New Scene for a fresh one".to_string();
+            }
+        }
+
+        row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |right| {
+            right.label(format!("{} fps", state.fps));
+            let mode = if shared.playing.load(Ordering::SeqCst) {
+                "playing"
+            } else {
+                "edit"
+            };
+            right.label(mode);
+        });
+    });
+}
+
+/// The viewport geometry the pass needs: the offscreen frame's dims and
+/// the window surface's, in one argument.
+struct FrameGeometry {
+    frame_dims: [u32; 2],
+    surface: [u32; 2],
+}
+
+/// The letterboxed rect the blit draws the frame into over the WHOLE
+/// SURFACE — the pick/gizmo viewport must match the pixels exactly or
+/// clicks land one place and select another. (The interaction AREA is
+/// still the central panel; the MATH is the surface's.)
 #[must_use]
-fn viewport_rect(central: [f32; 2], frame_dims: [u32; 2]) -> Viewport {
-    let (cw, ch) = (central[0].max(1.0), central[1].max(1.0));
+fn surface_viewport(surface: [u32; 2], frame_dims: [u32; 2]) -> Viewport {
+    let (sw, sh) = (surface[0].max(1) as f32, surface[1].max(1) as f32);
     let (iw, ih) = (frame_dims[0].max(1) as f32, frame_dims[1].max(1) as f32);
-    let scale = if iw / ih > cw / ch { cw / iw } else { ch / ih };
+    let scale = if iw / ih > sw / sh { sw / iw } else { sh / ih };
     let (bw, bh) = (iw * scale, ih * scale);
-    Viewport::new((cw - bw) * 0.5, (ch - bh) * 0.5, bw, bh)
+    Viewport::new((sw - bw) * 0.5, (sh - bh) * 0.5, bw, bh)
 }
 
 /// The viewport pass: picking, gizmo interaction, gizmo painting. All
-/// math in physical pixels; egui's crossing points convert by `ppp`.
+/// math in physical pixels over the SURFACE letterbox rect; egui's
+/// pointer arrives in points (absolute, window-origin) and converts by
+/// `ppp`.
 fn draw_viewport(
     vp: &mut egui::Ui,
     state: &mut EditorState,
     engine: &mut Engine,
-    _ctx: &egui::Context,
-    frame_dims: [u32; 2],
+    frame: FrameGeometry,
     ppp: f32,
+    shared: &ShellShared,
 ) {
     let response = vp.allocate_rect(vp.max_rect(), egui::Sense::click_and_drag());
-    let max = vp.max_rect();
-    let central = Viewport::new(
-        max.min.x * ppp,
-        max.min.y * ppp,
-        max.width() * ppp,
-        max.height() * ppp,
-    );
-    let vp_rect = viewport_rect([central.width, central.height], frame_dims);
-    // the Viewport::new positions are relative; anchor them to the window
-    let vp_rect = Viewport::new(
-        central.x + vp_rect.x,
-        central.y + vp_rect.y,
-        vp_rect.width,
-        vp_rect.height,
-    );
+    let vp_rect = surface_viewport(frame.surface, frame.frame_dims);
     state.viewport = Some(vp_rect);
 
     let camera = *engine.camera();
@@ -688,34 +1059,44 @@ fn draw_viewport(
         if let Some(drag) = state.drag.as_ref() {
             match drag {
                 DragState::TranslateAxis { axis } => {
-                    if let (Some(layout), Some(entity)) =
-                        (layout.as_ref(), state.ui.selected_entity(engine).map(|e| e.transform().position))
-                    {
+                    if let (Some(layout), Some(entity)) = (
+                        layout.as_ref(),
+                        state
+                            .ui
+                            .selected_entity(engine)
+                            .map(|e| e.transform().position),
+                    ) {
                         if let Some(handle) = layout.axes.iter().find(|h| h.axis == *axis) {
                             let delta = gizmo::translate_delta(handle, drag_phys);
-                            state.ui.set_selected_position(
-                                engine,
-                                entity + delta,
-                                state.now(),
-                            );
+                            state
+                                .ui
+                                .set_selected_position(engine, entity + delta, state.now());
+                            shared.touch();
                         }
                     }
                 }
                 DragState::TranslateCenter => {
-                    if let Some(entity) =
-                        state.ui.selected_entity(engine).map(|e| e.transform().position)
+                    if let Some(entity) = state
+                        .ui
+                        .selected_entity(engine)
+                        .map(|e| e.transform().position)
                     {
                         let delta =
                             gizmo::translate_center_delta(&camera, &vp_rect, entity, drag_phys);
                         state
                             .ui
                             .set_selected_position(engine, entity + delta, state.now());
+                        shared.touch();
                     }
                 }
                 DragState::ScaleAxis { axis } => {
-                    if let (Some(layout), Some(scale)) =
-                        (layout.as_ref(), state.ui.selected_entity(engine).map(|e| e.transform().scale))
-                    {
+                    if let (Some(layout), Some(scale)) = (
+                        layout.as_ref(),
+                        state
+                            .ui
+                            .selected_entity(engine)
+                            .map(|e| e.transform().scale),
+                    ) {
                         if let Some(handle) = layout.axes.iter().find(|h| h.axis == *axis) {
                             let delta = gizmo::scale_delta(handle, drag_phys);
                             let mut scale = scale;
@@ -726,6 +1107,7 @@ fn draw_viewport(
                             };
                             *component = (*component + delta).max(0.01);
                             state.ui.set_selected_scale(engine, scale, state.now());
+                            shared.touch();
                         }
                     }
                 }
@@ -746,18 +1128,12 @@ fn draw_viewport(
                         if d < -std::f32::consts::PI {
                             d += std::f32::consts::TAU;
                         }
-                        let (_, _, forward_up) = gizmo::view_basis(&camera);
-                        // view forward: the basis's up is derived from it;
-                        // the ring rotates around the camera's forward —
-                        // the axis pointing from the scene toward the eye
                         let (forward, _, _) = gizmo::view_basis(&camera);
-                        let _ = forward_up;
                         let delta = gizmo::rotate_delta(d, forward);
-                        state.ui.set_selected_rotation(
-                            engine,
-                            delta.compose(rotation),
-                            state.now(),
-                        );
+                        state
+                            .ui
+                            .set_selected_rotation(engine, delta.compose(rotation), state.now());
+                        shared.touch();
                         if let Some(DragState::Rotate { last_angle }) = state.drag.as_mut() {
                             *last_angle = angle;
                         }
@@ -816,9 +1192,9 @@ pub fn paint_gizmo(
     let to_points = |p: [f32; 2]| egui::pos2(p[0] / ppp, p[1] / ppp);
     let center = to_points(layout.center);
     let colors = [
-        egui::Color32::from_rgb(232, 85, 95),  // x
+        egui::Color32::from_rgb(232, 85, 95),   // x
         egui::Color32::from_rgb(105, 212, 107), // y
-        egui::Color32::from_rgb(91, 141, 240), // z
+        egui::Color32::from_rgb(91, 141, 240),  // z
     ];
     if mode != GizmoMode::Rotate {
         for handle in &layout.axes {
@@ -881,8 +1257,8 @@ pub fn paint_gizmo(
     }
 }
 
-/// The hierarchy rows: indent, ⊘ for disabled, component tags, click to
-/// select, the selection in gold.
+/// The hierarchy rows: indent, (off) for disabled, component tags, click
+/// to select, the selection in gold.
 fn hierarchy_rows(
     panel: &mut egui::Ui,
     node: &crate::game::editor::ui::HierarchyNode,
@@ -912,11 +1288,46 @@ fn hierarchy_rows(
     }
 }
 
-/// The inspector: name, enabled, transform (the gizmo's field-level
-/// twin), components with their params, delete. Every write is an undo
-/// step. Scrolled — the transform rows plus components overrun the panel
-/// on small windows.
-fn draw_inspector(panel: &mut egui::Ui, state: &mut EditorState, engine: &mut Engine) {
+/// Rows of DragValues filling the available width: vec3 → one row of 3,
+/// quaternion → 2×2. Widths derive from the row's available space, so
+/// narrow panels shrink the fields instead of spilling.
+fn axis_row(
+    scroll: &mut egui::Ui,
+    labels: &[&str],
+    values: &mut [f32],
+    speed: f32,
+    changed: &mut bool,
+) {
+    let per_row = if values.len() == 4 { 2 } else { values.len() };
+    for (row, chunk) in values.chunks_mut(per_row).enumerate() {
+        let row_labels = &labels[row * per_row..row * per_row + chunk.len()];
+        scroll.horizontal(|line| {
+            let width =
+                (line.available_width() - 8.0 * (chunk.len() as f32 - 1.0)) / chunk.len() as f32;
+            for (value, label) in chunk.iter_mut().zip(row_labels) {
+                let mut v = f64::from(*value);
+                let drag = egui::DragValue::new(&mut v)
+                    .speed(speed)
+                    .prefix(format!("{label} "));
+                let response = line.add_sized([width.max(44.0), 18.0], drag);
+                if response.changed() {
+                    *value = v as f32;
+                    *changed = true;
+                }
+            }
+        });
+    }
+}
+
+/// The inspector: name, enabled, transform (one row per vec3, 2×2 for
+/// the quaternion — filling the panel), components with their params,
+/// delete. Every write is an undo step. Scrolled.
+fn draw_inspector(
+    panel: &mut egui::Ui,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) {
     panel.heading("Inspector");
     let Some(path) = state.ui.selection().map(|p| p.to_vec()) else {
         state.name_edit = None;
@@ -941,9 +1352,8 @@ fn draw_inspector(panel: &mut egui::Ui, state: &mut EditorState, engine: &mut En
             // field is focused (rebuilt-from-entity each frame would eat
             // every keystroke); committed on blur or Enter
             let mut buf = state.name_edit.clone().unwrap_or_else(|| name.clone());
-            let edit = scroll.add(
-                egui::TextEdit::singleline(&mut buf).desired_width(f32::INFINITY),
-            );
+            let edit =
+                scroll.add(egui::TextEdit::singleline(&mut buf).desired_width(f32::INFINITY));
             if edit.has_focus() {
                 state.name_edit = Some(buf.clone());
             }
@@ -952,77 +1362,56 @@ fn draw_inspector(panel: &mut egui::Ui, state: &mut EditorState, engine: &mut En
                 let trimmed = buf.trim().to_string();
                 if !trimmed.is_empty() && trimmed != name {
                     state.ui.rename_selected(engine, &trimmed, state.now());
+                    mark_tab_dirty(state);
+                    shared.touch();
                 }
             }
             let mut enabled_buf = enabled;
             if scroll.checkbox(&mut enabled_buf, "enabled").changed() {
                 state.ui.set_selected_enabled(engine, enabled_buf, state.now());
+                mark_tab_dirty(state);
+                shared.touch();
             }
 
             scroll.separator();
             scroll.strong("transform");
-            let mut position = transform.position;
-            let mut moved = false;
+            let mut changed = false;
+
             scroll.label("position");
-            for (axis, value) in [
-                ("x", &mut position.x),
-                ("y", &mut position.y),
-                ("z", &mut position.z),
-            ] {
-                let mut v = f64::from(*value);
-                if scroll
-                    .add(egui::DragValue::new(&mut v).speed(0.05).prefix(format!("{axis} ")))
-                    .changed()
-                {
-                    *value = v as f32;
-                    moved = true;
-                }
-            }
-            if moved {
-                state.ui.set_selected_position(engine, position, state.now());
+            let mut pos = [transform.position.x, transform.position.y, transform.position.z];
+            axis_row(scroll, &["x", "y", "z"], &mut pos, 0.05, &mut changed);
+            if changed {
+                let pos = Vec3::new(pos[0], pos[1], pos[2]);
+                state.ui.set_selected_position(engine, pos, state.now());
+                mark_tab_dirty(state);
+                shared.touch();
             }
 
-            let mut scale = transform.scale;
-            let mut scaled = false;
+            let mut changed = false;
             scroll.label("scale");
-            for (axis, value) in [
-                ("x", &mut scale.x),
-                ("y", &mut scale.y),
-                ("z", &mut scale.z),
-            ] {
-                let mut v = f64::from(*value);
-                if scroll
-                    .add(egui::DragValue::new(&mut v).speed(0.05).prefix(format!("{axis} ")))
-                    .changed()
-                {
-                    *value = v as f32;
-                    scaled = true;
-                }
-            }
-            if scaled {
+            let mut scale = [transform.scale.x, transform.scale.y, transform.scale.z];
+            axis_row(scroll, &["x", "y", "z"], &mut scale, 0.05, &mut changed);
+            if changed {
+                let scale = Vec3::new(scale[0], scale[1], scale[2]);
                 state.ui.set_selected_scale(engine, scale, state.now());
+                mark_tab_dirty(state);
+                shared.touch();
             }
 
+            let mut changed = false;
             scroll.label("rotation (quaternion)");
-            let mut rotation = transform.rotation;
-            let mut rotated = false;
-            for (axis, value) in [
-                ("x", &mut rotation.x),
-                ("y", &mut rotation.y),
-                ("z", &mut rotation.z),
-                ("w", &mut rotation.w),
-            ] {
-                let mut v = f64::from(*value);
-                if scroll
-                    .add(egui::DragValue::new(&mut v).speed(0.01).prefix(format!("{axis} ")))
-                    .changed()
-                {
-                    *value = v as f32;
-                    rotated = true;
-                }
-            }
-            if rotated {
+            let mut rotation = [
+                transform.rotation.x,
+                transform.rotation.y,
+                transform.rotation.z,
+                transform.rotation.w,
+            ];
+            axis_row(scroll, &["x", "y", "z", "w"], &mut rotation, 0.01, &mut changed);
+            if changed {
+                let rotation = Quat::new(rotation[0], rotation[1], rotation[2], rotation[3]);
                 state.ui.set_selected_rotation(engine, rotation, state.now());
+                mark_tab_dirty(state);
+                shared.touch();
             }
 
             scroll.separator();
@@ -1059,111 +1448,17 @@ fn draw_inspector(panel: &mut egui::Ui, state: &mut EditorState, engine: &mut En
                 && state.ui.delete_selected(engine, state.now())
             {
                 state.status = "deleted (Ctrl+Z restores)".to_string();
+                mark_tab_dirty(state);
+                shared.touch();
             }
         });
 }
 
-/// The bottom bar: play/pause, undo/redo, history, gizmo modes, scene
-/// save/load (the file dialog), theme, fps — the editor's cockpit. All
-/// ASCII labels: the default font carries no ↶/☀/☿ glyphs, and tofu
-/// boxes read as bugs.
-fn draw_bottom_bar(
-    panel: &mut egui::Ui,
-    state: &mut EditorState,
-    engine: &mut Engine,
-    ctx: &egui::Context,
-    playing: &AtomicBool,
-) {
-    panel.horizontal(|bar| {
-        // play/pause — the edit-mode gate (paused default)
-        let playing_now = playing.load(Ordering::SeqCst);
-        let play_label = if playing_now { "pause" } else { "play" };
-        if bar.button(play_label).clicked() {
-            playing.store(!playing_now, Ordering::SeqCst);
-            state.status = if playing_now {
-                "edit mode — the sim is paused, edits stick".to_string()
-            } else {
-                "playing — press Space or pause to edit".to_string()
-            };
-        }
-
-        bar.separator();
-        if bar
-            .add_enabled(state.ui.undo_stack().can_undo(), egui::Button::new("undo"))
-            .clicked()
-            && state.ui.undo(engine)
-        {
-            state.status = "undo".to_string();
-        }
-        if bar
-            .add_enabled(state.ui.undo_stack().can_redo(), egui::Button::new("redo"))
-            .clicked()
-            && state.ui.redo(engine)
-        {
-            state.status = "redo".to_string();
-        }
-        if bar.button("history").clicked() {
-            state.show_history = !state.show_history;
-        }
-
-        bar.separator();
-        for mode in [GizmoMode::Translate, GizmoMode::Rotate, GizmoMode::Scale] {
-            let label = egui::RichText::new(mode.name());
-            let label = if state.mode == mode {
-                label.strong().color(style::dark::GOLD)
-            } else {
-                label
-            };
-            if bar.button(label).clicked() {
-                state.mode = mode;
-            }
-        }
-
-        bar.separator();
-        if bar.button("save...").clicked() {
-            let name = state
-                .scene_path
-                .rsplit('/')
-                .next()
-                .unwrap_or("scene.json.hyg")
-                .to_string();
-            state.files = Some(FileDialog {
-                save: true,
-                dir: std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()),
-                name,
-                selected: None,
-                error: None,
-            });
-        }
-        if bar.button("load...").clicked() {
-            state.files = Some(FileDialog {
-                save: false,
-                dir: std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()),
-                name: String::new(),
-                selected: None,
-                error: None,
-            });
-        }
-        let short = state
-            .scene_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&state.scene_path)
-            .to_string();
-        bar.monospace(format!(" {short}"));
-
-        bar.separator();
-        let theme_label = if state.dark { "light" } else { "dark" };
-        if bar.button(theme_label).clicked() {
-            state.dark = !state.dark;
-            style::apply(ctx, state.dark);
-        }
-
-        bar.with_layout(egui::Layout::right_to_left(egui::Align::Center), |right| {
-            right.label(format!("{} fps", state.fps));
-            right.label(&state.status);
-        });
-    });
+/// Mark the active tab edited (the tab's `*`).
+fn mark_tab_dirty(state: &mut EditorState) {
+    if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+        tab.dirty = true;
+    }
 }
 
 /// The scene save (path from the dialog): the M0 canonical document of
@@ -1180,10 +1475,10 @@ fn save_scene(path: &Path, engine: &Engine) -> Result<(), String> {
     carrier::write(path, &doc).map_err(|e| e.to_string())
 }
 
-/// The scene load (path from the dialog): the carrier reads, the scene
-/// materializes, the engine replaces its roots and camera. The undo
-/// stack clears (stored paths moved with the old tree) and the selection
-/// resets.
+/// The scene load (path from the active tab / dialog): the carrier
+/// reads, the scene materializes, the engine replaces its roots and
+/// camera. The undo stack clears (stored paths moved with the old tree)
+/// and the selection resets.
 fn load_scene(state: &mut EditorState, engine: &mut Engine) -> Result<(), String> {
     let scene = Scene::load(Path::new(&state.scene_path)).map_err(|e| e.to_string())?;
     engine.set_camera(scene.camera);
@@ -1207,13 +1502,47 @@ pub fn ensure_hyg_suffix(name: &str) -> String {
     }
 }
 
+/// Open the file dialog in save (defaulting the name) or load mode.
+fn open_file_dialog(state: &mut EditorState, save: bool) {
+    let name = if save {
+        state
+            .tabs
+            .get(state.active_tab)
+            .map(|t| {
+                t.path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| format!("{}.json.hyg", t.label))
+            })
+            .unwrap_or_else(|| "scene.json.hyg".to_string())
+    } else {
+        String::new()
+    };
+    state.files = Some(FileDialog {
+        save,
+        dir: std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()),
+        name,
+        selected: None,
+        error: None,
+    });
+}
+
 /// The history panel (Godot-style): the command timeline, newest last;
 /// applied rows solid, un-done rows dim, the cursor row gold. Clicking a
 /// row travels the timeline there (undo/redo as needed).
-fn draw_history_window(ctx: &egui::Context, state: &mut EditorState, engine: &mut Engine) {
-    egui::Window::new("History")
-        .open(&mut state.show_history)
-        .default_width(280.0)
+fn draw_history_window(
+    ctx: &egui::Context,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) {
+    let mut show = state.show_history;
+    let result = egui::Window::new("History")
+        .open(&mut show)
+        .resizable(true)
+        .default_size([340.0, 420.0])
+        .min_size([240.0, 180.0])
         .show(ctx, |win| {
             let entries = state.ui.undo_stack().history(engine);
             if entries.is_empty() {
@@ -1222,7 +1551,7 @@ fn draw_history_window(ctx: &egui::Context, state: &mut EditorState, engine: &mu
             }
             let cursor = state.ui.undo_stack().cursor();
             egui::ScrollArea::vertical()
-                .max_height(320.0)
+                .auto_shrink([false, false])
                 .show(win, |scroll| {
                     for entry in &entries {
                         let at_cursor = entry.timeline_index == cursor;
@@ -1241,10 +1570,14 @@ fn draw_history_window(ctx: &egui::Context, state: &mut EditorState, engine: &mu
                                 .undo_stack_mut()
                                 .goto(entry.timeline_index, engine);
                             state.status = format!("history: back to \"{}\"", entry.label);
+                            mark_tab_dirty(state);
+                            shared.touch();
                         }
                     }
                 });
         });
+    state.show_history = show;
+    let _ = result;
 }
 
 /// The in-app file dialog (the Godot way — themable, no toolkit deps):
@@ -1256,15 +1589,17 @@ fn draw_file_dialog(
     state: &mut EditorState,
     engine: &mut Engine,
     dialog: &mut FileDialog,
+    shared: &ShellShared,
 ) -> bool {
     // returns whether the dialog stays open (false = confirmed/cancelled);
     // `confirmed` crosses the egui closures (a `return` would only exit
     // the closure)
     let mut open = true;
     let mut confirmed = false;
-    egui::Window::new(if dialog.save { "Save scene" } else { "Load scene" })
+    egui::Window::new(if dialog.save { "Save scene" } else { "Open scene" })
         .open(&mut open)
-        .default_width(440.0)
+        .resizable(true)
+        .default_size([460.0, 380.0])
         .show(ctx, |win| {
             // the current directory, clickable parent segments
             win.horizontal(|row| {
@@ -1300,7 +1635,7 @@ fn draw_file_dialog(
 
             let mut entered: Option<String> = None;
             egui::ScrollArea::vertical()
-                .max_height(260.0)
+                .auto_shrink([false, false])
                 .show(win, |scroll| {
                     for name in dirs.iter().chain(files.iter()) {
                         let is_file = !name.ends_with('/');
@@ -1315,13 +1650,10 @@ fn draw_file_dialog(
                             if is_file {
                                 dialog.selected =
                                     Some(dialog.dir.join(name.trim_end_matches('/')));
-                                if dialog.save && response.double_clicked() {
-                                    dialog.name =
-                                        name.trim_end_matches('/').to_string();
+                                if dialog.save {
+                                    dialog.name = name.trim_end_matches('/').to_string();
                                 }
-                            } else if response.double_clicked()
-                                || response.clicked() && ctx.input(|i| i.key_pressed(egui::Key::Enter))
-                            {
+                            } else {
                                 entered = Some(name.trim_end_matches('/').to_string());
                             }
                         }
@@ -1345,7 +1677,7 @@ fn draw_file_dialog(
             }
 
             win.horizontal(|row| {
-                let confirm_label = if dialog.save { "save" } else { "load" };
+                let confirm_label = if dialog.save { "save" } else { "open" };
                 if row.button(confirm_label).clicked() {
                     if dialog.save {
                         let trimmed = dialog.name.trim().to_string();
@@ -1356,8 +1688,18 @@ fn draw_file_dialog(
                             match save_scene(&path, engine) {
                                 Ok(()) => {
                                     state.scene_path = path.to_string_lossy().to_string();
-                                    state.status =
-                                        format!("saved {}", path.to_string_lossy());
+                                    // a Save-As rebinds/creates the active tab
+                                    if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                                        tab.path = Some(path.clone());
+                                        tab.label = path
+                                            .file_stem()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("scene")
+                                            .trim_end_matches(".json")
+                                            .to_string();
+                                        tab.dirty = false;
+                                    }
+                                    state.status = format!("saved {}", path.to_string_lossy());
                                     confirmed = true;
                                 }
                                 Err(e) => dialog.error = Some(e),
@@ -1366,17 +1708,9 @@ fn draw_file_dialog(
                     } else {
                         match dialog.selected.clone() {
                             Some(path) => {
-                                state.scene_path = path.to_string_lossy().to_string();
-                                match load_scene(state, engine) {
-                                    Ok(()) => {
-                                        state.status = format!(
-                                            "loaded {}",
-                                            path.to_string_lossy()
-                                        );
-                                        confirmed = true;
-                                    }
-                                    Err(e) => dialog.error = Some(e),
-                                }
+                                open_scene_path(state, engine, &path, shared);
+                                state.status = format!("loaded {}", path.to_string_lossy());
+                                confirmed = true;
                             }
                             None => {
                                 dialog.error = Some("pick a .hyg scene".to_string());

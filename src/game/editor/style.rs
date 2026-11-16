@@ -44,6 +44,12 @@ pub fn apply(ctx: &Context, dark: bool) {
     } else {
         ThemePreference::Light
     });
+    // kill drag-to-select on ALL labels globally — the studio's rows and
+    // readouts are controls, not documents (hovering the UI must never
+    // paint selections)
+    ctx.all_styles_mut(|style| {
+        style.interaction.selectable_labels = false;
+    });
     ctx.style_mut_of(egui::Theme::Dark, |style| {
         style.visuals = palette(dark::BASE, dark::PANEL, dark::WINDOW, dark::TEXT, dark::FAINT, dark::ACCENT, dark::ACCENT_DIM, true);
     });

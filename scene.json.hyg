@@ -1,0 +1,156 @@
+{
+  "scene": "scene",
+  "format": 1,
+  "camera": {
+    "position": [
+      0.0,
+      4.0,
+      -8.0
+    ],
+    "target": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "projection": {
+      "perspective": {
+        "fov": 60.0,
+        "near": 0.1,
+        "far": 100.0,
+        "aspect": 1.7777778
+      }
+    }
+  },
+  "entities": [
+    {
+      "name": "floor",
+      "enabled": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "children": [],
+      "components": [
+        {
+          "type": "physics_body",
+          "shape": "box",
+          "half_extents": [
+            6.0,
+            0.5,
+            6.0
+          ],
+          "body": "static"
+        },
+        {
+          "type": "mesh_renderer",
+          "shape": "rect",
+          "half_size": [
+            6.0,
+            0.5,
+            6.0
+          ],
+          "color": [
+            0.3,
+            0.34,
+            0.4,
+            1.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ball",
+      "enabled": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.99992996,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "children": [],
+      "components": [
+        {
+          "type": "physics_body",
+          "shape": "sphere",
+          "radius": 0.5
+        },
+        {
+          "type": "mesh_renderer",
+          "shape": "circle",
+          "half_size": [
+            0.5,
+            0.5,
+            0.5
+          ],
+          "color": [
+            1.0,
+            0.4,
+            0.1,
+            1.0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sun",
+      "enabled": true,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "children": [],
+      "components": [
+        {
+          "type": "light",
+          "kind": "directional",
+          "color": [
+            1.0,
+            0.95,
+            0.85
+          ],
+          "intensity": 1.5
+        }
+      ]
+    }
+  ]
+}
