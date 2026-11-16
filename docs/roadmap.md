@@ -799,8 +799,28 @@ seams it grows through.
    default font carries no ↶/☀/☿/▶ and font-error boxes read as bugs;
    a proper icon font ships with the theme work. 20 editor tests
    (history travel, delete naming, suffix repair); suite 222 core / 345
-   `--all-features`, clippy clean. Next rung: **M3 — play mode**
-   (snapshot-restore around play, script live reload, console).
+   `--all-features`, clippy clean. **Round 2 (same day, second
+   hands-on review): the chrome takes shape.** The gizmo alignment bug
+   was a viewport mismatch — the pick/gizmo math used the central
+   panel's rect while the blit letterboxes into the WHOLE SURFACE, so
+   clicks selected one thing while the pixels showed another; the
+   viewport now derives from the surface letterbox (`surface_viewport`),
+   exactly matching the pixels. Resize sluggishness was the paused pump
+   re-rendering every 16ms (starving the UI thread of the engine lock):
+   the pump re-renders only on a scene-dirty flag while paused, and
+   Resized requests an immediate redraw. A **menu bar** (File:
+   New/Open/Save/Save As/Quit; Edit: Undo/Redo + History; View: theme)
+   and a **toolbar** (transport + gizmo modes + **scene tabs** + fps)
+   sit above the viewport; the bottom bar is a status line. The
+   transport is complete: **Play snapshots the scene's document Var,
+   Stop restores it (play never dirties edits — M3's snapshot-restore
+   pulled forward), Restart replays**. Scene tabs carry dirty marks and
+   switch by loading their document. Hover-highlighting is dead
+   globally (`interaction.selectable_labels = false`), the history
+   window resizes on both axes, and the inspector's vectors fill their
+   rows (3-in-a-row for vec3, 2×2 for the quaternion, shrinking with
+   the panel). Next rung: **M3 — play mode** (per-scene snapshots into
+   tabs, script live reload, console).
 
 ## What hyg will NOT do
 
