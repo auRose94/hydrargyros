@@ -861,8 +861,23 @@ seams it grows through.
    ballooning (a `desired_width(INFINITY)` rename field was maxing the
    panel — that was the phantom inside-the-panel resize line), and
    "+ entity" is an obvious green +. 24 editor tests; suite 226 core /
-   349 `--all-features`, clippy clean. Next rung: **M3 — play mode**
-   (script live reload, console, per-scene snapshots tied to tabs).
+   349 `--all-features`, clippy clean. **Round 5 (fifth review).** The
+   inspector's slow ballooning was reproduced by a headless probe that
+   drives the REAL panel for 240 frames (bisected to the transform rows:
+   field widths derived from `available_width` chase the panel's own
+   chrome a few px a frame) — constants can't feed back, and the probe
+   test guards the contract. The viewport gained its **projection
+   switch** (View menu + a view-options button top-right; wireframe/
+   normals/AO staged for M5) — the orbit camera has an ortho mode
+   (half-extents from the distance, one zoom knob), and the **2D
+   ortho gizmo is test-pinned** (two screen-aligned axes, 1:1 drags).
+   + component now spawns ready components (UI-side default params;
+   factories stay strict). And the file dialog went **native** (rfd,
+   xdg-desktop-portal on Linux — favorites, locations, filtering for
+   free; the in-app browser is deleted). 26 editor tests; suite 227
+   core / 351 `--all-features`, clippy clean. Next rung: **M3 — play
+   mode** (script live reload, console, per-scene snapshots tied to
+   tabs).
 
 ## What hyg will NOT do
 
