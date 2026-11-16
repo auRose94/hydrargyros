@@ -67,7 +67,13 @@ pub struct AxisHandle {
     /// The axis's screen direction (unit, from the center).
     pub screen_dir: [f32; 2],
     /// How many pixels one world unit covers ALONG this axis at the
-    /// entity's depth (drag deltas divide by this).
+    /// entity's depth (drag deltas divide by this). CLAMPED for dragging:
+    /// an axis pointing at the camera collapses toward 0 px/unit, and a
+    /// raw floor turns a 30px drag into hundreds of world units toward
+    /// the lens — the drag scale never falls below 15% of the healthiest
+    /// axis.
+    pub drag_scale: f32,
+    /// The raw measured px/unit (layout diagnostics).
     pub px_per_unit: f32,
     /// The axis is nearly parallel to the view direction — its screen
     /// footprint collapses; editors shrink it and so do we (still
@@ -77,12 +83,14 @@ pub struct AxisHandle {
 
 /// The laid-out gizmo for one frame: everything the painter and the
 /// hit-test need.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GizmoLayout {
     /// The entity's position in viewport pixels.
     pub center: [f32; 2],
     pub mode: GizmoMode,
-    pub axes: [AxisHandle; 3],
+    /// Two axes under an orthographic camera (the 2D gizmo), three
+    /// under perspective.
+    pub axes: Vec<AxisHandle>,
     /// The rotation ring's radius (the Rotate mode only).
     pub ring_radius: f32,
 }
@@ -151,6 +159,43 @@ pub fn layout(
     rotation: Quat,
 ) -> Option<GizmoLayout> {
     let center = project_point(camera, viewport, position)?;
+
+    // ORTHOGRAPHIC: the 2D gizmo — screen-aligned X/Y arrows at the
+    // window's uniform scale (a 3D gizmo under an ortho camera has no
+    // perspective cues; pretending it does reads as broken)
+    if let Projection::Orthographic { half_extents } = camera.projection {
+        let (_, right, up) = view_basis(camera);
+        let px_x = viewport.width / (half_extents.x * 2.0).max(1e-4);
+        let px_y = viewport.height / (half_extents.y * 2.0).max(1e-4);
+        let axes = vec![
+            AxisHandle {
+                axis: 0,
+                world_dir: right,
+                screen_end: [center[0] + GIZMO_LEN_PX, center[1]],
+                screen_dir: [1.0, 0.0],
+                drag_scale: px_x,
+                px_per_unit: px_x,
+                foreshortened: false,
+            },
+            AxisHandle {
+                axis: 1,
+                world_dir: up,
+                screen_end: [center[0], center[1] - GIZMO_LEN_PX],
+                screen_dir: [0.0, -1.0], // pixel y grows down
+                drag_scale: px_y,
+                px_per_unit: px_y,
+                foreshortened: false,
+            },
+        ];
+        let _ = rotation; // the 2D gizmo is screen-aligned, not entity-local
+        return Some(GizmoLayout {
+            center,
+            mode,
+            axes,
+            ring_radius: GIZMO_LEN_PX * 0.6,
+        });
+    }
+
     let local_axes = [
         (0, Vec3::new(1.0, 0.0, 0.0), [1.0, 0.35, 0.35]),
         (1, Vec3::new(0.0, 1.0, 0.0), [0.35, 1.0, 0.35]),
@@ -186,15 +231,27 @@ pub fn layout(
                 center[1] + screen_dir[1] * len,
             ],
             screen_dir,
-            px_per_unit: px_per.max(0.05),
+            drag_scale: px_per, // clamped in the second pass below
+            px_per_unit: px_per,
             foreshortened,
         });
     }
-    let [x, y, z] = axes.map(|a| a.expect("three axes built"));
+    let mut handles: Vec<AxisHandle> = axes.into_iter().map(|a| a.expect("three axes built")).collect();
+    // drag-scale clamp: no axis drags more than ~6.7x its healthiest
+    // sibling (a foreshortened axis toward the lens would otherwise
+    // convert a tiny drag into a launch)
+    let healthiest = handles
+        .iter()
+        .map(|h| h.px_per_unit)
+        .fold(0.0f32, f32::max)
+        .max(1e-4);
+    for handle in &mut handles {
+        handle.drag_scale = handle.drag_scale.max(healthiest * 0.15);
+    }
     Some(GizmoLayout {
         center,
         mode,
-        axes: [x, y, z],
+        axes: handles,
         ring_radius: GIZMO_LEN_PX * 0.6,
     })
 }
@@ -269,7 +326,7 @@ pub fn hit_test(layout: &GizmoLayout, pointer: [f32; 2]) -> GizmoHit {
 #[must_use]
 pub fn translate_delta(handle: &AxisHandle, drag_px: [f32; 2]) -> Vec3 {
     let along = drag_px[0] * handle.screen_dir[0] + drag_px[1] * handle.screen_dir[1];
-    let units = along / handle.px_per_unit.max(1e-6);
+    let units = along / handle.drag_scale.max(1e-6);
     handle.world_dir.scaled(Vec3::splat(units))
 }
 
@@ -306,5 +363,5 @@ pub fn rotate_delta(angle_delta: f32, camera_forward: Vec3) -> Quat {
 #[must_use]
 pub fn scale_delta(handle: &AxisHandle, drag_px: [f32; 2]) -> f32 {
     let along = drag_px[0] * handle.screen_dir[0] + drag_px[1] * handle.screen_dir[1];
-    along / handle.px_per_unit.max(1e-6)
+    along / handle.drag_scale.max(1e-6)
 }

@@ -194,6 +194,38 @@ impl Engine {
         parent.remove_child(*rest.last()?)
     }
 
+    /// Move the entity at `from` under the entity at `to` (the
+    /// hierarchy drag-reparent). Refuses (false) when either path is
+    /// dead or `from` contains `to` (no cycles). The moved subtree
+    /// appends to its new parent's children.
+    pub fn reparent(&mut self, from: &[usize], to: &[usize]) -> bool {
+        // from must contain to's path to be a cycle: to starts with from
+        if from.len() <= to.len() && to[..from.len()] == *from {
+            return false;
+        }
+        // the target must exist BEFORE the removal shifts indices
+        // (scoped probe — no borrow held across the remove)
+        if self.entity_at(to).is_none() {
+            return false;
+        }
+        let Some(moved) = self.remove_entity(from) else {
+            return false;
+        };
+        // `to` may have shifted if it shared a parent-list with `from`:
+        // re-resolve; on failure, restore `from` (never lose the subtree)
+        let adjusted = adjust_path_after_removal(to, from);
+        match self.entity_at_mut(&adjusted) {
+            Some(parent) => {
+                parent.add_child(moved);
+                true
+            }
+            None => {
+                self.insert_entity(from, moved);
+                false
+            }
+        }
+    }
+
     /// Insert `entity` AT a tree path (the parent must exist; the index
     /// is clamped into range — an out-of-range index appends to the
     /// parent's children). The delete-undo's restore seam. `true` when
@@ -575,6 +607,26 @@ impl Engine {
         }
         order.sort_by_key(|(p, _)| *p);
         order
+    }
+}
+
+/// After removing the entity at `removed`, a sibling path that jumped
+/// over it shifts down one index; deeper paths under the same parent
+/// shift too. Paths in other branches are untouched.
+fn adjust_path_after_removal(path: &[usize], removed: &[usize]) -> Vec<usize> {
+    if removed.len() <= path.len() && path[..removed.len() - 1] == removed[..removed.len() - 1] {
+        // same parent chain: the last compared index is within the same
+        // child list — shift indices greater than the removed one
+        let mut adjusted = path.to_vec();
+        let r_last = removed[removed.len() - 1];
+        for slot in adjusted.iter_mut().skip(removed.len() - 1) {
+            if *slot > r_last {
+                *slot -= 1;
+            }
+        }
+        adjusted
+    } else {
+        path.to_vec()
     }
 }
 

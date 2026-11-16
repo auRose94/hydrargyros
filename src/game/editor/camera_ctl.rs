@@ -33,7 +33,10 @@ impl Default for Orbit {
     /// down the +z axis the scenes are built along.
     fn default() -> Self {
         Orbit {
-            yaw: 0.0,
+            // yaw π views from +z looking −z: world +x renders
+            // screen-RIGHT — the gizmo convention every other editor
+            // trains (yaw 0 views from behind +z and mirrors it)
+            yaw: std::f32::consts::PI,
             pitch: 0.45,
             distance: 9.0,
             target: Vec3::new(0.0, 1.0, 0.0),
@@ -69,11 +72,10 @@ impl Orbit {
     }
 
     /// Orbit by pointer drag deltas (pixels): dragging right moves the
-    /// EYE right around the target (the scene slides left — the standard
-    /// editor orbit), dragging up raises the eye. The eye sits at
-    /// `target − forward·dist`, so the yaw sign runs against the drag.
+    /// EYE along the camera's CURRENT screen-right (view-invariant —
+    /// `dEye/dyaw = screen_right·dist`), dragging up raises the eye.
     pub fn orbit_by(&mut self, dx: f32, dy: f32) {
-        self.yaw -= dx * 0.01;
+        self.yaw += dx * 0.01;
         self.pitch = (self.pitch + dy * 0.01).clamp(-1.53, 1.53);
     }
 

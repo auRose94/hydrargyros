@@ -14,6 +14,14 @@ pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2e, 0x45, 0x62);
 pub const GOLD_DIM: Color32 = Color32::from_rgb(0x5e, 0x4c, 0x21);
 pub const GREEN_DIM: Color32 = Color32::from_rgb(0x27, 0x4a, 0x2c);
 pub const DANGER_DIM: Color32 = Color32::from_rgb(0x54, 0x27, 0x2b);
+// the transport's color language (user-specified): play green, stop
+// red, restart orange — bright enough to read as buttons, dark enough
+// for the dark theme
+pub const PLAY_GREEN: Color32 = Color32::from_rgb(0x2f, 0x7d, 0x3d);
+pub const STOP_RED: Color32 = Color32::from_rgb(0xb0, 0x38, 0x3d);
+pub const RESTART_ORANGE: Color32 = Color32::from_rgb(0xb5, 0x6a, 0x24);
+// the create button's green
+pub const CREATE_GREEN: Color32 = Color32::from_rgb(0x2f, 0x7d, 0x3d);
 
 /// The dark palette: quicksilver on deep space.
 pub mod dark {

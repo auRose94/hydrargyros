@@ -569,6 +569,90 @@ fn scene_io_round_trips_through_the_engine() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+// ---- round 4: reparenting ----
+
+/// Drag-to-reparent: subtrees move (children ride along), cycles are
+/// refused, and sibling indices survive the removal shift.
+#[test]
+fn reparent_moves_subtrees_and_refuses_cycles() {
+    let mut engine = demo_engine();
+    // tree: world > stack > block_3, plus root "free"
+    assert!(engine.reparent(&[1], &[0]), "free -> world"); // free under world
+    let free = engine.entity_at(&[0, 1]).expect("free moved under world");
+    assert_eq!(free.name(), "free");
+    assert_eq!(
+        engine.entity_at(&[0, 0]).map(|e| e.name()),
+        Some("stack"),
+        "stack unshifted? no — free appended AFTER stack: stack stays [0,0]"
+    );
+
+    // children ride along: stack (carrying block_3) moves under free
+    assert!(engine.reparent(&[0, 0], &[0, 1]), "stack (with block_3) -> free");
+    let free = engine.entity_at(&[0, 0]).expect("free shifted to [0,0] after stack left");
+    assert_eq!(free.children().len(), 1, "stack rode along");
+    assert_eq!(free.children()[0].name(), "stack");
+    assert_eq!(
+        free.children()[0].children()[0].name(),
+        "block_3",
+        "the grandchild rode along too"
+    );
+
+    // cycles refused: world under its own descendant
+    assert!(!engine.reparent(&[0], &[0, 0, 0]), "no cycles");
+    assert!(engine.entity_at(&[0]).is_some(), "world survived the refusal");
+}
+
+// ---- round 4: end-to-end gizmo direction ----
+
+/// THE reversal hunt, end to end: dragging 30px along the X handle's
+/// screen arrow must move the entity 30px along that same screen
+/// direction — the full layout→delta→project chain, no links missing.
+/// (If this passes, on-screen reversal is a VIEW-convention matter, not
+/// math — see the orbit default-yaw note in camera_ctl.)
+#[test]
+fn gizmo_drag_moves_the_entity_along_the_arrow() {
+    let camera = pick_camera();
+    let view = view();
+    let origin = Vec3::new(0.0, 0.0, 0.0);
+    let identity = hyg::var::Quat::new(0.0, 0.0, 0.0, 1.0);
+    let layout = gizmo::layout(GizmoMode::Translate, &camera, &view, origin, identity)
+        .expect("lays out");
+
+    for handle in &layout.axes {
+        let drag = [handle.screen_dir[0] * 30.0, handle.screen_dir[1] * 30.0];
+        let delta = gizmo::translate_delta(handle, drag);
+        if handle.foreshortened {
+            // an axis pointing at the lens cannot move on screen — but
+            // the CLAMP must bound it (a raw floor = a 600-unit launch)
+            let healthiest = layout
+                .axes
+                .iter()
+                .map(|h| h.px_per_unit)
+                .fold(0.0f32, f32::max);
+            let bound = 30.0 / (healthiest * 0.15);
+            assert!(
+                delta.length() <= bound + 0.01,
+                "axis {}: foreshortened drags stay bounded ({} <= {bound})",
+                handle.axis,
+                delta.length()
+            );
+            continue;
+        }
+        let before = pick::project_point(&camera, &view, origin).expect("projects");
+        let after =
+            pick::project_point(&camera, &view, origin + delta).expect("projects");
+        let moved = [after[0] - before[0], after[1] - before[1]];
+        let dot = moved[0] * handle.screen_dir[0] + moved[1] * handle.screen_dir[1];
+        assert!(
+            dot > 20.0,
+            "axis {}: a 30px drag along the arrow must move the entity \u{2248}30px the SAME way (moved {:?}, dir {:?})",
+            handle.axis,
+            moved,
+            handle.screen_dir
+        );
+    }
+}
+
 // ---- round 3: the editor camera + the view basis ----
 
 /// The view basis's `right` matches the SCREEN's right: projecting a
@@ -615,21 +699,29 @@ fn orbit_default_frames_the_target() {
     let up_px = pick::project_point(&camera, &view, orbit.target + up).expect("projects");
     assert!(right_px[0] > center[0], "orbit right = screen right");
     assert!(up_px[1] < center[1], "orbit up = screen up");
-    // elevated and behind: eye z < target z, eye y > target y
-    assert!(camera.position.z < orbit.target.z);
+    // the default view: from +z looking −z (world +x renders
+    // screen-RIGHT — the gizmo convention), elevated above the target
+    assert!(camera.position.z > orbit.target.z);
     assert!(camera.position.y > orbit.target.y);
+    let x_px = pick::project_point(&camera, &view, orbit.target + Vec3::new(1.0, 0.0, 0.0))
+        .expect("projects");
+    assert!(x_px[0] > center[0], "world +x renders screen-RIGHT by default");
 
     // orbit_by pans the view around; zoom_by dollies in
     let mut orbit = Orbit::default();
     let d0 = orbit.distance;
     orbit.zoom_by(100.0); // wheel up = zoom in
     assert!(orbit.distance < d0);
-    orbit.orbit_by(100.0, 0.0); // drag right
-    let camera = orbit.camera(16.0 / 9.0);
-    assert!(
-        camera.position.x > Orbit::default().camera(16.0 / 9.0).position.x,
-        "dragging right orbits the EYE toward +x"
-    );
+    // drag right = the eye moves along the camera's CURRENT screen-right
+    // (view-invariant — a world-frame assertion flips with yaw and once
+    // enshrined the wrong sign)
+    let before = orbit.camera(16.0 / 9.0);
+    let (_, right, _) = gizmo::view_basis(&before);
+    orbit.orbit_by(100.0, 0.0);
+    let after = orbit.camera(16.0 / 9.0);
+    let eye_delta = after.position - before.position;
+    let along_right = eye_delta.dot(right);
+    assert!(along_right > 0.0, "drag right moves the eye screen-right");
 }
 
 // ---- M2 fix round: the history panel's timeline ----

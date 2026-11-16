@@ -239,6 +239,25 @@ struct EditorState {
     files: Option<FileDialog>,
     /// The + component combo's pending choice (None = nothing picked).
     add_pick: Option<String>,
+    /// The editor log (every status line, newest last, capped) — the
+    /// dock's Log tab.
+    log: Vec<String>,
+    /// The hierarchy row being dragged (its path), for reparent-on-drop.
+    dragged_row: Option<Vec<usize>>,
+    /// The bottom dock's active tab.
+    dock_tab: DockTab,
+}
+
+/// The bottom dock's tabs. Console/debugger/profiler are staged homes —
+/// their content ships with the milestones that own it (M3 script
+/// console + debugger, M5 profiler); Log and Stats are live now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DockTab {
+    Log,
+    Stats,
+    Console,
+    Debugger,
+    Profiler,
 }
 
 /// One open scene (a tab): its label, its path once saved/loaded, and
@@ -289,7 +308,20 @@ impl EditorState {
             show_history: false,
             files: None,
             add_pick: None,
+            log: Vec::new(),
+            dragged_row: None,
+            dock_tab: DockTab::Log,
         }
+    }
+
+    /// Set the status line AND append it to the log (one seam).
+    fn set_status(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.log.push(message.clone());
+        if self.log.len() > 200 {
+            self.log.drain(..self.log.len() - 200);
+        }
+        self.status = message;
     }
 
     fn tick_fps(&mut self) {
@@ -617,18 +649,18 @@ fn draw_ui(
             )
         });
         if undo_hit && state.ui.undo(engine) {
-            state.status = "undo".to_string();
+            state.set_status("undo");
             shared.touch();
         }
         if redo_hit && state.ui.redo(engine) {
-            state.status = "redo".to_string();
+            state.set_status("redo");
             shared.touch();
         }
         if let Some(mode) = mode_key {
             state.mode = mode;
         }
         if delete_hit && state.ui.delete_selected(engine, state.now()) {
-            state.status = "deleted (Ctrl+Z restores)".to_string();
+            state.set_status("deleted (Ctrl+Z restores)");
             shared.touch();
         }
     }
@@ -653,153 +685,160 @@ fn draw_ui(
 
     let ppp = ctx.pixels_per_point();
     ctx.root_ui(|root| {
-        // the menu bar spans the top (File / Edit / View)
+// the menu bar spans the top: menus left, transport FAR RIGHT (the
+        // user's color language — play GREEN, stop RED, restart ORANGE)
         egui::containers::Panel::top("studio-menu")
             .exact_size(24.0)
             .show(root, |bar| {
-                egui::MenuBar::new().ui(bar, |menu| {
-                    menu.menu_button("File", |file| {
-                        if file.button("New Scene").clicked() {
-                            new_scene(state, engine, shared);
-                            file.close();
-                        }
-                        if file.button("Open...").clicked() {
-                            open_file_dialog(state, false);
-                            file.close();
-                        }
-                        if file.button("Save").clicked() {
-                            save_active_tab(state, engine);
-                            file.close();
-                        }
-                        if file.button("Save As...").clicked() {
-                            open_file_dialog(state, true);
-                            file.close();
-                        }
-                        file.separator();
-                        if file.button("Quit").clicked() {
-                            shared.quit.store(true, Ordering::SeqCst);
-                        }
-                    });
-                    menu.menu_button("Edit", |edit| {
-                        if edit
-                            .add_enabled(
-                                state.ui.undo_stack().can_undo(),
-                                egui::Button::new("Undo"),
-                            )
-                            .clicked()
-                            && state.ui.undo(engine)
-                        {
-                            state.status = "undo".to_string();
-                            shared.touch();
-                            edit.close();
-                        }
-                        if edit
-                            .add_enabled(
-                                state.ui.undo_stack().can_redo(),
-                                egui::Button::new("Redo"),
-                            )
-                            .clicked()
-                            && state.ui.redo(engine)
-                        {
-                            state.status = "redo".to_string();
-                            shared.touch();
-                            edit.close();
-                        }
-                        if edit
-                            .add_enabled(
-                                state.ui.selection().is_some(),
-                                egui::Button::new("Delete"),
-                            )
-                            .clicked()
-                            && state.ui.delete_selected(engine, state.now())
-                        {
-                            state.status = "deleted (Ctrl+Z restores)".to_string();
-                            mark_tab_dirty(state);
-                            shared.touch();
-                            edit.close();
-                        }
-                        edit.separator();
-                        if edit.button("History").clicked() {
-                            state.show_history = !state.show_history;
-                            edit.close();
-                        }
-                    });
-                    menu.menu_button("View", |view| {
-                        if view
-                            .button(if state.dark { "Light theme" } else { "Dark theme" })
-                            .clicked()
-                        {
-                            state.dark = !state.dark;
-                            style::apply(view.ctx(), state.dark);
-                            view.close();
-                        }
-                    });
-                });
-
-                // the transport lives HERE, far right of the menu bar —
-                // color coded (green play, amber pause, red stop, blue
-                // restart), above the fps readout
-                bar.with_layout(
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |right| {
-                        let playing_now = shared.playing.load(Ordering::SeqCst);
-                        if right
-                            .add(
-                                egui::Button::new(egui::RichText::new("restart").color(style::dark::TEXT))
-                                    .fill(style::ACCENT_DIM),
-                            )
-                            .clicked()
-                        {
-                            restart(state, engine, shared);
-                        }
-                        if right
-                            .add(
-                                egui::Button::new(egui::RichText::new("stop").color(style::dark::TEXT))
-                                    .fill(style::DANGER_DIM),
-                            )
-                            .clicked()
-                        {
-                            stop(state, engine, shared);
-                        }
-                        let pause_fill = if playing_now {
-                            style::GOLD_DIM
-                        } else {
-                            style::ACCENT_DIM
-                        };
-                        if right
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new("pause").color(style::dark::TEXT),
-                                )
-                                .fill(pause_fill),
-                            )
-                            .on_hover_text("pause the sim, keep the played state")
-                            .clicked()
-                        {
-                            pause(state, shared);
-                        }
-                        let play_fill = if playing_now {
-                            style::GOLD_DIM
-                        } else {
-                            style::GREEN_DIM
-                        };
-                        if right
-                            .add(
-                                egui::Button::new(egui::RichText::new("play").color(style::dark::TEXT))
-                                    .fill(play_fill),
-                            )
-                            .on_hover_text("snapshot the edit state and run")
-                            .clicked()
-                        {
-                            if playing_now {
-                                pause(state, shared);
-                            } else {
-                                play(state, engine, shared);
+                bar.horizontal(|row| {
+                    egui::MenuBar::new().ui(row, |menu| {
+                        menu.menu_button("File", |file| {
+                            if file.button("New Scene").clicked() {
+                                new_scene(state, engine, shared);
+                                file.close();
                             }
-                        }
-                    },
-                );
+                            if file.button("Open...").clicked() {
+                                open_file_dialog(state, false);
+                                file.close();
+                            }
+                            if file.button("Save").clicked() {
+                                save_active_tab(state, engine);
+                                file.close();
+                            }
+                            if file.button("Save As...").clicked() {
+                                open_file_dialog(state, true);
+                                file.close();
+                            }
+                            file.separator();
+                            if file.button("Quit").clicked() {
+                                shared.quit.store(true, Ordering::SeqCst);
+                            }
+                        });
+                        menu.menu_button("Edit", |edit| {
+                            if edit
+                                .add_enabled(
+                                    state.ui.undo_stack().can_undo(),
+                                    egui::Button::new("Undo"),
+                                )
+                                .clicked()
+                                && state.ui.undo(engine)
+                            {
+                                state.set_status("undo");
+                                shared.touch();
+                                edit.close();
+                            }
+                            if edit
+                                .add_enabled(
+                                    state.ui.undo_stack().can_redo(),
+                                    egui::Button::new("Redo"),
+                                )
+                                .clicked()
+                                && state.ui.redo(engine)
+                            {
+                                state.set_status("redo");
+                                shared.touch();
+                                edit.close();
+                            }
+                            if edit
+                                .add_enabled(
+                                    state.ui.selection().is_some(),
+                                    egui::Button::new("Delete"),
+                                )
+                                .clicked()
+                                && state.ui.delete_selected(engine, state.now())
+                            {
+                                state.set_status("deleted (Ctrl+Z restores)");
+                                mark_tab_dirty(state);
+                                shared.touch();
+                                edit.close();
+                            }
+                            edit.separator();
+                            if edit.button("History").clicked() {
+                                state.show_history = !state.show_history;
+                                edit.close();
+                            }
+                        });
+                        menu.menu_button("View", |view| {
+                            if view
+                                .button(if state.dark { "Light theme" } else { "Dark theme" })
+                                .clicked()
+                            {
+                                state.dark = !state.dark;
+                                style::apply(view.ctx(), state.dark);
+                                view.close();
+                            }
+                        });
+                    });
+                    // the transport, far right of the SAME row
+                    row.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |right| {
+                            let playing_now = shared.playing.load(Ordering::SeqCst);
+                            if right
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("restart").color(style::dark::TEXT),
+                                    )
+                                    .fill(style::RESTART_ORANGE),
+                                )
+                                .on_hover_text("restore the play snapshot and replay")
+                                .clicked()
+                            {
+                                restart(state, engine, shared);
+                            }
+                            if right
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("stop").color(style::dark::TEXT),
+                                    )
+                                    .fill(style::STOP_RED),
+                                )
+                                .on_hover_text("back to the edit state")
+                                .clicked()
+                            {
+                                stop(state, engine, shared);
+                            }
+                            if right
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("pause").color(style::dark::TEXT),
+                                    )
+                                    .fill(if playing_now {
+                                        style::GOLD_DIM
+                                    } else {
+                                        style::ACCENT_DIM
+                                    }),
+                                )
+                                .on_hover_text("pause the sim, keep the played state")
+                                .clicked()
+                            {
+                                pause(state, shared);
+                            }
+                            if right
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("play").color(style::dark::TEXT),
+                                    )
+                                    .fill(if playing_now {
+                                        style::GOLD_DIM
+                                    } else {
+                                        style::PLAY_GREEN
+                                    }),
+                                )
+                                .on_hover_text("snapshot the edit state and run")
+                                .clicked()
+                            {
+                                if playing_now {
+                                    pause(state, shared);
+                                } else {
+                                    play(state, engine, shared);
+                                }
+                            }
+                        },
+                    );
+                });
             });
+
 
         // the toolbar: gizmo modes, scene tabs, fps (transport moved to
         // the menu bar's right end)
@@ -816,7 +855,17 @@ fn draw_ui(
             .show(root, |panel| {
                 panel.horizontal(|head| {
                     head.heading("Hierarchy");
-                    if head.small_button("+ entity").clicked() {
+                    // the create button: an obvious green +
+                    if head
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("+").strong().color(style::dark::TEXT),
+                            )
+                            .fill(style::CREATE_GREEN),
+                        )
+                        .on_hover_text("new entity (child of the selection, else a root)")
+                        .clicked()
+                    {
                         // a child of the selection when one is live, else
                         // a new root
                         let name = format!("entity-{}", engine.entities().len() + 1);
@@ -834,11 +883,51 @@ fn draw_ui(
                     }
                 });
                 let nodes = EditorUi::hierarchy(engine);
-                egui::ScrollArea::vertical().show(panel, |scroll| {
-                    for node in &nodes {
-                        hierarchy_rows(scroll, node, state, 0);
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .id_salt("studio-hierarchy-scroll")
+                    .auto_shrink([false, false])
+                    .show(panel, |scroll| {
+                        // (path, rect) per row — the drop target lookup
+                        let mut rows: Vec<(Vec<usize>, egui::Rect)> = Vec::new();
+                        for node in &nodes {
+                            hierarchy_rows(scroll, node, state, 0, &mut rows);
+                        }
+                        // a drag released over a row reparents; over the
+                        // empty space below, the dragged entity goes to
+                        // the roots
+                        let reparent = state
+                            .dragged_row
+                            .clone()
+                            .filter(|_| scroll.response().drag_stopped());
+                        if let Some(from) = reparent {
+                            state.dragged_row = None;
+                            let pointer = scroll.response().interact_pointer_pos();
+                            let target = pointer.and_then(|p| {
+                                rows.iter()
+                                    .find(|(path, rect)| {
+                                        rect.contains(p) && *path != from
+                                    })
+                                    .map(|(path, _)| path.clone())
+                            });
+                            let landed = match target {
+                                Some(to) => engine.reparent(&from, &to),
+                                // drop on empty hierarchy space → a root
+                                None => {
+                                    let moved_to_root = (|| {
+                                        let entity = engine.remove_entity(&from)?;
+                                        engine.add_entity(entity);
+                                        Some(())
+                                    })();
+                                    moved_to_root.is_some()
+                                }
+                            };
+                            if landed {
+                                state.set_status("reparented (drag again to move it back)");
+                                mark_tab_dirty(state);
+                                shared.touch();
+                            }
+                        }
+                    });
             });
 
         egui::containers::Panel::right("studio-inspector")
@@ -849,20 +938,15 @@ fn draw_ui(
                 draw_inspector(panel, state, engine, shared);
             });
 
-        // the loaded-scene strip (16px, monospace path) sits above the
-        // status line
-        egui::containers::Panel::bottom("studio-scenebar")
-            .exact_size(16.0)
-            .show(root, |bar| {
-                bar.monospace(egui::RichText::new(&state.scene_path).small());
-            });
-
-        egui::containers::Panel::bottom("studio-status")
-            .exact_size(20.0)
-            .show(root, |panel| {
-                panel.horizontal(|bar| {
-                    bar.label(&state.status);
-                });
+        // the bottom DOCK: log / stats / console / debugger / profiler —
+        // the editor's output floor (Log and Stats live now; the others
+        // are staged for the milestones that own their content)
+        egui::containers::Panel::bottom("studio-dock")
+            .resizable(true)
+            .size_range(64.0..=420.0)
+            .default_size(140.0)
+            .show(root, |dock| {
+                draw_dock(dock, state, engine, shared);
             });
 
         // the viewport: LAST, frameless so the blit shows through
@@ -907,13 +991,13 @@ fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     // play runs through the SCENE's camera (the editor orbit is edit-only)
     engine.set_camera(state.scene_camera);
     shared.playing.store(true, Ordering::SeqCst);
-    state.status = "playing — Space or pause to edit".to_string();
+    state.set_status("playing — Space or pause to edit");
 }
 
 /// Pause: stop the sim, keep the played state (resume from here).
 fn pause(state: &mut EditorState, shared: &ShellShared) {
     shared.playing.store(false, Ordering::SeqCst);
-    state.status = "paused — edits stick; play resumes".to_string();
+    state.set_status("paused — edits stick; play resumes");
     shared.touch();
 }
 
@@ -921,7 +1005,7 @@ fn pause(state: &mut EditorState, shared: &ShellShared) {
 fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     shared.playing.store(false, Ordering::SeqCst);
     restore_snapshot(state, engine);
-    state.status = "stopped — back to the edit state".to_string();
+    state.set_status("stopped — back to the edit state");
     shared.touch();
 }
 
@@ -992,13 +1076,13 @@ fn save_active_tab(state: &mut EditorState, engine: &mut Engine) {
                     if let Some(tab) = state.tabs.get_mut(state.active_tab) {
                         tab.dirty = false;
                     }
-                    state.status = format!("saved {}", path.to_string_lossy());
+                    state.set_status(format!("saved {}", path.to_string_lossy()));
                 }
-                Err(e) => state.status = format!("save failed: {e}"),
+                Err(e) => state.set_status(format!("save failed: {e}")),
             }
         }
         None => {
-            state.status = "save as — name the scene".to_string();
+            state.set_status("save as — name the scene");
             open_file_dialog(state, true);
         }
     }
@@ -1022,37 +1106,101 @@ fn open_scene_path(state: &mut EditorState, engine: &mut Engine, path: &Path, sh
     shared.touch();
 }
 
-/// The toolbar: transport buttons, gizmo modes, scene tabs, fps.
+/// The bottom dock: a tab strip and its content. Log is the status
+/// history; Stats is live engine telemetry; the staged tabs name their
+/// milestone (the dock is the extension point for more).
+fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shared: &ShellShared) {
+    dock.horizontal(|tabs| {
+        for (tab, label) in [
+            (DockTab::Log, "Log"),
+            (DockTab::Stats, "Stats"),
+            (DockTab::Console, "Console"),
+            (DockTab::Debugger, "Debugger"),
+            (DockTab::Profiler, "Profiler"),
+        ] {
+            if tabs
+                .selectable_label(state.dock_tab == tab, label)
+                .clicked()
+            {
+                state.dock_tab = tab;
+            }
+        }
+    });
+    dock.separator();
+    match state.dock_tab {
+        DockTab::Log => {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(dock, |scroll| {
+                    if state.log.is_empty() {
+                        scroll.weak("(nothing logged yet)");
+                    }
+                    for line in &state.log {
+                        scroll.monospace(egui::RichText::new(line).small());
+                    }
+                });
+        }
+        DockTab::Stats => {
+            let playing = shared.playing.load(Ordering::SeqCst);
+            let entities: usize = engine.entities().iter().map(count_subtree).sum();
+            let components: usize = engine
+                .entities()
+                .iter()
+                .map(|e| e.iter_components().count() + count_child_components(e))
+                .sum();
+            dock.monospace(format!(
+                "mode: {}   fps: {}\nroot entities: {}   total entities: {}   components: {}",
+                if playing { "playing" } else { "edit" },
+                state.fps,
+                engine.entities().len(),
+                entities,
+                components,
+            ));
+        }
+        DockTab::Console => {
+            dock.weak("script output lands here — the console ships with M3 (script live reload)");
+        }
+        DockTab::Debugger => {
+            dock.weak("graph runs attach here — the debugger panel ships with the dynamic seam UI");
+        }
+        DockTab::Profiler => {
+            dock.weak("frame profiling ships with M5 (polish)");
+        }
+    }
+}
+
+fn count_subtree(entity: &Entity) -> usize {
+    1 + entity.children().iter().map(count_subtree).sum::<usize>()
+}
+
+fn count_child_components(entity: &Entity) -> usize {
+    entity
+        .children()
+        .iter()
+        .map(|c| c.iter_components().count() + count_child_components(c))
+        .sum()
+}
+
+/// The toolbar: gizmo modes, scene tabs, fps.
 fn draw_toolbar(
     bar: &mut egui::Ui,
     state: &mut EditorState,
     engine: &mut Engine,
     shared: &ShellShared,
 ) {
+    let _ = engine;
     bar.horizontal(|row| {
-        let playing_now = shared.playing.load(Ordering::SeqCst);
-        if row
-            .selectable_label(playing_now, if playing_now { "pause" } else { "play" })
-            .clicked()
-        {
-            if playing_now {
-                pause(state, shared);
-            } else {
-                play(state, engine, shared);
-            }
-        }
-        if row.button("stop").clicked() {
-            stop(state, engine, shared);
-        }
-        if row.button("restart").clicked() {
-            restart(state, engine, shared);
-        }
-
-        row.separator();
-        for mode in [GizmoMode::Translate, GizmoMode::Rotate, GizmoMode::Scale] {
+        // the gizmo modes, color-coded to their gizmo axes of heart:
+        // move red, rotate green, scale blue
+        for (mode, color) in [
+            (GizmoMode::Translate, egui::Color32::from_rgb(232, 85, 95)),
+            (GizmoMode::Rotate, egui::Color32::from_rgb(105, 212, 107)),
+            (GizmoMode::Scale, egui::Color32::from_rgb(91, 141, 240)),
+        ] {
             let label = egui::RichText::new(mode.name());
             let label = if state.mode == mode {
-                label.strong().color(style::dark::GOLD)
+                label.strong().color(color)
             } else {
                 label
             };
@@ -1093,7 +1241,7 @@ fn draw_toolbar(
                     .unwrap_or(false);
                 activate_tab(state, engine, i);
                 if dirty_warning {
-                    state.status = "switched tabs — the previous tab had unsaved edits".to_string();
+                    state.set_status("switched tabs — the previous tab had unsaved edits");
                 }
             }
         }
@@ -1103,7 +1251,7 @@ fn draw_toolbar(
                 let next = i.min(state.tabs.len() - 1);
                 activate_tab(state, engine, next);
             } else {
-                state.status = "the last tab stays — File > New Scene for a fresh one".to_string();
+                state.set_status("the last tab stays — File > New Scene for a fresh one");
             }
         }
 
@@ -1115,6 +1263,8 @@ fn draw_toolbar(
                 "edit"
             };
             right.label(mode);
+            right.separator();
+            right.weak(&state.status);
         });
     });
 }
@@ -1320,16 +1470,22 @@ fn draw_viewport(
         if let Some(pointer) = pointer_phys {
             match pick::click_pick(engine, &camera, &vp_rect, pointer) {
                 Some(path) => {
-                    let name = engine
-                        .entity_at(&path)
-                        .map(|e| e.name().to_string())
-                        .unwrap_or_default();
-                    state.ui.select(path);
-                    state.status = format!("selected {name}");
+                    // clicking the already-selected entity deselects it
+                    if state.ui.selection() == Some(path.as_slice()) {
+                        state.ui.deselect();
+                        state.set_status("deselected");
+                    } else {
+                        let name = engine
+                            .entity_at(&path)
+                            .map(|e| e.name().to_string())
+                            .unwrap_or_default();
+                        state.ui.select(path);
+                        state.set_status(format!("selected {name}"));
+                    }
                 }
                 None => {
                     state.ui.deselect();
-                    state.status = "deselected".to_string();
+                    state.set_status("deselected");
                 }
             }
         }
@@ -1448,11 +1604,13 @@ pub fn paint_gizmo(
 
 /// The hierarchy rows: indent, (off) for disabled, component tags, click
 /// to select, the selection in gold.
+#[allow(clippy::too_many_arguments)]
 fn hierarchy_rows(
     panel: &mut egui::Ui,
     node: &crate::game::editor::ui::HierarchyNode,
     state: &mut EditorState,
     depth: usize,
+    rows: &mut Vec<(Vec<usize>, egui::Rect)>,
 ) {
     let selected = state.ui.selection() == Some(node.path.as_slice());
     let mut label = String::new();
@@ -1464,16 +1622,33 @@ fn hierarchy_rows(
     if !node.component_types.is_empty() {
         label.push_str(&format!("   · {}", node.component_types.join(", ")));
     }
-    // selectable_label: a proper row widget — no text-selection gesture
-    // (the old clickable Label left the pointer dragging out highlights)
-    let response = panel.selectable_label(selected, label);
+    // click-and-drag rows: click selects (again = deselects), drag
+    // carries the row for reparenting
+    let response = panel.add(
+        egui::Button::new(label)
+            .fill(if selected {
+                style::GOLD_DIM
+            } else {
+                egui::Color32::TRANSPARENT
+            })
+            .min_size(egui::vec2(panel.available_width(), 14.0)),
+    );
+    rows.push((node.path.clone(), response.rect));
     if response.clicked() {
-        state.ui.select(node.path.clone());
-        state.name_edit = None;
-        state.status = format!("selected {}", node.name);
+        if selected {
+            state.ui.deselect();
+            state.set_status("deselected");
+        } else {
+            state.ui.select(node.path.clone());
+            state.name_edit = None;
+            state.set_status(format!("selected {}", node.name));
+        }
+    }
+    if response.drag_started() {
+        state.dragged_row = Some(node.path.clone());
     }
     for child in &node.children {
-        hierarchy_rows(panel, child, state, depth + 1);
+        hierarchy_rows(panel, child, state, depth + 1, rows);
     }
 }
 
@@ -1509,10 +1684,7 @@ fn axis_row(
                         .color(axis_color)
                         .strong(),
                 );
-                let response = line.add_sized(
-                    [(width - 14.0).max(36.0), 18.0],
-                    drag,
-                );
+                let response = line.add_sized([(width - 14.0).max(26.0), 18.0], drag);
                 if response.changed() {
                     *value = v as f32;
                     *changed = true;
@@ -1537,7 +1709,7 @@ fn add_component_ui(
     let mut picked = state.add_pick.clone();
     egui::ComboBox::from_id_salt("studio-add-component")
         .selected_text(picked.clone().unwrap_or_else(|| "+ component".to_string()))
-        .width(scroll.available_width())
+        .width(scroll.available_width().min(200.0))
         .show_ui(scroll, |combo| {
             for ty in &types {
                 combo.selectable_value(&mut picked, Some(ty.clone()), ty);
@@ -1556,7 +1728,7 @@ fn add_component_ui(
         Ok(component) => {
             if let Some(entity) = engine.entity_at_mut(path) {
                 entity.add_component(component);
-                state.status = format!("added {ty}");
+                state.set_status(format!("added {ty}"));
                 state.add_pick = None;
                 true
             } else {
@@ -1564,7 +1736,7 @@ fn add_component_ui(
             }
         }
         Err(e) => {
-            state.status = format!("{ty} needs more than defaults: {e}");
+            state.set_status(format!("{ty} needs more than defaults: {e}"));
             false
         }
     }
@@ -1603,8 +1775,12 @@ fn draw_inspector(
             // field is focused (rebuilt-from-entity each frame would eat
             // every keystroke); committed on blur or Enter
             let mut buf = state.name_edit.clone().unwrap_or_else(|| name.clone());
-            let edit =
-                scroll.add(egui::TextEdit::singleline(&mut buf).desired_width(f32::INFINITY));
+            // finite width — an INFINITY desired width balloons a
+            // resizable panel to its max
+            let edit = scroll.add(
+                egui::TextEdit::singleline(&mut buf)
+                    .desired_width((scroll.available_width() - 8.0).max(80.0)),
+            );
             if edit.has_focus() {
                 state.name_edit = Some(buf.clone());
             }
@@ -1706,7 +1882,7 @@ fn draw_inspector(
                 .clicked()
                 && state.ui.delete_selected(engine, state.now())
             {
-                state.status = "deleted (Ctrl+Z restores)".to_string();
+                state.set_status("deleted (Ctrl+Z restores)");
                 mark_tab_dirty(state);
                 shared.touch();
             }
@@ -1830,7 +2006,7 @@ fn draw_history_window(
                                 .ui
                                 .undo_stack_mut()
                                 .goto(entry.timeline_index, engine);
-                            state.status = format!("history: back to \"{}\"", entry.label);
+                            state.set_status(format!("history: back to \"{}\"", entry.label));
                             mark_tab_dirty(state);
                             shared.touch();
                         }
@@ -1960,7 +2136,7 @@ fn draw_file_dialog(
                                             .to_string();
                                         tab.dirty = false;
                                     }
-                                    state.status = format!("saved {}", path.to_string_lossy());
+                                    state.set_status(format!("saved {}", path.to_string_lossy()));
                                     confirmed = true;
                                 }
                                 Err(e) => dialog.error = Some(e),
@@ -1970,7 +2146,7 @@ fn draw_file_dialog(
                         match dialog.selected.clone() {
                             Some(path) => {
                                 open_scene_path(state, engine, &path, shared);
-                                state.status = format!("loaded {}", path.to_string_lossy());
+                                state.set_status(format!("loaded {}", path.to_string_lossy()));
                                 confirmed = true;
                             }
                             None => {
