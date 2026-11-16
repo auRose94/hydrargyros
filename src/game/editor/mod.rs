@@ -11,6 +11,10 @@
 //!   loop, the engine pump on its own thread, the engine's frame blitted
 //!   under egui panels on one surface.
 
+pub mod gizmo;
+pub mod pick;
 pub mod ui;
 #[cfg(feature = "editor")]
 pub mod shell;
+#[cfg(feature = "editor")]
+pub mod style;

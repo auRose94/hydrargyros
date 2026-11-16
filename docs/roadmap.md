@@ -629,11 +629,11 @@ The port rung queue is closed; new work branches from these items:
 
 The game-editor milestone queue ([game-editor-design.md](game-editor-design.md)):
 M0 scene model (**landed**), M1 editor core (**landed**), M2 manipulation
-(picking, gizmos, undo), M3 play mode (snapshot/restore, live reload), M4
-assets, M5 polish (packaging). One binary — the editor *is* the engine
-running with a shell around it; the headless-first pump, the registered
-window backends, and the multi-consumer `FrameSink` are the seams it grows
-through.
+(**landed**), M3 play mode (snapshot/restore, live reload), M4 assets, M5
+polish (packaging, editor camera controls). One binary — the editor *is* the
+engine running with a shell around it; the headless-first pump, the
+registered window backends, and the multi-consumer `FrameSink` are the
+seams it grows through.
 
 7. **Studio M0 landed (2026-11-14): the scene model.** Scenes are `.hyg`
    documents and everything about them runs and tests headless. The
@@ -729,6 +729,57 @@ through.
    of build cache — the linker had started dying (`ld: Bus error`) on
    the 100%-full data disk. Next rung: **M2 — manipulation** (picking,
    transform gizmos, undo/redo, scene save/load from the UI).
+
+9. **Studio M2 landed (2026-11-16, overnight): manipulation.** The
+   viewport is now an editor. **Picking** (`hyg::game::editor::pick`,
+   feature-free): a click unprojects through the camera's inverse
+   view·projection (a general Gauss-Jordan 4×4 inverse — both
+   projections) into a world ray; each entity's pick proxy (a box: the
+   shape-mode renderer's `half_size`, a unit cube for models) is
+   slab-tested in its composed world transform; nearest wins, disabled
+   entities are transparent, nested entities are hit where their parents
+   put them. **Gizmos** (`hyg::game::editor::gizmo`, feature-free):
+   screen-space T/R/S handles sized in PIXELS (grabbable at any
+   distance), each axis measuring its own px-per-world-unit at the
+   entity's depth so drags map back to honest world deltas along the
+   entity's LOCAL axes; the translate center moves in the view plane;
+   the rotate ring turns around the camera's forward (the y-down atan2
+   sweep maps to the drag's visual direction — the test pins the
+   contract); scale is additive per-axis. The shell paints the layout
+   (colored axis lines, arrowheads, center square, ring) in a
+   transparent CentralPanel over the letterboxed viewport — the pick
+   viewport is the SAME rect the pixels live in. **Undo/redo**
+   (`editor::ui::UndoStack`): the designed `(path, old, new)` command
+   stack with per-drag coalescing — a 400ms window folds a drag's
+   per-frame edits into ONE step whose undo returns to the gesture's
+   start; new commands clear the redo branch; **Delete owns the removed
+   subtree** (it sits on the undo stack, undo re-inserts it, redo
+   re-removes — no Clone needed on `Entity`, which holds dyn
+   components); Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, Del deletes, and the
+   bottom bar carries undo/redo buttons. **Scene save/load from the
+   UI**: path field + Save/Load in the bottom bar — save writes the M0
+   canonical document of the live tree through the carrier (byte-clean,
+   format from the filename); load replaces the roots + camera and
+   clears the undo history (stored paths moved with the old tree).
+   Engine surface additions: `set_roots`, `remove_entity`,
+   `insert_entity`, `world_transform_at`; Entity gained `remove_child`/
+   `insert_child` (pub(crate)) and `set_name` (M1). **The Studio has a
+   face**: a deliberate quicksilver theme (deep blue-gray bases,
+   silver-blue accents, gold selection) — DARK DEFAULT, light palette
+   riding along, toggle in the bottom bar (0.37's styles are
+   theme-keyed: both palettes installed, the preference picks). FPS
+   lands in the status bar. Tests: 17 in `tests/editor.rs` — the gizmo
+   rendering assertion is GEOMETRY-level (a headless egui pass
+   tessellates the painted gizmo; vertex count + every vertex inside
+   the viewport; the pixel pass composites it in the shell — the
+   done-when's "pixel tests" land honestly one level up, where the
+   editor's own layer lives). Suite 220 core / 342 `--all-features`,
+   clippy clean. Known limits, stated: editor camera controls
+   (orbit/fly) are future work — picking runs through the scene camera;
+   the rotate ring covers view-plane rotation only; gizmos size from
+   proxy boxes until the asset pipeline knows real bounds. Next rung:
+   **M3 — play mode** (play/pause/step with snapshot-restore, script
+   live reload, console).
 
 ## What hyg will NOT do
 

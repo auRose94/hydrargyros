@@ -171,6 +171,33 @@ the scene round-trip contract is already format-agnostic through `Var`).
   handles, collider wireframes, light cones, camera frusta are quads and
   lines in that pass). Picking = raycast: physics raycasts exist; for
   non-physics entities, a CPU ray vs entity AABB pass at pick time.
+
+  **As-built (M2).** Picking landed as the CPU-ray pass: a click unprojects
+  through the camera's inverse view-projection into a world ray, and each
+  entity's pick proxy (a box — the shape-mode renderer's `half_size`, or a
+  unit cube for models) is slab-tested in its composed world transform;
+  nearest wins, disabled entities are transparent (`editor/pick.rs`,
+  feature-free). Gizmos landed in SCREEN space painted by egui (not the
+  quad pipeline): the handles are sized in pixels (grabbable at any
+  distance), each axis measures its own px-per-world-unit at the entity's
+  depth so drags map back to honest world deltas, the translate center
+  moves in the view plane, and the rotate ring turns around the camera's
+  forward — the pick/gizmo math is feature-free (`editor/gizmo.rs`) and
+  the shell paints it. Undo/redo is the designed command stack of
+  `(path, old, new)` records with per-drag coalescing (a 400ms window
+  folds a drag into one step; the folded command keeps the gesture's
+  starting value), and Delete OWNS the removed subtree (undo re-inserts
+  it; redo re-removes). Scene save/load is the M0 carrier from the
+  bottom bar (path field + buttons; loading replaces the roots + camera
+  and clears the undo history). Theme: dark default — quicksilver
+  (deep blue-gray, silver-blue accents, gold selection) — with a light
+  palette for bright rooms; style grows from here. The done-when's
+  "pixel tests assert gizmo rendering" landed as GEOMETRY-level
+  assertions: a headless egui pass tessellates the painted gizmo and
+  asserts the vertex count and that every vertex lands inside the
+  viewport (the pixel pass composites it in the shell). Editor camera
+  controls (orbit/fly) remain future work — picking runs through the
+  scene camera.
 - **Undo/redo:** a command stack of `(path, old, new)` `put()` records over
   the live `Var` tree, coalescing per drag/frame. Because scenes are plain
   data, undo is not special — it's `set_path` bookkeeping.
@@ -257,7 +284,7 @@ runs in headless tests.
 | --- | --- | --- |
 | M0 | Scene model | **LANDED 2026-11-14.** Scenes (de)serialize headless; `FromVar` rejects bad scenes with path errors; round-trip test: build → save → load → save is byte-identical (`tests/scene.rs`, `tests/carrier.rs`) |
 | M1 | Editor core | **LANDED 2026-11-16.** winit shell + egui panels + viewport presenting `FrameSink`; hierarchy + inspector editing a live `Engine`; headless UI-logic tests (`src/game/editor/`, `tests/editor.rs`, `examples/editor_shell.rs`) |
-| M2 | Manipulation | Selection (picking), transform gizmos, undo/redo, scene save/load from the UI; pixel tests assert gizmo rendering |
+| M2 | Manipulation | **LANDED 2026-11-16 (overnight).** Viewport picking (camera-ray vs entity boxes), screen-space T/R/S gizmos, undo/redo with per-drag coalescing, entity delete + restore, scene save/load from the UI (`src/game/editor/{pick,gizmo}.rs` feature-free; `tests/editor.rs`) |
 | M3 | Play mode | Play/pause/step with snapshot-restore; script editing + live reload; console shows script errors |
 | M4 | Assets | glTF/texture/audio import flow; physics + audio debug views (colliders, raycasts, sound list) |
 | M5 | Polish | Multi-viewport (camera preview), scene tabs, project settings UI, packaging: `hyg build` emits a runtime binary + data bundle |

@@ -65,6 +65,19 @@ impl Entity {
         self
     }
 
+    /// Remove a child by index, returning it (the editor's delete).
+    /// `None` out of range.
+    pub(crate) fn remove_child(&mut self, idx: usize) -> Option<Entity> {
+        (idx < self.children.len()).then(|| self.children.remove(idx))
+    }
+
+    /// Insert a child AT an index (clamped into range — the delete-undo's
+    /// restore seam).
+    pub(crate) fn insert_child(&mut self, idx: usize, child: Entity) {
+        let idx = idx.min(self.children.len());
+        self.children.insert(idx, child);
+    }
+
     /// The entity's components, in attach order — the scene save walk and
     /// the editor's inspector read them through this.
     pub fn iter_components(&self) -> impl Iterator<Item = &dyn Component> + '_ {

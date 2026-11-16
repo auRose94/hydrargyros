@@ -157,6 +157,63 @@ impl Engine {
         walk_mut(&mut self.entities, *first, rest)
     }
 
+    /// Replace the whole root set (the editor's scene load). The camera is
+    /// the caller's business — [`set_camera`](Self::set_camera).
+    pub fn set_roots(&mut self, roots: Vec<Entity>) {
+        self.entities = roots;
+    }
+
+    /// The entity's world transform (composed parent-first down the
+    /// path) — the gizmo and picking's addressing for nested entities.
+    /// `None` off the tree.
+    #[must_use]
+    pub fn world_transform_at(&self, path: &[usize]) -> Option<Transform> {
+        let [first, rest @ ..] = path else {
+            return None;
+        };
+        let mut entity = self.entities.get(*first)?;
+        let mut world = *entity.transform();
+        for idx in rest {
+            let child = entity.children().get(*idx)?;
+            world = child.transform().compose(&world);
+            entity = child;
+        }
+        Some(world)
+    }
+
+    /// Remove the entity at a tree path, returning it (the editor's
+    /// delete + undo keeps the subtree for restore). `None` off the tree.
+    pub fn remove_entity(&mut self, path: &[usize]) -> Option<Entity> {
+        let [first, rest @ ..] = path else {
+            return None;
+        };
+        if rest.is_empty() {
+            return (first < &self.entities.len()).then(|| self.entities.remove(*first));
+        }
+        let parent = walk_mut(&mut self.entities, *first, &rest[..rest.len() - 1])?;
+        parent.remove_child(*rest.last()?)
+    }
+
+    /// Insert `entity` AT a tree path (the parent must exist; the index
+    /// is clamped into range — an out-of-range index appends to the
+    /// parent's children). The delete-undo's restore seam. `true` when
+    /// the entity landed.
+    pub fn insert_entity(&mut self, path: &[usize], entity: Entity) -> bool {
+        let [first, rest @ ..] = path else {
+            return false;
+        };
+        if rest.is_empty() {
+            let idx = (*first).min(self.entities.len());
+            self.entities.insert(idx, entity);
+            return true;
+        }
+        let Some(parent) = walk_mut(&mut self.entities, *first, &rest[..rest.len() - 1]) else {
+            return false;
+        };
+        parent.insert_child(rest[0], entity);
+        true
+    }
+
     /// The frame cap in milliseconds; `0` disables it (headless runs).
     pub fn frame_time(&mut self, ms: f64) -> &mut Self {
         self.frame_time = ms;
