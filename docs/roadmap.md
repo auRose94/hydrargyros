@@ -777,9 +777,30 @@ seams it grows through.
    clippy clean. Known limits, stated: editor camera controls
    (orbit/fly) are future work — picking runs through the scene camera;
    the rotate ring covers view-plane rotation only; gizmos size from
-   proxy boxes until the asset pipeline knows real bounds. Next rung:
-   **M3 — play mode** (play/pause/step with snapshot-restore, script
-   live reload, console).
+   proxy boxes until the asset pipeline knows real bounds. **Fix round
+   (2026-11-16, after first hands-on review): edit mode arrives early.**
+   The always-running pump reverted every position/rotation edit a frame
+   later (rapier's step-and-sync owns transforms while the sim runs), so
+   the pump's UPDATE pass is now gated behind a play flag — **paused by
+   default (edit mode), play/pause button + Space, still drawing while
+   paused** — M3's edit/play distinction pulled forward; snapshot-restore
+   remains M3. The history panel landed Godot-style: the command
+   timeline as a clickable list (applied rows solid, un-done dim, cursor
+   gold) with `UndoStack::goto` traveling to any point. The scene
+   save/load grew an **in-app file dialog** (the Godot way — a themable
+   directory browser over `.hyg` documents, save names auto-repaired to
+   the carrier suffix; no toolkit dialogs, no new deps). Inspector
+   fixes: a ScrollArea (the component list was below the fold),
+   a rename that actually renames (the buffer persists in editor state —
+   rebuilt-from-entity each frame ate every keystroke — committed on
+   blur/Enter), and per-component param summaries. The hierarchy's
+   clickable Label became a `selectable_label` (the old one dragged out
+   text selections that stuck). All UI glyphs de-tofu'd to ASCII — the
+   default font carries no ↶/☀/☿/▶ and font-error boxes read as bugs;
+   a proper icon font ships with the theme work. 20 editor tests
+   (history travel, delete naming, suffix repair); suite 222 core / 345
+   `--all-features`, clippy clean. Next rung: **M3 — play mode**
+   (snapshot-restore around play, script live reload, console).
 
 ## What hyg will NOT do
 

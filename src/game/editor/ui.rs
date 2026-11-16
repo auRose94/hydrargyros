@@ -306,6 +306,97 @@ impl UndoStack {
         self.undo.clear();
         self.redo.clear();
     }
+
+    /// One history row: where the timeline sits after this command, its
+    /// label, and whether it is currently applied (`done`). The redo
+    /// branch's rows are `done: false` — clicking any row jumps there.
+    #[must_use]
+    pub fn history(&self, engine: &Engine) -> Vec<HistoryEntry> {
+        let mut entries: Vec<HistoryEntry> = self
+            .undo
+            .iter()
+            .enumerate()
+            .map(|(i, command)| HistoryEntry {
+                timeline_index: i + 1,
+                label: command.describe(engine),
+                done: true,
+            })
+            .collect();
+        let undone_at = entries.len();
+        for (i, command) in self.redo.iter().rev().enumerate() {
+            entries.push(HistoryEntry {
+                timeline_index: undone_at + i + 1,
+                label: command.describe(engine),
+                done: false,
+            });
+        }
+        entries
+    }
+
+    /// The timeline cursor (0 = the state before any recorded command;
+    /// `undo.len()` = now). The history panel's highlight.
+    #[must_use]
+    pub fn cursor(&self) -> usize {
+        self.undo.len()
+    }
+
+    /// Jump the timeline to `index` — undoing/redoing as many commands as
+    /// it takes (Godot's click-a-row-to-travel). `true` when anything
+    /// moved.
+    pub fn goto(&mut self, index: usize, engine: &mut Engine) -> bool {
+        let start = self.undo.len();
+        while self.undo.len() > index {
+            if !self.undo(engine) {
+                break;
+            }
+        }
+        while self.undo.len() < index {
+            if !self.redo(engine) {
+                break;
+            }
+        }
+        self.undo.len() != start
+    }
+}
+
+/// One row of the history panel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryEntry {
+    /// The timeline position AFTER this command (`goto` target).
+    pub timeline_index: usize,
+    pub label: String,
+    /// Applied (on the undo stack) vs un-done (on the redo branch).
+    pub done: bool,
+}
+
+impl Command {
+    /// The panel label: verb + entity name (resolved live; a stale path
+    /// degrades to the held subtree's name for Deletes, else "entity" —
+    /// the row still travels correctly either way).
+    #[must_use]
+    pub fn describe(&self, engine: &Engine) -> String {
+        let name = match self {
+            // the deleted subtree is out of the engine — its name rides
+            // in the command
+            Command::Delete {
+                entity: Some(held), ..
+            } => held.name().to_string(),
+            _ => engine
+                .entity_at(self.path())
+                .map(|e| e.name().to_string())
+                .unwrap_or_else(|| "entity".to_string()),
+        };
+        match self {
+            Command::Position { .. } => format!("move {name}"),
+            Command::Scale { .. } => format!("scale {name}"),
+            Command::Rotation { .. } => format!("rotate {name}"),
+            Command::Rename { new, .. } => format!("rename → {new}"),
+            Command::Enabled { new, .. } => {
+                if *new { format!("enable {name}") } else { format!("disable {name}") }
+            }
+            Command::Delete { .. } => format!("delete {name}"),
+        }
+    }
 }
 
 /// The editor's state: what is selected, and everything the panels need
@@ -351,6 +442,11 @@ impl EditorUi {
     #[must_use]
     pub fn undo_stack(&self) -> &UndoStack {
         &self.undo
+    }
+
+    /// The undo stack, mutable — the history panel's timeline travel.
+    pub fn undo_stack_mut(&mut self) -> &mut UndoStack {
+        &mut self.undo
     }
 
     /// Undo the newest edit. `false` when nothing to undo.

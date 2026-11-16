@@ -569,6 +569,80 @@ fn scene_io_round_trips_through_the_engine() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+// ---- M2 fix round: the history panel's timeline ----
+
+/// The history panel: entries describe the timeline (applied vs
+/// un-done), and clicking a row travels there — undoing or redoing as
+/// many commands as it takes.
+#[test]
+fn history_panel_travels_the_timeline() {
+    let mut engine = demo_engine();
+    let mut ui = EditorUi::new();
+    ui.select(vec![1]);
+    let start = engine.entity_at(&[1]).unwrap().transform().position;
+
+    // three deliberate edits (outside the coalescing window)
+    ui.set_selected_position(&mut engine, start + Vec3::new(1.0, 0.0, 0.0), 0);
+    ui.set_selected_position(&mut engine, start + Vec3::new(2.0, 0.0, 0.0), 1_000);
+    ui.set_selected_position(&mut engine, start + Vec3::new(3.0, 0.0, 0.0), 2_000);
+
+    // undo the last one: 2 applied, 1 un-done
+    assert!(ui.undo(&mut engine));
+    let history = ui.undo_stack().history(&engine);
+    assert_eq!(history.len(), 3, "the whole timeline shows");
+    assert_eq!(ui.undo_stack().cursor(), 2);
+    assert!(history[0].done && history[1].done, "applied rows");
+    assert!(!history[2].done, "the un-done row dims");
+    assert!(
+        history[0].label.starts_with("move free"),
+        "labels describe: {:?}",
+        history[0].label
+    );
+
+    // click the FIRST row: travel back to just after edit #1
+    assert!(ui.undo_stack_mut().goto(history[0].timeline_index, &mut engine));
+    assert_eq!(
+        engine.entity_at(&[1]).unwrap().transform().position,
+        start + Vec3::new(1.0, 0.0, 0.0),
+        "travel to timeline index 1 = after the first edit"
+    );
+
+    // click the LAST row: travel forward to the newest state
+    assert!(ui
+        .undo_stack_mut()
+        .goto(history[2].timeline_index, &mut engine));
+    assert_eq!(
+        engine.entity_at(&[1]).unwrap().transform().position,
+        start + Vec3::new(3.0, 0.0, 0.0),
+        "travel forward redoes through the newest edit"
+    );
+}
+
+/// A delete's history row names the deleted entity (the subtree rides
+/// in the command, out of the engine).
+#[test]
+fn history_names_deleted_entities() {
+    let mut engine = demo_engine();
+    let mut ui = EditorUi::new();
+    ui.select(vec![0, 0]);
+    assert!(ui.delete_selected(&mut engine, 0));
+
+    let history = ui.undo_stack().history(&engine);
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].label, "delete stack", "{}", history[0].label);
+}
+
+/// The file dialog repairs a save name into a `.hyg` carrier path.
+#[cfg(feature = "editor")]
+#[test]
+fn hyg_suffix_repair() {
+    use hyg::game::editor::shell::ensure_hyg_suffix;
+    assert_eq!(ensure_hyg_suffix("level"), "level.json.hyg");
+    assert_eq!(ensure_hyg_suffix("level.json"), "level.json.hyg");
+    assert_eq!(ensure_hyg_suffix("level.json.hyg"), "level.json.hyg");
+    assert_eq!(ensure_hyg_suffix("dense.cbor"), "dense.cbor.json.hyg");
+}
+
 // ---- M2: gizmo rendering (geometry-level assertions) ----
 
 /// The gizmo's paint pass produces real tessellated geometry inside the

@@ -207,6 +207,11 @@ the scene round-trip contract is already format-agnostic through `Var`).
   determinism; pause steps one frame at a time. Scene state on entering
   play is snapshotted (deep clone of the `Var` tree — scenes are small) and
   restored on exit, so play experiments never dirty the file.
+  **As-built (M2 fix round, pulled forward):** the pump's update pass is
+  gated behind a play flag — paused by default, play/pause + Space,
+  drawing continues while paused (the viewport stays live). The pause is
+  the first half of this paragraph; snapshot/restore and single-step
+  remain M3.
 
 ### Canvas scaling — non-standard aspect ratios
 
