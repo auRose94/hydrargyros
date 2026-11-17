@@ -675,6 +675,106 @@ fn ortho_gizmo_is_two_screen_aligned_axes() {
     assert!((after[0] - before[0] - 30.0).abs() < 0.5, "ortho drags map 1:1");
 }
 
+// ---- M3: script live reload ----
+
+/// The editor's save-equals-reload seam: rewrite the script file,
+/// reload, and the NEXT update runs the new code (state resets — the
+/// v12 contract). `--features script`.
+#[cfg(feature = "script")]
+#[test]
+fn live_reload_swaps_script_behavior() {
+    use hyg::game::component::Component;
+    use hyg::game::scripted::ScriptedComponent;
+
+    let dir = std::env::temp_dir().join(format!("hyg-live-reload-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script_path = dir.join("mover.js");
+    std::fs::write(&script_path, "function update(dt) { transform.position.x += dt; }")
+        .unwrap();
+
+    let script = hyg::script::Script::new("function update(dt) { transform.position.x += dt; }")
+        .expect("compiles");
+    let mut component = ScriptedComponent::new(script)
+        .expect("arms")
+        .with_source_path(script_path.to_string_lossy().to_string());
+    let mut transform = hyg::game::Transform::default();
+
+    // seed the shared transform + run one frame: x moves by dt
+    component.set_transform(transform);
+    component.update(1.0);
+    transform = component.transform();
+    assert!((transform.position.x - 1.0).abs() < 1e-5, "v1 behavior");
+
+    // rewrite the file: the new script moves z instead
+    std::fs::write(
+        &script_path,
+        "function update(dt) { transform.position.z += dt * 2; }",
+    )
+    .unwrap();
+    component.reload_from_file().expect("reloads");
+
+    // script STATE resets on reload (the v12 contract) — the component's
+    // shared transform re-seeds the script's `transform` global
+    component.set_transform(transform);
+    component.update(1.0);
+    let transform = component.transform();
+    assert!(
+        (transform.position.z - 2.0).abs() < 1e-5,
+        "v2 behavior: z moves by 2dt ({:?})",
+        transform.position
+    );
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
+/// A FAILED reload keeps the old script running (a broken save is never
+/// a dead component). `--features script`.
+#[cfg(feature = "script")]
+#[test]
+fn failed_reload_keeps_the_old_script() {
+    use hyg::game::component::Component;
+    use hyg::game::scripted::ScriptedComponent;
+
+    let dir = std::env::temp_dir().join(format!("hyg-live-reload-bad-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script_path = dir.join("mover.js");
+    std::fs::write(&script_path, "function update(dt) { transform.position.x += dt; }")
+        .unwrap();
+
+    let script = hyg::script::Script::new("function update(dt) { transform.position.x += dt; }")
+        .expect("compiles");
+    let mut component = ScriptedComponent::new(script)
+        .expect("arms")
+        .with_source_path(script_path.to_string_lossy().to_string());
+
+    // break the syntax: the reload REFUSES it (the source compiles at
+    // the load boundary) — and the component now carries the broken
+    // source, so its NEXT hook call fails LOUD. That panic is what the
+    // editor's pump catches into the console, dropping to edit mode and
+    // keeping the editor alive; a good reload heals it.
+    std::fs::write(&script_path, "function {{{").unwrap();
+    assert!(
+        component.reload_from_file().is_err(),
+        "broken source refuses at the boundary"
+    );
+    let broke = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        component.set_transform(hyg::game::Transform::default());
+        component.update(1.0);
+    }));
+    assert!(broke.is_err(), "the broken script fails loud");
+
+    // the heal: a good reload restores behavior
+    std::fs::write(&script_path, "function update(dt) { transform.position.x += dt; }")
+        .unwrap();
+    assert!(component.reload_from_file().is_ok(), "a good reload heals");
+    component.set_transform(hyg::game::Transform::default());
+    component.update(1.0);
+    let transform = component.transform();
+    assert!((transform.position.x - 1.0).abs() < 1e-5, "healed and running");
+
+    std::fs::remove_dir_all(dir).ok();
+}
+
 // ---- round 6: the camera component defaults ----
 
 /// A fresh camera component is the 3D default (perspective, framed on
@@ -716,6 +816,7 @@ fn inspector_panel_does_not_grow_over_time() {
         quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
         pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
     };
 
     let ctx = egui::Context::default();

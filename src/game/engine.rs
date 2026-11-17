@@ -136,6 +136,11 @@ impl Engine {
         &self.entities
     }
 
+    /// The roots, mutable — the editor's live-reload walk.
+    pub fn entities_mut(&mut self) -> &mut Vec<Entity> {
+        &mut self.entities
+    }
+
     /// A top-level entity by name — the direct handle scripts get
     /// with `engine.entities[i]`. First match wins; children are reached
     /// through [`Entity::child_mut`](super::entity::Entity::child_mut).

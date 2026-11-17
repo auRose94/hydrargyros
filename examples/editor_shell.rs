@@ -19,6 +19,16 @@ use hyg::game::{Camera, Engine, Entity};
 use hyg::var::Vec3;
 
 fn main() {
+    // the live-reload demo script, written fresh each launch (edit it
+    // while the studio runs — the editor reloads on save; break the
+    // syntax and the console shows the panic, edit mode resumes)
+    std::fs::write(
+        "patrol.js",
+        "function update(dt) { transform.position.z += dt * 2; }",
+    )
+    .expect("writes patrol.js");
+    println!("demo script: edit ./patrol.js and save — live reload does the rest");
+
     // the sink the shell presents from — created before the renderer so
     // the attach can hand it over
     let sink = hyg::game::FrameSink::new();
@@ -88,6 +98,28 @@ fn build_engine(sink: hyg::game::FrameSink) -> Engine {
         hyg::game::Light::directional().with_color([1.0, 0.95, 0.85]).with_intensity(1.5),
     ));
     engine.add_entity(sun);
+
+    // a scripted drifter: the live-reload demo (edit patrol.js while
+    // playing — save = reload; the drifter changes behavior instantly)
+    let mut drifter = Entity::new("drifter");
+    drifter.transform_mut().position = Vec3::new(0.0, 1.5, -2.0);
+    let script = hyg::script::Script::new(
+        std::fs::read_to_string("patrol.js").expect("patrol.js exists"),
+    )
+    .expect("the demo script compiles");
+    drifter.add_component(Box::new(
+        hyg::game::ScriptedComponent::new(script)
+            .expect("the demo script arms")
+            .with_source_path("patrol.js"),
+    ));
+    drifter.add_component(Box::new(MeshRenderer::new(
+        MeshGeometry::Shape {
+            shape: MeshShape::Circle,
+            half_size: Vec3::new(0.25, 0.25, 0.25),
+        },
+        [0.4, 0.9, 0.6, 1.0],
+    )));
+    engine.add_entity(drifter);
 
     // the scene's main camera — what play renders through (the editor
     // viewport uses its own orbit; this entity is the document's view)

@@ -212,6 +212,28 @@ impl ScriptedComponent {
         self.source_path.as_deref()
     }
 
+    /// LIVE RELOAD: re-read the script file and swap the source — the
+    /// editor's save-equals-reload seam. The pool is keyed by script id,
+    /// so host closures and bootstraps re-bind and the NEXT hook call
+    /// runs the new code; script state (globals) resets, which is the
+    /// v12 contract. File-backed components only; inline-source scripts
+    /// have nothing to re-read (`Ok(())` — nothing to do IS success
+    /// there).
+    ///
+    /// # Errors
+    /// The file can't be read, or the new source fails to
+    /// compile/run — the OLD script keeps running (a failed reload is
+    /// never a dead editor).
+    pub fn reload_from_file(&mut self) -> Result<(), ScriptError> {
+        let Some(path) = &self.source_path else {
+            return Ok(());
+        };
+        let text = std::fs::read_to_string(path).map_err(|e| {
+            ScriptError::Type(format!("reload {}: {e}", path))
+        })?;
+        self.script.load(text)
+    }
+
     /// Build from a scene document's params object (the component
     /// registry's `script` factory): `source` (required — a script file
     /// path, resolved against the scene's base directory and recorded for

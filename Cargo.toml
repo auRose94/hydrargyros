@@ -128,7 +128,9 @@ dynamic-ffi = ["dep:abi_stable", "dep:libloading", "dep:tempfile", "dep:hyg-plug
 # with no ambient authority wired (no WASI: no fs, no net, no clock)
 dynamic-wasm = ["dep:wasmtime", "dep:hyg-plugin-api"]
 # editor: the Studio shell — egui panels composited over the engine's frame
-editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:rfd", "wgpu", "winit"]
+# the editor's scripting story (live reload, console) rides the same
+# v12 seam — script comes with the editor
+editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:rfd", "wgpu", "winit", "script"]
 rfd = ["dep:rfd"]
 
 [dev-dependencies]
@@ -195,7 +197,7 @@ required-features = ["tray"]
 
 [[example]]
 name = "editor_shell"
-required-features = ["editor", "physics"]
+required-features = ["editor", "physics", "script"]
 
 # the FFI boundary proof: builds the out-of-tree test plugin, loads it,
 # hot-swaps it under live traffic (tests/ffi-plugin is the plugin crate)

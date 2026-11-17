@@ -88,6 +88,11 @@ impl Entity {
         &self.children
     }
 
+    /// The children, mutable — the editor's live-reload walk.
+    pub(crate) fn children_mut(&mut self) -> &mut Vec<Entity> {
+        &mut self.children
+    }
+
     /// A mutable child by index (the engine's physics sync walks these).
     pub(crate) fn child_mut(&mut self, idx: usize) -> Option<&mut Entity> {
         self.children.get_mut(idx)

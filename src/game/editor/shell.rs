@@ -81,6 +81,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
     let frame_size = Arc::new(Mutex::new([960u32, 540]));
     // the camera-preview camera (Some = render the preview each tick)
     let pip_camera = Arc::new(Mutex::new(None));
+    let console = Arc::new(Mutex::new(Vec::new()));
     let pump = {
         let engine = Arc::clone(&engine);
         let pumping = Arc::clone(&pumping);
@@ -88,6 +89,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
         let dirty = Arc::clone(&dirty);
         let frame_size = Arc::clone(&frame_size);
         let pip_camera = Arc::clone(&pip_camera);
+        let console = Arc::clone(&console);
         std::thread::Builder::new()
             .name("hyg-studio-pump".to_string())
             .spawn(move || {
@@ -97,34 +99,57 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
                     let run_frame =
                         playing.load(Ordering::SeqCst) || dirty.swap(false, Ordering::SeqCst);
                     if run_frame {
-                        if let Ok(mut engine) = engine.lock() {
-                            // resize the offscreen frame to the panel
-                            let size = *frame_size.lock().unwrap();
-                            if size != rendered_size {
-                                if let Some(renderer) = engine.renderer_mut() {
-                                    renderer.set_size(size[0], size[1]);
-                                }
-                                rendered_size = size;
+                        // poison-tolerant lock: a script panic mid-update
+                        // poisons the mutex; the editor keeps living
+                        let mut engine = match engine.lock() {
+                            Ok(guard) => guard,
+                            Err(poisoned) => poisoned.into_inner(),
+                        };
+                        // resize the offscreen frame to the panel
+                        let size = *frame_size.lock().unwrap();
+                        if size != rendered_size {
+                            if let Some(renderer) = engine.renderer_mut() {
+                                renderer.set_size(size[0], size[1]);
                             }
-                            if playing.load(Ordering::SeqCst) {
-                                engine.update(1.0 / 60.0);
-                            }
-                            engine.draw();
-                            engine.render();
-                            // the camera preview: render the pip camera's
-                            // view into tag 1 (the main frame re-renders
-                            // first next tick; tags keep the slots apart)
-                            let pip = *pip_camera.lock().unwrap();
-                            if let Some(pip_camera) = pip {
-                                if let Some(renderer) = engine.renderer_mut() {
-                                    renderer.set_frame_tag(1);
+                            rendered_size = size;
+                        }
+                        let was_playing = playing.load(Ordering::SeqCst);
+                        // a script throw panics through the component —
+                        // CAUGHT here: the console shows the error, the
+                        // sim stops (edit mode), the editor stays alive
+                        let frame_result = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                if was_playing {
+                                    engine.update(1.0 / 60.0);
                                 }
-                                engine.set_camera(pip_camera);
                                 engine.draw();
                                 engine.render();
-                                if let Some(renderer) = engine.renderer_mut() {
-                                    renderer.set_frame_tag(0);
-                                }
+                            }),
+                        );
+                        if let Err(panic) = frame_result {
+                            let message = panic
+                                .downcast_ref::<String>()
+                                .cloned()
+                                .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
+                                .unwrap_or_else(|| "unknown script panic".to_string());
+                            console
+                                .lock()
+                                .unwrap()
+                                .push(format!("SCRIPT PANIC: {message}"));
+                            playing.store(false, Ordering::SeqCst);
+                        }
+                        // the camera preview: render the pip camera's
+                        // view into tag 1 (tags keep the slots apart)
+                        let pip = *pip_camera.lock().unwrap();
+                        if let Some(pip_camera) = pip {
+                            if let Some(renderer) = engine.renderer_mut() {
+                                renderer.set_frame_tag(1);
+                            }
+                            engine.set_camera(pip_camera);
+                            engine.draw();
+                            engine.render();
+                            if let Some(renderer) = engine.renderer_mut() {
+                                renderer.set_frame_tag(0);
                             }
                         }
                     }
@@ -137,13 +162,14 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
             .map_err(|e| format!("studio pump thread: {e}"))?
     };
 
-    let result = run_shell(engine, sink, title.into(), playing, dirty, frame_size, pip_camera);
+    let result = run_shell(engine, sink, title.into(), playing, dirty, frame_size, pip_camera, console);
     pumping.store(false, Ordering::SeqCst);
     let _ = pump.join();
     result
 }
 
 /// The winit event loop + egui + blit, on the current thread.
+#[allow(clippy::too_many_arguments)]
 fn run_shell(
     engine: Arc<Mutex<Engine>>,
     sink: FrameSink,
@@ -152,6 +178,7 @@ fn run_shell(
     dirty: Arc<AtomicBool>,
     frame_size: Arc<Mutex<[u32; 2]>>,
     pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
+    console: Arc<Mutex<Vec<String>>>,
 ) -> Result<(), String> {
     let mut builder = winit::event_loop::EventLoop::<ShellMessage>::with_user_event();
     // the editor normally owns the main thread; the escape hatches cost
@@ -184,6 +211,7 @@ fn run_shell(
         quit,
         frame_size,
         pip_camera,
+        console,
         state: EditorState::new(scene_camera),
         window: None,
         view: None,
@@ -221,12 +249,27 @@ pub struct ShellShared {
     /// The camera-preview camera (Some = render the preview into tag 1).
     #[doc(hidden)]
     pub pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
+    /// The editor console (script errors from the pump, editor
+    /// statuses) — the dock's Console tab reads it.
+    #[doc(hidden)]
+    pub console: Arc<Mutex<Vec<String>>>,
 }
 
 impl ShellShared {
     /// Mark the scene changed — the paused pump re-renders once.
     fn touch(&self) {
         self.dirty.store(true, Ordering::SeqCst);
+    }
+
+    /// Push a line into the editor console (capped — the dock reads the
+    /// tail).
+    fn console_log(&self, message: impl Into<String>) {
+        let mut console = self.console.lock().unwrap();
+        console.push(message.into());
+        if console.len() > 400 {
+            let overflow = console.len().saturating_sub(400);
+        console.drain(..overflow);
+        }
     }
 }
 
@@ -246,6 +289,8 @@ struct ShellHandler {
     frame_size: Arc<Mutex<[u32; 2]>>,
     /// The camera-preview camera (Some = render the preview).
     pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
+    /// The editor console (the dock's Console tab).
+    console: Arc<Mutex<Vec<String>>>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -303,8 +348,6 @@ pub struct EditorState {
     log: Vec<String>,
     /// The hierarchy row being dragged (its path), for reparent-on-drop.
     dragged_row: Option<Vec<usize>>,
-    /// The bottom dock's active tab.
-    dock_tab: DockTab,
     /// The camera-preview window (tag-1 frames): shown while a camera
     /// entity is selected and its TRS is being edited, or locked.
     pip_open: bool,
@@ -313,6 +356,11 @@ pub struct EditorState {
     /// The camera component's fields changed this frame (the PiP's
     /// show trigger).
     camera_trs_editing: bool,
+    /// Script file paths -> their mtime at last check (live reload).
+    script_mtimes: std::collections::HashMap<std::path::PathBuf, std::time::SystemTime>,
+    script_check_at: Option<Instant>,
+    /// The bottom dock's active tab.
+    dock_tab: DockTab,
     pip_last_edit: Option<Instant>,
 }
 
@@ -334,6 +382,10 @@ struct SceneTab {
     label: String,
     path: Option<std::path::PathBuf>,
     dirty: bool,
+    /// The tab's LIVE state (its full document) — snapshotted when the
+    /// tab is deactivated, restored when it's activated. Tabs are
+    /// independent in-memory scenes: unsaved edits survive switching.
+    state: Option<crate::Var>,
 }
 
 /// A native file dialog in flight (rfd — xdg-desktop-portal on Linux,
@@ -368,6 +420,7 @@ impl EditorState {
                 label: "untitled".to_string(),
                 path: None,
                 dirty: false,
+                state: None,
             }],
             active_tab: 0,
             snapshot: None,
@@ -376,6 +429,8 @@ impl EditorState {
             add_pick: None,
             log: Vec::new(),
             dragged_row: None,
+            script_mtimes: std::collections::HashMap::new(),
+            script_check_at: None,
             dock_tab: DockTab::Log,
             pip_open: true,
             pip_locked: false,
@@ -445,7 +500,9 @@ impl winit::application::ApplicationHandler<ShellMessage> for ShellHandler {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         let attributes = winit::window::Window::default_attributes()
             .with_title(self.title.clone())
-            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0));
+            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+            .with_maximized(true)
+            .with_active(true);
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(e) => {
@@ -594,6 +651,7 @@ impl ShellHandler {
                 quit: Arc::clone(&self.quit),
                 frame_size: Arc::clone(&self.frame_size),
                 pip_camera: Arc::clone(&self.pip_camera),
+                console: Arc::clone(&self.console),
             };
             draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, &shared);
         }
@@ -927,6 +985,24 @@ fn draw_ui(
                                 stop(state, engine, shared);
                             }
                             if right
+                                .add_enabled(
+                                    !playing_now,
+                                    egui::Button::new(
+                                        egui::RichText::new("step").color(style::dark::TEXT),
+                                    )
+                                    .fill(style::ACCENT_DIM),
+                                )
+                                .on_hover_text("one frame while paused")
+                                .clicked()
+                            {
+                                // one frame, exactly: update + draw + render
+                                engine.update(1.0 / 60.0);
+                                engine.draw();
+                                engine.render();
+                                state.set_status("stepped one frame");
+                                shared.touch();
+                            }
+                            if right
                                 .add(
                                     egui::Button::new(
                                         egui::RichText::new("pause").color(style::dark::TEXT),
@@ -1095,6 +1171,23 @@ fn draw_ui(
         draw_history_window(ctx, state, engine, shared);
     }
     poll_file_dialog(state, engine, shared);
+
+    // script live reload: poll mtimes ~1/sec; a changed file swaps the
+    // component's source (Script::load — same id, host closures
+    // re-bound, script state resets)
+    let check_now = state
+        .script_check_at
+        .map(|t| t.elapsed() >= Duration::from_secs(1))
+        .unwrap_or(true);
+    if check_now {
+        state.script_check_at = Some(Instant::now());
+        for changed in reload_changed_scripts(engine, &mut state.script_mtimes) {
+            shared.console_log(format!("reloaded {}", changed));
+            state.set_status(format!("reloaded {changed}"));
+            mark_tab_dirty(state);
+            shared.touch();
+        }
+    }
 
     // the camera preview (PiP): shows while a camera entity is selected
     // AND its TRS is being edited (or the preview is locked) — the pump
@@ -1270,6 +1363,7 @@ fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared)
         label: format!("untitled-{n}"),
         path: None,
         dirty: false,
+        state: None,
     });
     activate_tab(state, engine, state.tabs.len() - 1);
     // every new scene is EMPTY except its main camera — the camera
@@ -1289,15 +1383,40 @@ fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared)
 
 /// Activate a tab: load its document (an untitled tab is an empty world).
 fn activate_tab(state: &mut EditorState, engine: &mut Engine, index: usize) {
-    let Some(tab) = state.tabs.get(index) else {
-        return;
-    };
     // switching tabs leaves play mode — the snapshot belongs to the
     // scene it was taken from (restart-after-switch used to replay the
     // PREVIOUS scene's snapshot)
     state.snapshot = None;
+    // copy the incoming tab's bits up front (the outgoing snapshot
+    // below re-borrows `tabs` mutably)
+    let (incoming_path, incoming_state) = match state.tabs.get(index) {
+        Some(tab) => (tab.path.clone(), tab.state.clone()),
+        None => return,
+    };
+    // the OUTGOING tab keeps its live tree (unsaved edits survive the
+    // switch — tabs are independent in-memory scenes)
+    if state.active_tab < state.tabs.len() {
+        let label = state.tabs[state.active_tab].label.clone();
+        let scene_camera = state.scene_camera;
+        state.tabs[state.active_tab].state =
+            Some(Scene::document(&label, &scene_camera, engine.entities()));
+    }
     state.active_tab = index;
-    match &tab.path {
+    state.name_edit = None;
+    // the incoming tab: its live state if it has one, else its document
+    if let Some(doc) = &incoming_state {
+        if let Ok(scene) = Scene::from_var(doc) {
+            state.scene_camera = scene.camera;
+            engine.set_camera(scene.camera);
+            engine.set_roots(scene.entities);
+            state.orbit.ortho = matches!(
+                state.scene_camera.projection,
+                crate::game::camera::Projection::Orthographic { .. }
+            );
+            return;
+        }
+    }
+    match &incoming_path {
         Some(path) => {
             state.scene_path = path.to_string_lossy().to_string();
             if load_scene(state, engine).is_err() {
@@ -1308,7 +1427,6 @@ fn activate_tab(state: &mut EditorState, engine: &mut Engine, index: usize) {
             engine.set_roots(Vec::new());
         }
     }
-    state.name_edit = None;
 }
 
 /// Save the active tab: to its path when it has one, else Save As.
@@ -1347,6 +1465,7 @@ fn open_scene_path(state: &mut EditorState, engine: &mut Engine, path: &Path, sh
         label,
         path: Some(path.to_path_buf()),
         dirty: false,
+        state: None,
     });
     activate_tab(state, engine, state.tabs.len() - 1);
     shared.touch();
@@ -1405,7 +1524,25 @@ fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shar
             ));
         }
         DockTab::Console => {
-            dock.weak("script output lands here — the console ships with M3 (script live reload)");
+            // the unified feed: script panics (from the pump) first, then
+            // the editor's statuses — newest last
+            let console_lines = shared.console.lock().unwrap().clone();
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(dock, |scroll| {
+                    if console_lines.is_empty() && state.log.is_empty() {
+                        scroll.weak("(nothing yet — script panics and editor statuses land here)");
+                    }
+                    for line in &console_lines {
+                        scroll.monospace(
+                            egui::RichText::new(line).color(style::dark::DANGER).small(),
+                        );
+                    }
+                    for line in &state.log {
+                        scroll.monospace(egui::RichText::new(line).small());
+                    }
+                });
         }
         DockTab::Debugger => {
             dock.weak("graph runs attach here — the debugger panel ships with the dynamic seam UI");
@@ -1426,6 +1563,50 @@ fn count_child_components(entity: &Entity) -> usize {
         .iter()
         .map(|c| c.iter_components().count() + count_child_components(c))
         .sum()
+}
+
+/// Walk the tree; for every file-backed scripted component whose source
+/// file's mtime moved since the last check, reload it. Returns the
+/// reloaded paths (errors log loudly and keep the old script — a failed
+/// reload is never a dead editor).
+fn reload_changed_scripts(
+    engine: &mut Engine,
+    mtimes: &mut std::collections::HashMap<std::path::PathBuf, std::time::SystemTime>,
+) -> Vec<String> {
+    fn walk(
+        entity: &mut Entity,
+        mtimes: &mut std::collections::HashMap<std::path::PathBuf, std::time::SystemTime>,
+        reloaded: &mut Vec<String>,
+    ) {
+        if let Some(scripted) = entity.component_mut::<crate::game::ScriptedComponent>()
+        {
+            if let Some(path) = scripted.source_path() {
+                let path = std::path::PathBuf::from(path);
+                let current = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+                match (current, mtimes.get(&path).copied()) {
+                    (Some(now), Some(seen)) if now > seen => {
+                        match scripted.reload_from_file() {
+                            Ok(()) => reloaded.push(path.to_string_lossy().to_string()),
+                            Err(e) => reloaded.push(format!("{path:?} FAILED: {e}")),
+                        }
+                        mtimes.insert(path, now);
+                    }
+                    (Some(now), None) => {
+                        mtimes.insert(path, now);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for child in entity.children_mut() {
+            walk(child, mtimes, reloaded);
+        }
+    }
+    let mut reloaded = Vec::new();
+    for root in engine.entities_mut() {
+        walk(root, mtimes, &mut reloaded);
+    }
+    reloaded
 }
 
 /// The toolbar: gizmo modes, scene tabs, fps.
