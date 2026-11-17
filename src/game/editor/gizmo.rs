@@ -50,8 +50,14 @@ impl GizmoMode {
     }
 }
 
-/// The gizmo's screen size: handle length from the center, in pixels.
-pub const GIZMO_LEN_PX: f32 = 90.0;
+/// The gizmo's world size: handle length from the center, in WORLD
+/// units — the gizmo scales with the viewport's zoom like the geometry
+/// does (the review's ask: render the gizmo THROUGH the MVP, not as a
+/// fixed screen overlay). A small screen floor keeps far-zoomed-out
+/// gizmos grabbable.
+pub const GIZMO_WORLD_LEN: f32 = 1.4;
+/// The handle's minimum screen length (the grab floor).
+pub const GIZMO_MIN_PX: f32 = 26.0;
 /// The grab radius around any handle (generous on purpose).
 pub const GRAB_PX: f32 = 12.0;
 
@@ -157,8 +163,10 @@ pub fn layout(
     viewport: &Viewport,
     position: Vec3,
     rotation: Quat,
+    world_len: f32,
 ) -> Option<GizmoLayout> {
     let center = project_point(camera, viewport, position)?;
+    let world_len = world_len.max(0.05);
 
     // ORTHOGRAPHIC: the 2D gizmo — screen-aligned X/Y arrows at the
     // window's uniform scale (a 3D gizmo under an ortho camera has no
@@ -167,11 +175,15 @@ pub fn layout(
         let (_, right, up) = view_basis(camera);
         let px_x = viewport.width / (half_extents.x * 2.0).max(1e-4);
         let px_y = viewport.height / (half_extents.y * 2.0).max(1e-4);
+        // world-sized under ortho too: the handles scale with the
+        // viewport's zoom (floor keeps far gizmos grabbable)
+        let len_x = (world_len * px_x).max(GIZMO_MIN_PX);
+        let len_y = (world_len * px_y).max(GIZMO_MIN_PX);
         let axes = vec![
             AxisHandle {
                 axis: 0,
                 world_dir: right,
-                screen_end: [center[0] + GIZMO_LEN_PX, center[1]],
+                screen_end: [center[0] + len_x, center[1]],
                 screen_dir: [1.0, 0.0],
                 drag_scale: px_x,
                 px_per_unit: px_x,
@@ -180,7 +192,7 @@ pub fn layout(
             AxisHandle {
                 axis: 1,
                 world_dir: up,
-                screen_end: [center[0], center[1] - GIZMO_LEN_PX],
+                screen_end: [center[0], center[1] - len_y],
                 screen_dir: [0.0, -1.0], // pixel y grows down
                 drag_scale: px_y,
                 px_per_unit: px_y,
@@ -192,7 +204,7 @@ pub fn layout(
             center,
             mode,
             axes,
-            ring_radius: GIZMO_LEN_PX * 0.6,
+            ring_radius: (world_len * px_x).max(GIZMO_MIN_PX) * 0.6,
         });
     }
 
@@ -221,8 +233,21 @@ pub fn layout(
         // screen; shrink it (overlap relief — a full-length axis pointing
         // at the camera reads as a blob over its siblings) and keep it
         // grabbable along whatever direction survives
-        let foreshortened = px_per < 1.0;
-        let len = if foreshortened { GIZMO_LEN_PX * 0.6 } else { GIZMO_LEN_PX };
+        let foreshortened = px_per < 0.35 * world_len * px_per / world_len.max(1e-4)
+            && px_per < 1.0;
+        // the handle's TIP is a true MVP projection of a world point
+        // (entity + axis * world_len): zoom rescales the gizmo with the
+        // geometry, exactly as asked. The floor is a usability minimum.
+        let projected_len = match project_point(camera, viewport, position + world_dir.scaled(Vec3::splat(world_len))) {
+            Some(tip) => {
+                let dx = tip[0] - center[0];
+                let dy = tip[1] - center[1];
+                (dx * dx + dy * dy).sqrt()
+            }
+            None => 0.0,
+        };
+        let len = projected_len.max(GIZMO_MIN_PX);
+        let foreshortened = foreshortened || projected_len < len * 0.5;
         axes[i] = Some(AxisHandle {
             axis: *axis,
             world_dir,
@@ -248,11 +273,21 @@ pub fn layout(
     for handle in &mut handles {
         handle.drag_scale = handle.drag_scale.max(healthiest * 0.15);
     }
+    let ring = handles
+        .iter()
+        .map(|h| {
+            let dx = h.screen_end[0] - center[0];
+            let dy = h.screen_end[1] - center[1];
+            (dx * dx + dy * dy).sqrt()
+        })
+        .sum::<f32>()
+        / handles.len().max(1) as f32
+        * 0.6;
     Some(GizmoLayout {
         center,
         mode,
         axes: handles,
-        ring_radius: GIZMO_LEN_PX * 0.6,
+        ring_radius: ring.max(14.0),
     })
 }
 

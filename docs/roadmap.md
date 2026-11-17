@@ -938,8 +938,19 @@ seams it grows through.
    required-features gained `script` (the editor's scripting story rides
    the same seam). 31 editor tests; suite 230 core / 356
    `--all-features`, clippy clean; screenshot-verified maximized with
-   the scene filling the viewport. M4 — assets (import flows, debug
-   views) — is the next rung.
+   the scene filling the viewport. **Round 8 (2026-11-16): the gizmo
+   respects zoom.** The gizmo's handles were fixed 90px screen
+   constructs — only their direction came from the world axes, so
+   zooming rescaled the scene while the gizmo stayed put ("doesn't
+   respect the zoom", per review). The handles are now TRUE MVP
+   projections of world points (entity + axis × `GIZMO_WORLD_LEN` = a
+   world-locked 1.4 units): the gizmo scales with the viewport's zoom
+   like the geometry, and the hit-test/drag chain follows the projected
+   tips (picking keeps its inverse-MVP path — that part was always
+   correct; a distance-scaled world length would have canceled the
+   zoom into a constant screen size — caught by the new zoom-respect
+   test before it shipped). M4 — assets (import flows, debug views) —
+   is the next rung.
 
 ## What hyg will NOT do
 

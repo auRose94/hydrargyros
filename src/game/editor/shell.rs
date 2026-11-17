@@ -1724,10 +1724,24 @@ fn draw_viewport(
     let camera = *engine.camera();
 
     // the gizmo layout for the current selection (recomputed per frame —
-    // the entity moves under the drag)
+    // the entity moves under the drag). The gizmo's world size rides the
+    // orbit distance: zoom rescales it with the geometry (rendered
+    // THROUGH the MVP, per the review)
+    // the gizmo's size is FIXED IN WORLD UNITS: rendered through the
+    // MVP it scales with the viewport's zoom like the geometry (the
+    // review's ask; a distance-scaled length would cancel the zoom and
+    // pin the gizmo at constant screen size)
+    let gizmo_world_len = gizmo::GIZMO_WORLD_LEN;
     let layout: Option<GizmoLayout> = state.ui.selection().and_then(|path| {
         let world = engine.world_transform_at(path)?;
-        gizmo::layout(state.mode, &camera, &vp_rect, world.position, world.rotation)
+        gizmo::layout(
+            state.mode,
+            &camera,
+            &vp_rect,
+            world.position,
+            world.rotation,
+            gizmo_world_len,
+        )
     });
 
     let pointer_phys = response

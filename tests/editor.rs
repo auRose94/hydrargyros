@@ -452,6 +452,7 @@ fn translate_delta_follows_the_screen_axis() {
         &view,
         origin,
         Quat::new(0.0, 0.0, 0.0, 1.0),
+        1.4,
     )
     .expect("the gizmo lays out");
 
@@ -496,6 +497,7 @@ fn scale_delta_is_additive() {
         &view,
         Vec3::new(0.0, 0.0, 0.0),
         Quat::new(0.0, 0.0, 0.0, 1.0),
+        1.4,
     )
     .expect("lays out");
     let x = &layout.axes[0];
@@ -654,6 +656,7 @@ fn ortho_gizmo_is_two_screen_aligned_axes() {
         &view,
         Vec3::new(0.0, 0.0, 0.0),
         hyg::var::Quat::new(0.0, 0.0, 0.0, 1.0),
+        1.4,
     )
     .expect("lays out under ortho");
 
@@ -795,6 +798,54 @@ fn camera_component_defaults_to_3d_and_main() {
     assert_eq!(camera.camera.position, Vec3::new(0.0, 0.0, -8.0));
 }
 
+// ---- round 7: the gizmo respects zoom ----
+
+/// The gizmo's handles are true MVP projections of world points: zoom
+/// in (small orbit distance) and the handles grow in pixels; zoom out
+/// and they shrink. The review's ask — the gizmo scales with the
+/// geometry instead of floating as a fixed screen overlay.
+#[test]
+fn gizmo_handles_respect_zoom() {
+    let view = view();
+    let identity = hyg::var::Quat::new(0.0, 0.0, 0.0, 1.0);
+
+    let handle_len = |distance: f32| {
+        let camera = Camera {
+            position: Vec3::new(0.0, 0.0, -distance),
+            target: Vec3::new(0.0, 0.0, 0.0),
+            projection: Projection::Perspective {
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 500.0,
+                aspect: 16.0 / 9.0,
+            },
+        };
+        let layout = gizmo::layout(
+            GizmoMode::Translate,
+            &camera,
+            &view,
+            Vec3::new(0.0, 0.0, 0.0),
+            identity,
+            gizmo::GIZMO_WORLD_LEN, // world-locked: zoom rescales it
+        )
+        .expect("lays out");
+        let x = &layout.axes[0];
+        let dx = x.screen_end[0] - layout.center[0];
+        let dy = x.screen_end[1] - layout.center[1];
+        (dx * dx + dy * dy).sqrt()
+    };
+
+    let close = handle_len(3.0);
+    let far = handle_len(30.0);
+    assert!(close > far, "zoomed in = bigger handles: {close} vs {far}");
+    // perspective projection: ~10x distance ≈ ~10x smaller
+    let ratio = close / far;
+    assert!(
+        (ratio - 10.0).abs() < 3.0,
+        "10x closer = ~10x bigger (perspective): ratio {ratio}"
+    );
+}
+
 // ---- round 5: the inspector growth probe ----
 
 /// THE ballooning bug, reproduced against the REAL panel: a widget
@@ -899,8 +950,9 @@ fn gizmo_drag_moves_the_entity_along_the_arrow() {
     let view = view();
     let origin = Vec3::new(0.0, 0.0, 0.0);
     let identity = hyg::var::Quat::new(0.0, 0.0, 0.0, 1.0);
-    let layout = gizmo::layout(GizmoMode::Translate, &camera, &view, origin, identity)
-        .expect("lays out");
+    let layout =
+        gizmo::layout(GizmoMode::Translate, &camera, &view, origin, identity, 1.4)
+            .expect("lays out");
 
     for handle in &layout.axes {
         let drag = [handle.screen_dir[0] * 30.0, handle.screen_dir[1] * 30.0];
@@ -1108,6 +1160,7 @@ fn gizmo_paint_tessellates_in_the_viewport() {
         &view,
         Vec3::new(0.0, 0.0, 0.0),
         Quat::new(0.0, 0.0, 0.0, 1.0),
+        1.4,
     )
     .expect("lays out");
     shell::paint_gizmo(ctx.debug_painter(), &layout, GizmoMode::Translate, 1.0, false);
