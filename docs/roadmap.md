@@ -915,9 +915,31 @@ seams it grows through.
    slot is that seam already); "rendered first in view" is draw-order
    policy. The example scene carries its camera entity (play renders
    the demo view). 29 editor tests; suite 230 core / 354
-   `--all-features`, clippy clean. Next rung: **M3 — play mode**
-   (script live reload, console in the dock, per-scene snapshots tied
-   to tabs).
+   `--all-features`, clippy clean. **M3 landed (2026-11-16, same-day
+   follow-through): play mode.** The editor opens **maximized and
+   focused** (also fixing the screenshot feedback loop). **Script live
+   reload** — the design's save-equals-reload: the editor polls script
+   files' mtimes (~1/sec) and a changed file swaps the component's
+   source through `ScriptedComponent::reload_from_file` (`Script::load`
+   — same id, host closures re-bound, script state resets per the v12
+   contract); a broken reload refuses at the boundary and the component
+   fails loud on its next hook (both pinned by tests, including the
+   heal-after-break cycle). The **pump catches script panics**
+   (catch_unwind around the frame): the console shows the error, the
+   sim drops to edit mode, and the editor stays alive — the
+   poison-tolerant lock keeps the engine usable. The dock's **Console
+   tab is real**: script panics (red) + editor statuses, newest last,
+   stick-to-bottom. The transport completes with **step** (one frame
+   while paused). **Per-tab live state**: switching tabs snapshots the
+   outgoing tree into its tab and restores the incoming tab's — unsaved
+   edits survive switching; tabs are independent in-memory scenes. The
+   editor example carries a scripted drifter + patrol.js (the live
+   reload demo: edit while playing; break it, watch the console).
+   required-features gained `script` (the editor's scripting story rides
+   the same seam). 31 editor tests; suite 230 core / 356
+   `--all-features`, clippy clean; screenshot-verified maximized with
+   the scene filling the viewport. M4 — assets (import flows, debug
+   views) — is the next rung.
 
 ## What hyg will NOT do
 
