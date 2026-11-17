@@ -875,9 +875,29 @@ seams it grows through.
    factories stay strict). And the file dialog went **native** (rfd,
    xdg-desktop-portal on Linux — favorites, locations, filtering for
    free; the in-app browser is deleted). 26 editor tests; suite 227
-   core / 351 `--all-features`, clippy clean. Next rung: **M3 — play
-   mode** (script live reload, console, per-scene snapshots tied to
-   tabs).
+   core / 351 `--all-features`, clippy clean. **Round 6 (sixth
+   review): the CAMERA COMPONENT and 2D/3D scenes.** Scenes now declare
+   their dimensionality through a **main camera** — an entity-attached
+   [`CameraComponent`](game::camera_component) (ortho = 2D, perspective
+   = 3D; registered as "camera", full save/load params). Play resolves
+   the main camera and renders through it — a scene without one plays
+   BLANK, per contract; the editor viewport renders through its own
+   orbit (edit views are the editor's, never the document's), and new
+   scenes spawn a main camera entity (ortho default). The **viewport
+   renders at the panel's size**: a shared frame-size gate drives
+   `WgpuRenderer::set_size` (target + depth + readback recreated) and
+   the blit gained a sub-rect fit (extents + center in the uniform) —
+   the frame lands exactly on the panel, no letterbox bars anywhere.
+   The **camera preview PiP** landed: while a camera entity is selected
+   and its TRS edited (or locked), the pump renders its view into sink
+   tag 1 (FrameSink tagged slots; `latest_since_tag`) and the shell
+   uploads it as an egui texture in a closable window. The inspector
+   carries camera controls (main, projection, fov/half-extents/near/
+   far) and the **editor camera accordion** (target, distance,
+   yaw/pitch, fov — view state, never saved). + component spawns ready
+   components (UI-side default params). 28 editor tests; suite 229 core
+   / 353 `--all-features`, clippy clean. Next rung: **M3 — play mode**
+   (script live reload, console, per-scene snapshots tied to tabs).
 
 ## What hyg will NOT do
 
