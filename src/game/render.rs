@@ -90,7 +90,11 @@ pub struct FrameSink(std::sync::Arc<std::sync::Mutex<Inner>>);
 
 #[derive(Default)]
 struct Inner {
+    /// The primary slot (tag 0 — the default publish).
     frame: Option<Frame>,
+    /// Tagged slots (a second consumer view — the editor's camera
+    /// preview renders into tag 1 alongside the primary frame).
+    tagged: std::collections::HashMap<u32, Frame>,
     generation: u64,
 }
 
@@ -101,14 +105,26 @@ impl FrameSink {
 
     /// Publish a frame (bumps the generation).
     pub fn publish(&self, width: u32, height: u32, rgba: Vec<u8>) {
+        self.publish_tagged(0, width, height, rgba)
+    }
+
+    /// Publish a TAGGED frame — tags keep separate slots, so a second
+    /// render (the editor's camera preview) never disturbs the primary
+    /// frame a viewport is showing.
+    pub fn publish_tagged(&self, tag: u32, width: u32, height: u32, rgba: Vec<u8>) {
         let mut inner = self.0.lock().unwrap();
         inner.generation += 1;
-        inner.frame = Some(Frame {
+        let frame = Frame {
             width,
             height,
             generation: inner.generation,
             rgba,
-        });
+        };
+        if tag == 0 {
+            inner.frame = Some(frame);
+        } else {
+            inner.tagged.insert(tag, frame);
+        }
     }
 
     /// The newest frame, if any.
@@ -116,10 +132,45 @@ impl FrameSink {
         self.0.lock().unwrap().frame.clone()
     }
 
-    /// The newest frame whose generation is greater than `seen`.
+    /// The newest frame whose generation is greater than `seen` — ANY
+    /// slot (the back-compat read).
     pub fn latest_since(&self, seen: u64) -> Option<Frame> {
         let inner = self.0.lock().unwrap();
-        match &inner.frame {
+        let primary = inner
+            .frame
+            .as_ref()
+            .filter(|f| f.generation > seen)
+            .cloned();
+        let tagged_best = inner
+            .tagged
+            .values()
+            .filter(|f| f.generation > seen)
+            .max_by_key(|f| f.generation)
+            .cloned();
+        match (primary, tagged_best) {
+            (Some(a), Some(b)) => {
+                if a.generation >= b.generation {
+                    Some(a)
+                } else {
+                    Some(b)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    }
+
+    /// The newest frame of ONE tag whose generation beats `seen` — the
+    /// per-view read (tag 0 = the primary slot).
+    pub fn latest_since_tag(&self, seen: u64, tag: u32) -> Option<Frame> {
+        let inner = self.0.lock().unwrap();
+        let frame = if tag == 0 {
+            inner.frame.as_ref()
+        } else {
+            inner.tagged.get(&tag)
+        };
+        match frame {
             Some(f) if f.generation > seen => Some(f.clone()),
             _ => None,
         }
@@ -132,6 +183,16 @@ pub trait RenderBackend: Send {
 
     /// Per-frame setup, before the update pass.
     fn pre_frame(&mut self) {}
+
+    /// Resize the render target (the editor's viewport-driven rendering:
+    /// the offscreen frame tracks the panel it fills). Backends with a
+    /// fixed target ignore it.
+    fn set_size(&mut self, _width: u32, _height: u32) {}
+
+    /// Stamp the next published frames with a tag — tags keep separate
+    /// sink slots, so a second render (a camera preview) never disturbs
+    /// the primary frame a viewport is showing.
+    fn set_frame_tag(&mut self, _tag: u32) {}
 
     /// Begin a camera-driven scene: clears the quad list; subsequent
     /// [`push_quad`](Self::push_quad) calls take WORLD-space positions and

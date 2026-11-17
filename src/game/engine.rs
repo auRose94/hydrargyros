@@ -119,6 +119,13 @@ impl Engine {
         self
     }
 
+    /// The attached render backend, mutably — the editor resizes the
+    /// offscreen target as its viewport panel grows (the frame tracks
+    /// the panel, so no letterbox bars).
+    pub fn renderer_mut(&mut self) -> Option<&mut Box<dyn RenderBackend>> {
+        self.renderer.as_mut()
+    }
+
     /// Attach a top-level entity (one of the scene's roots).
     pub fn add_entity(&mut self, entity: Entity) -> &mut Self {
         self.entities.push(entity);

@@ -36,6 +36,7 @@
 //! ```
 
 pub mod camera;
+pub mod camera_component;
 pub mod component;
 pub mod editor;
 pub mod engine;
@@ -72,6 +73,7 @@ pub mod window;
 pub mod winit_window;
 
 pub use camera::{Camera, OrbitController, Projection};
+pub use camera_component::CameraComponent;
 pub use component::{Component, Priority};
 pub use editor::ui::EditorUi;
 pub use engine::Engine;

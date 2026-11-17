@@ -146,7 +146,7 @@ pub fn fit_extents(surface: (u32, u32), image: (u32, u32)) -> [f32; 2] {
 /// editor's viewport) before its egui pass.
 #[cfg(feature = "wgpu")]
 pub(crate) const BLIT_WGSL: &str = r#"
-@group(0) @binding(0) var<uniform> fit: vec4f; // x, y = clip half-extents
+@group(0) @binding(0) var<uniform> fit: vec4f; // xy = clip half-extents, zw = clip center
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
 
@@ -169,7 +169,7 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
     // v=0: flip v against the corner's clip y, or the view renders the
     // frame upside down.
     out.uv = vec2f(c.x, 1.0 - c.y);
-    out.clip = vec4f((c * 2.0 - 1.0) * fit.xy, 0.0, 1.0);
+    out.clip = vec4f((c * 2.0 - 1.0) * fit.xy + fit.zw, 0.0, 1.0);
     return out;
 }
 
@@ -247,7 +247,7 @@ pub(crate) struct BlitView {
     bind_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    /// The letterbox fit uniform (two clip-space half-extents).
+    /// The fit uniform (clip half-extents xy + clip center zw).
     fit: wgpu::Buffer,
     frame_tex: wgpu::Texture,
     frame_view: wgpu::TextureView,
@@ -341,11 +341,29 @@ impl BlitView {
     }
 
     fn update_fit(&self) {
-        let extents = fit_extents(
+        self.set_fit_rect(
             (self.config.width, self.config.height),
             (self.image[0], self.image[1]),
+            [0.0, 0.0],
         );
-        let floats = [extents[0], extents[1], 0.0, 0.0];
+    }
+
+    /// Fit the frame into a pixel RECT of the surface (the editor's
+    /// viewport panel): extents from the letterbox rule, center at the
+    /// rect's middle — the frame lands exactly on the panel, no bars.
+    pub(crate) fn set_fit_rect(
+        &self,
+        surface: (u32, u32),
+        image: (u32, u32),
+        rect_px: [f32; 2],
+    ) {
+        let extents = fit_extents(surface, image);
+        let (sw, sh) = (surface.0.max(1) as f32, surface.1.max(1) as f32);
+        let center = [
+            (rect_px[0] * 2.0 / sw - 1.0) + extents[0],
+            1.0 - (rect_px[1] * 2.0 / sh - 1.0) - extents[1],
+        ];
+        let floats = [extents[0], extents[1], center[0], center[1]];
         let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
         self.queue.write_buffer(&self.fit, 0, &bytes);
     }

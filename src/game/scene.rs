@@ -160,6 +160,13 @@ fn factories() -> &'static RwLock<FactoryMap> {
                 MeshRenderer::from_params(params).map(|c| Box::new(c) as Box<dyn Component>)
             }),
         );
+        map.insert(
+            "camera".to_string(),
+            Arc::new(|params, _ctx| {
+                crate::game::camera_component::CameraComponent::from_params(params)
+                    .map(|c| Box::new(c) as Box<dyn Component>)
+            }),
+        );
         #[cfg(feature = "script")]
         map.insert(
             "script".to_string(),

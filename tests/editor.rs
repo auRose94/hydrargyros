@@ -505,6 +505,71 @@ fn scale_delta_is_additive() {
     assert!((delta - expected).abs() < 0.05, "additive drag: {delta}");
 }
 
+// ---- round 5/6: the camera component ----
+
+/// The camera component round-trips through the scene document:
+/// projection kind, main flag, position/target all survive save/load,
+/// and the scene's dimensionality follows the main camera.
+#[test]
+fn camera_component_round_trips_through_the_scene() {
+    use hyg::game::CameraComponent;
+
+    let mut engine = Engine::new("acme", "camera-test");
+    let mut entity = Entity::new("main camera");
+    entity.add_component(Box::new(CameraComponent {
+        camera: Camera {
+            position: Vec3::new(2.0, 3.0, -6.0),
+            target: Vec3::new(0.0, 1.0, 0.0),
+            projection: Projection::Perspective {
+                fov_y_degrees: 55.0,
+                near: 0.2,
+                far: 80.0,
+                aspect: 1.6,
+            },
+        },
+        main: true,
+    }));
+    engine.add_entity(entity);
+
+    // round trip through the document
+    let doc = Scene::document("cams", engine.camera(), engine.entities());
+    let loaded = Scene::from_var(&doc).expect("the scene loads");
+    let found = loaded
+        .entities
+        .first()
+        .and_then(|e| e.get_component::<CameraComponent>())
+        .expect("the camera component survives");
+    assert!(found.main);
+    assert!(matches!(
+        found.camera.projection,
+        Projection::Perspective { .. }
+    ));
+    assert_eq!(found.camera.position, Vec3::new(2.0, 3.0, -6.0));
+    assert_eq!(found.camera.target, Vec3::new(0.0, 1.0, 0.0));
+}
+
+/// The play camera: the main camera component wins; a scene without one
+/// plays blank (the shell's play() resolves through this helper's
+/// semantics — find_main_camera lives in the shell, so here we pin the
+/// ENGINE-side contract the shell relies on: components materialize and
+/// are discoverable).
+#[test]
+fn main_camera_component_is_discoverable() {
+    use hyg::game::CameraComponent;
+
+    let mut engine = Engine::new("acme", "camera-test");
+    let mut entity = Entity::new("main camera");
+    entity.add_component(Box::new(CameraComponent::default()));
+    engine.add_entity(entity);
+
+    let found = engine.entities().first().and_then(|e| {
+        e.iter_components()
+            .find_map(|c| c.as_any().downcast_ref::<CameraComponent>().map(|c| (c.main, c.camera)))
+    });
+    let (main, _) = found.expect("the camera component is discoverable");
+    assert!(main, "a fresh camera component defaults to main");
+}
+
 // ---- M2: scene save/load from the editor ----
 
 /// The scene-io op the Save button drives: the live tree's canonical
@@ -629,6 +694,8 @@ fn inspector_panel_does_not_grow_over_time() {
         playing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
+        pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
     };
 
     let ctx = egui::Context::default();

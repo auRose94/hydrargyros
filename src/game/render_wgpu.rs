@@ -798,6 +798,9 @@ pub struct WgpuRenderer {
     clear_color: [f64; 4],
     camera: Option<Camera>,
     frame_sink: Option<crate::game::render::FrameSink>,
+    /// The tag stamped on published frames (0 = the primary view; 1 =
+    /// the editor's camera preview — see [`FrameSink::latest_since_tag`]).
+    frame_tag: u32,
     last_frame: Vec<u8>,
     /// When a window is attached, frames present to its surface instead of
     /// the offscreen target (no readback — the compositor is the consumer).
@@ -876,6 +879,7 @@ impl WgpuRenderer {
             mesh_buffers: HashMap::new(),
             tex_buffers: HashMap::new(),
             frame_sink: None,
+            frame_tag: 0,
             last_frame: Vec::new(),
             window: Some((window, surface)),
             window_config: Some(config),
@@ -923,6 +927,7 @@ impl WgpuRenderer {
             mesh_buffers: HashMap::new(),
             tex_buffers: HashMap::new(),
             frame_sink: None,
+            frame_tag: 0,
             last_frame: Vec::new(),
             #[cfg(feature = "winit")]
             window: None,
@@ -978,6 +983,30 @@ impl WgpuRenderer {
     /// backend reads from it).
     pub fn attach_sink(&mut self, sink: crate::game::render::FrameSink) {
         self.frame_sink = Some(sink);
+    }
+
+    /// Stamp published frames with a tag (0 = the primary view). Sinks
+    /// keep tags in separate slots — an editor's camera preview renders
+    /// into tag 1 without disturbing the viewport's frame.
+    pub fn set_frame_tag(&mut self, tag: u32) {
+        self.frame_tag = tag;
+    }
+
+    /// Recreate the offscreen target at a new size (the editor's
+    /// viewport-driven rendering: the frame tracks the panel it fills,
+    /// so no letterbox bars).
+    pub fn set_size(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+        if (width, height) == self.size {
+            return;
+        }
+        self.size = (width, height);
+        self.target = Self::offscreen_target(&self.device, width, height);
+        let (depth, depth_view) = depth_target(&self.device, width, height);
+        self.depth = depth;
+        self.depth_view = depth_view;
+        self.readback = Self::offscreen_readback(&self.device, width, height);
     }
 
     /// Present frames to a winit window's surface instead of the offscreen
@@ -1128,6 +1157,14 @@ impl super::render::RenderBackend for WgpuRenderer {
 
     fn pre_frame(&mut self) {}
 
+    fn set_size(&mut self, width: u32, height: u32) {
+        WgpuRenderer::set_size(self, width, height);
+    }
+
+    fn set_frame_tag(&mut self, tag: u32) {
+        self.frame_tag = tag;
+    }
+
     fn begin_scene(&mut self, camera: &Camera, lights: &[SceneLight]) {
         self.camera = Some(*camera);
         self.scene.clear();
@@ -1239,7 +1276,7 @@ impl super::render::RenderBackend for WgpuRenderer {
         drop(data);
         self.readback.unmap();
         if let Some(sink) = &self.frame_sink {
-            sink.publish(width, height, frame.clone());
+            sink.publish_tagged(self.frame_tag, width, height, frame.clone());
         }
         self.last_frame = frame;
     }

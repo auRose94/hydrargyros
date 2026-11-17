@@ -47,6 +47,7 @@ use crate::game::engine::Engine;
 use crate::game::entity::Entity;
 use crate::game::render::FrameSink;
 use crate::game::scene::Scene;
+use crate::game::camera::Projection;
 use crate::var::{Quat, Vec3};
 
 /// Launch the Studio shell: spawn the engine pump on a worker thread and
@@ -75,25 +76,56 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
     // offscreen frame every 16ms starves the UI thread of the engine
     // lock — the sluggish-resize feel)
     let dirty = Arc::new(AtomicBool::new(true));
+    // the viewport panel's size — the pump renders the offscreen frame
+    // AT this size, so the frame fills the panel with no letterbox bars
+    let frame_size = Arc::new(Mutex::new([960u32, 540]));
+    // the camera-preview camera (Some = render the preview each tick)
+    let pip_camera = Arc::new(Mutex::new(None));
     let pump = {
         let engine = Arc::clone(&engine);
         let pumping = Arc::clone(&pumping);
         let playing = Arc::clone(&playing);
         let dirty = Arc::clone(&dirty);
+        let frame_size = Arc::clone(&frame_size);
+        let pip_camera = Arc::clone(&pip_camera);
         std::thread::Builder::new()
             .name("hyg-studio-pump".to_string())
             .spawn(move || {
+                let mut rendered_size = [960u32, 540];
                 while pumping.load(Ordering::SeqCst) {
                     let started = Instant::now();
                     let run_frame =
                         playing.load(Ordering::SeqCst) || dirty.swap(false, Ordering::SeqCst);
                     if run_frame {
                         if let Ok(mut engine) = engine.lock() {
+                            // resize the offscreen frame to the panel
+                            let size = *frame_size.lock().unwrap();
+                            if size != rendered_size {
+                                if let Some(renderer) = engine.renderer_mut() {
+                                    renderer.set_size(size[0], size[1]);
+                                }
+                                rendered_size = size;
+                            }
                             if playing.load(Ordering::SeqCst) {
                                 engine.update(1.0 / 60.0);
                             }
                             engine.draw();
                             engine.render();
+                            // the camera preview: render the pip camera's
+                            // view into tag 1 (the main frame re-renders
+                            // first next tick; tags keep the slots apart)
+                            let pip = *pip_camera.lock().unwrap();
+                            if let Some(pip_camera) = pip {
+                                if let Some(renderer) = engine.renderer_mut() {
+                                    renderer.set_frame_tag(1);
+                                }
+                                engine.set_camera(pip_camera);
+                                engine.draw();
+                                engine.render();
+                                if let Some(renderer) = engine.renderer_mut() {
+                                    renderer.set_frame_tag(0);
+                                }
+                            }
                         }
                     }
                     // pace to ~60 fps of pump work; the display loop
@@ -105,7 +137,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
             .map_err(|e| format!("studio pump thread: {e}"))?
     };
 
-    let result = run_shell(engine, sink, title.into(), playing, dirty);
+    let result = run_shell(engine, sink, title.into(), playing, dirty, frame_size, pip_camera);
     pumping.store(false, Ordering::SeqCst);
     let _ = pump.join();
     result
@@ -118,6 +150,8 @@ fn run_shell(
     title: String,
     playing: Arc<AtomicBool>,
     dirty: Arc<AtomicBool>,
+    frame_size: Arc<Mutex<[u32; 2]>>,
+    pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
 ) -> Result<(), String> {
     let mut builder = winit::event_loop::EventLoop::<ShellMessage>::with_user_event();
     // the editor normally owns the main thread; the escape hatches cost
@@ -148,6 +182,8 @@ fn run_shell(
         playing,
         dirty,
         quit,
+        frame_size,
+        pip_camera,
         state: EditorState::new(scene_camera),
         window: None,
         view: None,
@@ -163,6 +199,10 @@ fn run_shell(
 /// control messages ride winit's user events; nothing needs them yet).
 enum ShellMessage {}
 
+/// The camera preview's egui texture id (a User id — clear of egui's
+/// managed font/atlas ids).
+const PIP_TEXTURE: egui::TextureId = egui::TextureId::User(0xC0);
+
 /// The pump-shared gates, passed through the UI pass.
 #[doc(hidden)]
 pub struct ShellShared {
@@ -174,6 +214,13 @@ pub struct ShellShared {
     /// command does not reach winit 0.30 through this embed).
     #[doc(hidden)]
     pub quit: Arc<AtomicBool>,
+    /// The viewport panel's size — the pump renders the offscreen frame
+    /// at it (the frame tracks the panel; no letterbox bars).
+    #[doc(hidden)]
+    pub frame_size: Arc<Mutex<[u32; 2]>>,
+    /// The camera-preview camera (Some = render the preview into tag 1).
+    #[doc(hidden)]
+    pub pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
 }
 
 impl ShellShared {
@@ -195,6 +242,10 @@ struct ShellHandler {
     dirty: Arc<AtomicBool>,
     /// File > Quit (watched in about_to_wait).
     quit: Arc<AtomicBool>,
+    /// The viewport panel's size (the pump renders at it).
+    frame_size: Arc<Mutex<[u32; 2]>>,
+    /// The camera-preview camera (Some = render the preview).
+    pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -254,6 +305,15 @@ pub struct EditorState {
     dragged_row: Option<Vec<usize>>,
     /// The bottom dock's active tab.
     dock_tab: DockTab,
+    /// The camera-preview window (tag-1 frames): shown while a camera
+    /// entity is selected and its TRS is being edited, or locked.
+    pip_open: bool,
+    pip_locked: bool,
+    seen_pip: u64,
+    /// The camera component's fields changed this frame (the PiP's
+    /// show trigger).
+    camera_trs_editing: bool,
+    pip_last_edit: Option<Instant>,
 }
 
 /// The bottom dock's tabs. Console/debugger/profiler are staged homes —
@@ -317,6 +377,11 @@ impl EditorState {
             log: Vec::new(),
             dragged_row: None,
             dock_tab: DockTab::Log,
+            pip_open: false,
+            pip_locked: false,
+            seen_pip: 0,
+            camera_trs_editing: false,
+            pip_last_edit: None,
         }
     }
 
@@ -514,6 +579,7 @@ impl ShellHandler {
             return;
         };
         self.state.tick_fps();
+        let frame_dims = view.frame_dims;
 
         // egui pass: panels over the live engine (the lock is held while
         // the widgets read/write; the pump waits its turn — a value drag
@@ -522,14 +588,14 @@ impl ShellHandler {
         egui_ctx.begin_pass(raw_input);
         {
             let mut engine = self.engine.lock().expect("studio engine");
-            let frame_dims = view.frame_dims;
-            let surface = [view.blit.config.width, view.blit.config.height];
             let shared = ShellShared {
                 playing: Arc::clone(&self.playing),
                 dirty: Arc::clone(&self.dirty),
                 quit: Arc::clone(&self.quit),
+                frame_size: Arc::clone(&self.frame_size),
+                pip_camera: Arc::clone(&self.pip_camera),
             };
-            draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, surface, &shared);
+            draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, &shared);
         }
         let mut output = egui_ctx.end_pass();
         egui_state.handle_platform_output(window, output.platform_output);
@@ -546,11 +612,32 @@ impl ShellHandler {
         for id in std::mem::take(&mut output.textures_delta.free) {
             view.egui_renderer.free_texture(&id);
         }
+        // the camera preview's frame (tag 1) uploads as a plain egui
+        // texture — the PiP window paints it like any image
+        if let Some(frame) = self.sink.latest_since_tag(self.state.seen_pip, 1) {
+            self.state.seen_pip = frame.generation;
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width as usize, frame.height as usize],
+                &frame.rgba,
+            );
+            let delta = egui::epaint::ImageDelta {
+                image: egui::ImageData::Color(std::sync::Arc::new(image)),
+                options: egui::TextureOptions::LINEAR,
+                pos: None,
+            };
+            view.egui_renderer.update_texture(
+                &view.blit.device,
+                &view.blit.queue,
+                PIP_TEXTURE,
+                &delta,
+            );
+        }
         let primitives = egui_ctx.tessellate(output.shapes, output.pixels_per_point);
         let screen = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [view.blit.config.width, view.blit.config.height],
             pixels_per_point: output.pixels_per_point,
         };
+        let surface_wh = (view.blit.config.width, view.blit.config.height);
 
         // the surface frame: pass 1 clears + blits the engine frame, pass
         // 2 loads + draws the egui meshes on top
@@ -567,6 +654,20 @@ impl ShellHandler {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
+            // the frame maps exactly onto the viewport panel's rect
+            // (last frame's layout — panels are stable between frames)
+            match self.state.viewport {
+                Some(vp_view) => view.blit.set_fit_rect(
+                    (surface_wh.0, surface_wh.1),
+                    (frame_dims[0].max(1), frame_dims[1].max(1)),
+                    [vp_view.x, vp_view.y],
+                ),
+                None => view.blit.set_fit_rect(
+                    (surface_wh.0, surface_wh.1),
+                    (frame_dims[0].max(1), frame_dims[1].max(1)),
+                    [0.0, 0.0],
+                ),
+            }
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("hyg-studio-underlay"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -630,9 +731,10 @@ fn draw_ui(
     state: &mut EditorState,
     engine: &mut Engine,
     frame_dims: [u32; 2],
-    surface: [u32; 2],
     shared: &ShellShared,
 ) {
+    state.camera_trs_editing = false;
+
     // undo/redo + mode + delete keys — skipped while a text field owns
     // the keyboard
     if !ctx.egui_wants_keyboard_input() {
@@ -683,13 +785,20 @@ fn draw_ui(
 
     // the editor's viewport camera: the orbit, not the scene's camera
     // (play mode swaps the scene camera in; save always writes
-    // state.scene_camera)
+    // state.scene_camera). Aspect comes from the VIEWPORT panel — the
+    // frame is rendered at the panel's size.
+    let ppp = ctx.pixels_per_point();
     if !shared.playing.load(Ordering::SeqCst) {
-        let aspect = frame_dims[0].max(1) as f32 / frame_dims[1].max(1) as f32;
-        engine.set_camera(state.orbit.camera(aspect));
+        let (vw, vh) = match state.viewport {
+            Some(view) => (view.width.max(1.0), view.height.max(1.0)),
+            None => (
+                frame_dims[0].max(1) as f32,
+                frame_dims[1].max(1) as f32,
+            ),
+        };
+        engine.set_camera(state.orbit.camera(vw / vh));
     }
 
-    let ppp = ctx.pixels_per_point();
     ctx.root_ui(|root| {
 // the menu bar spans the top: menus left, transport FAR RIGHT (the
         // user's color language — play GREEN, stop RED, restart ORANGE)
@@ -966,29 +1075,130 @@ fn draw_ui(
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |vp| {
-                draw_viewport(
-                    vp,
-                    state,
-                    engine,
-                    FrameGeometry { frame_dims, surface },
-                    ppp,
-                    shared,
-                    ctx,
-                );
+                draw_viewport(vp, state, engine, ppp, shared, ctx);
             });
     });
 
-    // floating windows (history, files) live on the context, after panels
+    // the pump renders the frame AT the viewport panel's size (the blit
+    // maps it back onto the panel — no letterbox bars anywhere)
+    if let Some(view) = state.viewport {
+        let desired = [view.width.round() as u32, view.height.round() as u32];
+        let mut size = shared.frame_size.lock().unwrap();
+        if desired[0] > 1 && desired[1] > 1 && (desired[0] != size[0] || desired[1] != size[1]) {
+            *size = desired;
+            shared.touch();
+        }
+    }
+
+    // floating windows (history) live on the context, after panels
     if state.show_history {
         draw_history_window(ctx, state, engine, shared);
     }
     poll_file_dialog(state, engine, shared);
-}
 
+    // the camera preview (PiP): shows while a camera entity is selected
+    // AND its TRS is being edited (or the preview is locked) — the pump
+    // renders its view into tag 1
+    let pip_visible = state.pip_open
+        && (state.pip_locked
+            || state.camera_trs_editing
+            || state
+                .pip_last_edit
+                .map(|t| t.elapsed() < Duration::from_secs(1))
+                .unwrap_or(false));
+    let mut pip_camera = None;
+    if pip_visible {
+        if let Some(path) = state.ui.selection() {
+            if let Some(entity) = engine.entity_at(path) {
+                for component in entity.iter_components() {
+                    if let Some(camera) = component
+                        .as_any()
+                        .downcast_ref::<crate::game::CameraComponent>()
+                    {
+                        pip_camera = Some(camera.camera);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    *shared.pip_camera.lock().unwrap() = pip_camera;
+
+    // the camera preview PiP window: the tag-1 texture, closable,
+    // lockable (stays while locked)
+    let pip_shown = pip_visible && state.seen_pip > 0;
+    if pip_shown {
+        egui::Window::new("camera preview")
+            .open(&mut state.pip_open)
+            .default_width(320.0)
+            .show(ctx, |win| {
+                win.horizontal(|head| {
+                    let mut locked = state.pip_locked;
+                    if head.checkbox(&mut locked, "lock").changed() {
+                        state.pip_locked = locked;
+                    }
+                    if locked {
+                        head.weak("(stays while locked)");
+                    }
+                });
+                win.image(egui::ImageSource::Texture(egui::load::SizedTexture::new(
+                    PIP_TEXTURE,
+                    egui::vec2(320.0, 200.0),
+                )));
+            });
+    }
+}
 // ---- transport: edit / play / stop / restart ----
 
-/// Play: snapshot the edit state, then run. The snapshot is the scene's
-/// document Var — Stop/Restart restore it, so play never dirties edits.
+/// The scene's main camera: the first entity carrying a main
+/// [`CameraComponent`](crate::game::CameraComponent), walked tree-first.
+#[must_use]
+fn find_main_camera(engine: &Engine) -> Option<crate::game::Camera> {
+    fn walk(entity: &Entity, found: &mut Option<crate::game::Camera>) {
+        if found.is_some() {
+            return;
+        }
+        for component in entity.iter_components() {
+            if let Some(camera) = component
+                .as_any()
+                .downcast_ref::<crate::game::CameraComponent>()
+            {
+                if camera.main {
+                    *found = Some(camera.camera);
+                    return;
+                }
+            }
+        }
+        for child in entity.children() {
+            walk(child, found);
+        }
+    }
+    let mut found = None;
+    for root in engine.entities() {
+        walk(root, &mut found);
+    }
+    found
+}
+
+/// A camera that sees nothing — what plays when a scene has no main
+/// camera (the render is blank, per the contract).
+#[must_use]
+fn blank_camera() -> crate::game::Camera {
+    crate::game::Camera {
+        position: Vec3::new(1.0e5, 1.0e5, 1.0e5),
+        target: Vec3::new(0.0, 0.0, 0.0),
+        projection: crate::game::camera::Projection::Perspective {
+            fov_y_degrees: 60.0,
+            near: 1.0,
+            far: 2.0,
+            aspect: 1.0,
+        },
+    }
+}
+
+/// Play: snapshot the edit state, resolve the MAIN camera (the scene's
+/// dimensionality), then run. No main camera = a blank scene, per the
+/// contract.
 fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     let label = state
         .tabs
@@ -996,10 +1206,15 @@ fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
         .map(|t| t.label.clone())
         .unwrap_or_else(|| "scene".to_string());
     state.snapshot = Some(Scene::document(&label, &state.scene_camera, engine.entities()));
-    // play runs through the SCENE's camera (the editor orbit is edit-only)
+    let main_camera = find_main_camera(engine);
+    state.scene_camera = main_camera.unwrap_or_else(blank_camera);
     engine.set_camera(state.scene_camera);
     shared.playing.store(true, Ordering::SeqCst);
-    state.set_status("playing — Space or pause to edit");
+    if main_camera.is_some() {
+        state.set_status("playing — Space or pause to edit");
+    } else {
+        state.set_status("playing a BLANK scene — no main camera (add a camera entity)");
+    }
 }
 
 /// Pause: stop the sim, keep the played state (resume from here).
@@ -1046,6 +1261,16 @@ fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared)
         dirty: false,
     });
     activate_tab(state, engine, state.tabs.len() - 1);
+    // every new scene starts with a main camera entity (ortho — the 2D
+    // default; the inspector switches to perspective for 3D scenes)
+    let mut camera_entity = Entity::new("main camera");
+    camera_entity.add_component(Box::new(crate::game::CameraComponent {
+        camera: crate::game::Camera::default(),
+        main: true,
+    }));
+    engine.add_entity(camera_entity);
+    state.scene_camera = crate::game::Camera::default();
+    state.orbit.ortho = true;
     shared.touch();
 }
 
@@ -1277,26 +1502,6 @@ fn draw_toolbar(
     });
 }
 
-/// The viewport geometry the pass needs: the offscreen frame's dims and
-/// the window surface's, in one argument.
-struct FrameGeometry {
-    frame_dims: [u32; 2],
-    surface: [u32; 2],
-}
-
-/// The letterboxed rect the blit draws the frame into over the WHOLE
-/// SURFACE — the pick/gizmo viewport must match the pixels exactly or
-/// clicks land one place and select another. (The interaction AREA is
-/// still the central panel; the MATH is the surface's.)
-#[must_use]
-fn surface_viewport(surface: [u32; 2], frame_dims: [u32; 2]) -> Viewport {
-    let (sw, sh) = (surface[0].max(1) as f32, surface[1].max(1) as f32);
-    let (iw, ih) = (frame_dims[0].max(1) as f32, frame_dims[1].max(1) as f32);
-    let scale = if iw / ih > sw / sh { sw / iw } else { sh / ih };
-    let (bw, bh) = (iw * scale, ih * scale);
-    Viewport::new((sw - bw) * 0.5, (sh - bh) * 0.5, bw, bh)
-}
-
 /// The viewport pass: picking, gizmo interaction, gizmo painting. All
 /// math in physical pixels over the SURFACE letterbox rect; egui's
 /// pointer arrives in points (absolute, window-origin) and converts by
@@ -1305,13 +1510,21 @@ fn draw_viewport(
     vp: &mut egui::Ui,
     state: &mut EditorState,
     engine: &mut Engine,
-    frame: FrameGeometry,
     ppp: f32,
     shared: &ShellShared,
     ctx: &egui::Context,
 ) {
     let response = vp.allocate_rect(vp.max_rect(), egui::Sense::click_and_drag());
-    let vp_rect = surface_viewport(frame.surface, frame.frame_dims);
+    // the viewport IS the central panel: the pump renders the frame at
+    // this exact size and the blit maps it back onto this exact rect —
+    // no letterbox bars, gizmos glued to the pixels
+    let max = vp.max_rect();
+    let vp_rect = Viewport::new(
+        max.min.x * ppp,
+        max.min.y * ppp,
+        max.width() * ppp,
+        max.height() * ppp,
+    );
     state.viewport = Some(vp_rect);
 
     let camera = *engine.camera();
@@ -1952,6 +2165,136 @@ fn draw_inspector(
                 shared.touch();
             }
 
+            // the CAMERA component's controls (projection = the scene's
+            // 2D/3D switch; main = what play renders through). Direct
+            // mutation for v1 — camera-field undo commands come with the
+            // M3 snapshot work.
+            let mut camera_changed = false;
+            if let Some(entity) = engine.entity_at_mut(&path) {
+                if let Some(camera) = entity.component_mut::<crate::game::CameraComponent>() {
+                    scroll.separator();
+                    scroll.strong("camera");
+                    let mut main_buf = camera.main;
+                    if scroll.checkbox(&mut main_buf, "main scene camera").changed() {
+                        camera.main = main_buf;
+                        camera_changed = true;
+                    }
+                    let is_ortho =
+                        matches!(camera.camera.projection, Projection::Orthographic { .. });
+                    let label = if is_ortho {
+                        "orthographic (2D)"
+                    } else {
+                        "perspective (3D)"
+                    };
+                    egui::ComboBox::from_id_salt("studio-camera-projection")
+                        .selected_text(label)
+                        .width(scroll.available_width().min(180.0))
+                        .show_ui(scroll, |combo| {
+                            if combo.selectable_label(!is_ortho, "perspective (3D)").clicked() {
+                                camera.camera.projection = Projection::Perspective {
+                                    fov_y_degrees: 60.0,
+                                    near: 0.1,
+                                    far: 500.0,
+                                    aspect: 16.0 / 9.0,
+                                };
+                                camera_changed = true;
+                            }
+                            if combo.selectable_label(is_ortho, "orthographic (2D)").clicked() {
+                                camera.camera.projection = Projection::Orthographic {
+                                    half_extents: Vec3::new(8.89, 5.0, 500.0),
+                                };
+                                camera_changed = true;
+                            }
+                        });
+                    match &mut camera.camera.projection {
+                        Projection::Orthographic { half_extents } => {
+                            scroll.label("half extents");
+                            let mut hx_new = f64::from(half_extents.x);
+                            let mut hy_new = f64::from(half_extents.y);
+                            let mut hz_new = f64::from(half_extents.z);
+                            let mut hz_changed = false;
+                            for (axis, v) in [
+                                ("x", &mut hx_new),
+                                ("y", &mut hy_new),
+                                ("z", &mut hz_new),
+                            ] {
+                                if scroll
+                                    .add(
+                                        egui::DragValue::new(v)
+                                            .speed(0.1)
+                                            .prefix(format!("{axis} ")),
+                                    )
+                                    .changed()
+                                {
+                                    hz_changed = true;
+                                }
+                            }
+                            if hz_changed {
+                                half_extents.x = hx_new as f32;
+                                half_extents.y = hy_new as f32;
+                                half_extents.z = hz_new as f32;
+                            }
+                            camera_changed = camera_changed || hz_changed;
+                        }
+                        Projection::Perspective {
+                            fov_y_degrees,
+                            near,
+                            far,
+                            ..
+                        } => {
+                            let mut fov = f64::from(*fov_y_degrees);
+                            if scroll
+                                .add(
+                                    egui::DragValue::new(&mut fov)
+                                        .speed(0.5)
+                                        .prefix("fov "),
+                                )
+                                .changed()
+                            {
+                                *fov_y_degrees = fov as f32;
+                                camera_changed = true;
+                            }
+                            let mut near_v = f64::from(*near);
+                            if scroll
+                                .add(
+                                    egui::DragValue::new(&mut near_v)
+                                        .speed(0.01)
+                                        .prefix("near "),
+                                )
+                                .changed()
+                            {
+                                *near = near_v as f32;
+                                camera_changed = true;
+                            }
+                            let mut far_v = f64::from(*far);
+                            if scroll
+                                .add(
+                                    egui::DragValue::new(&mut far_v)
+                                        .speed(1.0)
+                                        .prefix("far "),
+                                )
+                                .changed()
+                            {
+                                *far = far_v as f32;
+                                camera_changed = true;
+                            }
+                        }
+                    }
+                    if camera_changed && camera.main {
+                        // the main camera IS the scene's camera — keep the
+                        // editor's copy in lockstep (save/play read it)
+                        state.scene_camera = camera.camera;
+                        state.orbit.ortho = is_ortho;
+                    }
+                }
+            }
+            if camera_changed {
+                state.camera_trs_editing = true;
+                state.pip_last_edit = Some(Instant::now());
+                mark_tab_dirty(state);
+                shared.touch();
+            }
+
             scroll.separator();
             if scroll
                 .add(egui::Button::new("delete").fill(style::dark::DANGER))
@@ -1993,12 +2336,19 @@ fn save_scene(path: &Path, scene_camera: &crate::game::Camera, engine: &Engine) 
 /// and the selection resets.
 fn load_scene(state: &mut EditorState, engine: &mut Engine) -> Result<(), String> {
     let scene = Scene::load(Path::new(&state.scene_path)).map_err(|e| e.to_string())?;
-    state.scene_camera = scene.camera;
     engine.set_camera(scene.camera);
     engine.set_roots(scene.entities);
     state.ui = EditorUi::new();
     state.drag = None;
     state.name_edit = None;
+    // the scene's dimensionality follows its main camera component (the
+    // top-level camera is the fallback)
+    let main = find_main_camera(engine);
+    state.scene_camera = main.unwrap_or(scene.camera);
+    state.orbit.ortho = matches!(
+        state.scene_camera.projection,
+        crate::game::camera::Projection::Orthographic { .. }
+    );
     Ok(())
 }
 

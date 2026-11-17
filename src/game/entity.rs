@@ -109,6 +109,14 @@ impl Entity {
             .find_map(|slot| slot.component.as_any().downcast_ref::<T>())
     }
 
+    /// The entity's component of type `T`, mutable — the inspector's
+    /// camera controls write through this.
+    pub fn component_mut<T: Component + 'static>(&mut self) -> Option<&mut T> {
+        self.components
+            .iter_mut()
+            .find_map(|slot| slot.component.as_any_mut().downcast_mut::<T>())
+    }
+
     /// All components of type `T`, including children's — recursive
     /// down the whole subtree.
     pub fn get_components_recursive<T: Component + 'static>(&self) -> Vec<&T> {
