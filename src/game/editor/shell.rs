@@ -377,7 +377,7 @@ impl EditorState {
             log: Vec::new(),
             dragged_row: None,
             dock_tab: DockTab::Log,
-            pip_open: false,
+            pip_open: true,
             pip_locked: false,
             seen_pip: 0,
             camera_trs_editing: false,
@@ -1099,7 +1099,18 @@ fn draw_ui(
     // the camera preview (PiP): shows while a camera entity is selected
     // AND its TRS is being edited (or the preview is locked) — the pump
     // renders its view into tag 1
+    let camera_selected = state
+        .ui
+        .selection()
+        .and_then(|path| engine.entity_at(path))
+        .map(|entity| {
+            entity
+                .iter_components()
+                .any(|c| c.as_any().downcast_ref::<crate::game::CameraComponent>().is_some())
+        })
+        .unwrap_or(false);
     let pip_visible = state.pip_open
+        && camera_selected
         && (state.pip_locked
             || state.camera_trs_editing
             || state
@@ -1261,16 +1272,18 @@ fn new_scene(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared)
         dirty: false,
     });
     activate_tab(state, engine, state.tabs.len() - 1);
-    // every new scene starts with a main camera entity (ortho — the 2D
-    // default; the inspector switches to perspective for 3D scenes)
+    // every new scene is EMPTY except its main camera — the camera
+    // decides the scene's dimensionality, defaulting to 3D (perspective;
+    // the inspector's projection combo switches to 2D)
+    let camera = crate::game::CameraComponent::default();
+    state.scene_camera = camera.camera;
+    state.orbit.ortho = matches!(
+        camera.camera.projection,
+        crate::game::camera::Projection::Orthographic { .. }
+    );
     let mut camera_entity = Entity::new("main camera");
-    camera_entity.add_component(Box::new(crate::game::CameraComponent {
-        camera: crate::game::Camera::default(),
-        main: true,
-    }));
+    camera_entity.add_component(Box::new(camera));
     engine.add_entity(camera_entity);
-    state.scene_camera = crate::game::Camera::default();
-    state.orbit.ortho = true;
     shared.touch();
 }
 

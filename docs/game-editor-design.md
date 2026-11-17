@@ -50,6 +50,15 @@ the least.
   the invariant.
 - No closed proprietary scene format: scenes are serde data, readable
   without the editor.
+- **Sub-scenes are composition, not a new container** (user-raised): a UI
+  layer, a static-geometry chunk, or an entity's screen contents can each
+  be a scene rendered by its own camera into a texture, composited by the
+  parent — exactly the camera component + render-to-texture seam the PiP
+  preview already exercises (a second camera → a tagged sink slot → an
+  egui/native texture). The two pieces M4/M5 grow: a scene-reference
+  component (path + instantiate) and per-camera render targets;
+  "rendered first when in view" is draw-order policy on the renderer.
+  Not a separate scene graph.
 - v1 is single-user, single-window. Collaborative editing is out of scope.
 
 ## Architecture

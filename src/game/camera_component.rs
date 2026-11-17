@@ -25,9 +25,20 @@ pub struct CameraComponent {
 }
 
 impl Default for CameraComponent {
+    /// A fresh camera is the 3D default: perspective, framed on the
+    /// origin from behind -z (the editor's new-scene camera entity).
     fn default() -> Self {
         CameraComponent {
-            camera: Camera::default(),
+            camera: Camera {
+                position: crate::var::Vec3::new(0.0, 0.0, -8.0),
+                target: crate::var::Vec3::new(0.0, 0.0, 0.0),
+                projection: Projection::Perspective {
+                    fov_y_degrees: 60.0,
+                    near: 0.1,
+                    far: 500.0,
+                    aspect: 16.0 / 9.0,
+                },
+            },
             main: true,
         }
     }

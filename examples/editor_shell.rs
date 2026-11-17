@@ -89,5 +89,23 @@ fn build_engine(sink: hyg::game::FrameSink) -> Engine {
     ));
     engine.add_entity(sun);
 
+    // the scene's main camera — what play renders through (the editor
+    // viewport uses its own orbit; this entity is the document's view)
+    let mut camera = Entity::new("main camera");
+    camera.add_component(Box::new(hyg::game::CameraComponent {
+        camera: hyg::game::Camera {
+            position: Vec3::new(0.0, 4.0, -8.0),
+            target: Vec3::new(0.0, 1.0, 0.0),
+            projection: Projection::Perspective {
+                fov_y_degrees: 60.0,
+                near: 0.1,
+                far: 500.0,
+                aspect: 16.0 / 9.0,
+            },
+        },
+        main: true,
+    }));
+    engine.add_entity(camera);
+
     engine
 }

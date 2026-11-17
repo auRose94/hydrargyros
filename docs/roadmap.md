@@ -897,7 +897,27 @@ seams it grows through.
    yaw/pitch, fov — view state, never saved). + component spawns ready
    components (UI-side default params). 28 editor tests; suite 229 core
    / 353 `--all-features`, clippy clean. Next rung: **M3 — play mode**
-   (script live reload, console, per-scene snapshots tied to tabs).
+   (script live reload, console, per-scene snapshots tied to tabs). **Round 7 (2026-11-16, seventh review): the black box and the PiP.**
+   The giant black box in the viewport's lower half was an off-by-a-
+   full-screen shift in the blit's clip-center formula (`1 - (2y/sh -
+   1)` should be `1 - 2y/sh` — pixel y is down, clip y is up; the extra
+   `+1` pushed the whole blit a screen height up, leaving the panel
+   black). The camera PiP never appeared from a chicken-and-egg in the
+   visibility logic (it required a seen preview frame that required the
+   preview rendering that required the visibility) — now: camera
+   entity selected AND (its TRS edited OR locked OR within a 1s grace)
+   AND the user hasn't closed it. The **camera component defaults to
+   3D** (perspective, framed on the origin) and **new scenes are EMPTY
+   except the main camera entity** — the camera decides the scene's
+   dimensionality, defaulting to 3D per review. **Sub-scenes answered
+   in the design doc**: composition, not a new container — a scene
+   reference component + per-camera render targets (the PiP's tagged
+   slot is that seam already); "rendered first in view" is draw-order
+   policy. The example scene carries its camera entity (play renders
+   the demo view). 29 editor tests; suite 230 core / 354
+   `--all-features`, clippy clean. Next rung: **M3 — play mode**
+   (script live reload, console in the dock, per-scene snapshots tied
+   to tabs).
 
 ## What hyg will NOT do
 

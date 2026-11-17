@@ -675,6 +675,26 @@ fn ortho_gizmo_is_two_screen_aligned_axes() {
     assert!((after[0] - before[0] - 30.0).abs() < 0.5, "ortho drags map 1:1");
 }
 
+// ---- round 6: the camera component defaults ----
+
+/// A fresh camera component is the 3D default (perspective, framed on
+/// the origin) and defaults to main — the new-scene contract.
+#[test]
+fn camera_component_defaults_to_3d_and_main() {
+    use hyg::game::CameraComponent;
+
+    let camera = CameraComponent::default();
+    assert!(
+        matches!(
+            camera.camera.projection,
+            Projection::Perspective { .. }
+        ),
+        "new scenes default to 3D"
+    );
+    assert!(camera.main);
+    assert_eq!(camera.camera.position, Vec3::new(0.0, 0.0, -8.0));
+}
+
 // ---- round 5: the inspector growth probe ----
 
 /// THE ballooning bug, reproduced against the REAL panel: a widget

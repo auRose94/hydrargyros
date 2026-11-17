@@ -359,9 +359,13 @@ impl BlitView {
     ) {
         let extents = fit_extents(surface, image);
         let (sw, sh) = (surface.0.max(1) as f32, surface.1.max(1) as f32);
+        // pixel y is down, clip y is up: clip(y) = 1 - 2y/sh — the
+        // center sits at the rect's vertical middle (an extra "-1"
+        // here shifts the whole blit a full screen height, reading as
+        // a black box over half the viewport)
         let center = [
             (rect_px[0] * 2.0 / sw - 1.0) + extents[0],
-            1.0 - (rect_px[1] * 2.0 / sh - 1.0) - extents[1],
+            1.0 - 2.0 * rect_px[1] / sh - extents[1],
         ];
         let floats = [extents[0], extents[1], center[0], center[1]];
         let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
