@@ -927,7 +927,7 @@ fn draw_ui(
 // the menu bar spans the top: menus left, transport FAR RIGHT (the
         // user's color language — play GREEN, stop RED, restart ORANGE)
         egui::containers::Panel::top("studio-menu")
-            .exact_size(24.0)
+            .exact_size(30.0)
             .show(root, |bar| {
                 bar.horizontal(|row| {
                     egui::MenuBar::new().ui(row, |menu| {
@@ -1043,6 +1043,8 @@ fn draw_ui(
                     row.with_layout(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |right| {
+                            // breathing room between the transport buttons
+                            right.style_mut().spacing.item_spacing = egui::vec2(6.0, 4.0);
                             let playing_now = shared.playing.load(Ordering::SeqCst);
                             if style::color_button(
                                 right,
@@ -1152,16 +1154,19 @@ fn draw_ui(
             .show(root, |panel| {
                 panel.horizontal(|head| {
                     head.heading("Hierarchy");
-                    // the create button: an obvious green +
-                    if head
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("+").strong().color(style::dark::TEXT),
-                            )
-                            .fill(style::CREATE_GREEN),
-                        )
-                        .on_hover_text("new entity (child of the selection, else a root)")
-                        .clicked()
+                    // the create button: an obvious green + (glass like
+                    // the rest of the chrome)
+                    if style::color_button(
+                        head,
+                        "+",
+                        style::CREATE_GREEN,
+                        false,
+                        true,
+                        state.dark,
+                        state.button_style,
+                    )
+                    .on_hover_text("new entity (child of the selection, else a root)")
+                    .clicked()
                     {
                         // a child of the selection when one is live, else
                         // a new root
@@ -1596,7 +1601,7 @@ fn draw_dock(
             }
         }
     });
-    dock.separator();
+    dock.add(egui::Separator::default().spacing(2.0));
     match state.dock_tab {
         DockTab::Log => {
             egui::ScrollArea::vertical()

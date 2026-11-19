@@ -181,13 +181,13 @@ fn with_alpha(c: Color32, a: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
 }
 
-/// The halo color for a button's glow. On the dark theme a dim fill
-/// color (the transport's dim variants) must still read as light, so it
-/// lifts toward white; on the light theme white would vanish, so the
-/// accent glows as itself.
+/// The halo color for a button's glow. On the dark theme the accent
+/// lifts only slightly toward white — the HUE is the signal (the review:
+/// "colors pop and glow radioactive"), a washed-out halo reads pastel;
+/// on the light theme white would vanish, so the accent glows as itself.
 fn glow_tint(accent: Color32, dark: bool) -> Color32 {
     if dark {
-        mix(accent, Color32::from_rgb(255, 255, 255), 0.4)
+        mix(accent, Color32::from_rgb(255, 255, 255), 0.18)
     } else {
         accent
     }
@@ -196,12 +196,14 @@ fn glow_tint(accent: Color32, dark: bool) -> Color32 {
 /// The glow as concentric outline layers, outside-in skipped: each
 /// entry is `(outset, stroke width, alpha)`. Hover = a loose fading
 /// halo; active = fewer, tighter, brighter — the halo "pinches" onto
-/// the button so pressed/toggled reads at a glance.
+/// the button so pressed/toggled reads at a glance. Alphas run HIGH
+/// (the review: radioactive — the glow should be the loudest thing in
+/// the chrome).
 fn glow_layers(state: ButtonState) -> &'static [(f32, f32, u8)] {
     match state {
         ButtonState::Idle | ButtonState::Disabled => &[],
-        ButtonState::Hovered => &[(2.0, 2.0, 55), (4.5, 1.5, 30), (7.5, 1.0, 14)],
-        ButtonState::Active => &[(1.5, 3.0, 105), (3.5, 2.0, 60)],
+        ButtonState::Hovered => &[(2.0, 2.5, 130), (4.5, 2.0, 80), (7.5, 1.5, 45), (10.5, 1.0, 22)],
+        ButtonState::Active => &[(1.5, 3.5, 200), (3.5, 2.5, 130), (6.0, 1.5, 70)],
     }
 }
 
@@ -260,21 +262,23 @@ fn paint_vertical_fade(
 
 /// The glass body's layers for a state: `(body alpha, fade top alpha,
 /// fade bottom alpha, border alpha, specular alpha)`. Hover brightens
-/// the glass slightly, active brightens more — the surface answers the
-/// pointer before the glow even starts.
+/// the glass, active more — the surface answers the pointer before the
+/// glow even starts. Alphas run high and the body stays close to the
+/// accent (the review: the colors should POP — a desaturated body reads
+/// gray under a glowing halo).
 fn glass_layers(state: ButtonState, dark: bool) -> (u8, u8, u8, u8, u8) {
     if dark {
         match state {
-            ButtonState::Idle => (95, 55, 45, 45, 28),
-            ButtonState::Hovered => (115, 75, 55, 75, 40),
-            ButtonState::Active => (140, 95, 70, 100, 52),
+            ButtonState::Idle => (140, 90, 70, 80, 45),
+            ButtonState::Hovered => (170, 120, 85, 115, 65),
+            ButtonState::Active => (205, 150, 105, 150, 85),
             ButtonState::Disabled => (60, 30, 25, 28, 14),
         }
     } else {
         match state {
-            ButtonState::Idle => (150, 170, 90, 70, 110),
-            ButtonState::Hovered => (175, 195, 110, 95, 130),
-            ButtonState::Active => (200, 215, 130, 120, 150),
+            ButtonState::Idle => (165, 185, 110, 90, 125),
+            ButtonState::Hovered => (190, 210, 130, 115, 145),
+            ButtonState::Active => (215, 230, 150, 140, 165),
             ButtonState::Disabled => (110, 110, 60, 45, 70),
         }
     }
@@ -294,7 +298,7 @@ pub fn paint_glass_button(
 ) -> Rect {
     paint_glow(painter, rect, accent, state, dark);
     let (body_a, top_a, bottom_a, border_a, spec_a) = glass_layers(state, dark);
-    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.3);
+    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.12);
     painter.rect_filled(rect, CornerRadius::same(BUTTON_RADIUS), with_alpha(body, body_a));
     let fade_top = mix(
         Color32::from_rgb(255, 255, 255),
@@ -396,7 +400,7 @@ pub fn paint_tab(
         ButtonState::Hovered => (if dark { 45 } else { 120 }, if dark { 30 } else { 75 }, 50),
         _ => (if dark { 22 } else { 90 }, 0, 30),
     };
-    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.3);
+    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.12);
     painter.rect_filled(rect, radius, with_alpha(body, body_a));
     if fade_a > 0 {
         let top = if dark { Color32::WHITE } else { mix(Color32::WHITE, accent, 0.15) };
