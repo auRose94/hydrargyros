@@ -221,6 +221,7 @@ fn run_shell(
         .map_err(|e| format!("studio: event loop: {e} (no display server?)"))?;
     let scene_camera = engine.lock().map(|engine| *engine.camera()).unwrap_or_default();
     let quit = Arc::new(AtomicBool::new(false));
+    register_builtin_component_editors();
     let mut handler = ShellHandler {
         engine,
         sink,
@@ -318,6 +319,47 @@ impl EditorState {
             }
         }
     }
+}
+
+/// The BUILT-IN component editors: the demo surface for the extension
+/// system (a component can register its own — this covers the engine's
+/// physics body). Sliders mutate the component live (the paused editor
+/// re-renders after every edit); the action button defers engine work.
+fn register_builtin_component_editors() {
+    use crate::game::editor::component_editor::{
+        register_component_editor, EditorAction, EditorFn,
+    };
+    let physics_body: EditorFn = |ui, component, origin| {
+        let body = component
+            .as_any_mut()
+            .downcast_mut::<crate::game::physics_body::PhysicsBody>()?;
+        ui.label(format!("body: {}", body.name()));
+        ui.horizontal(|row| {
+            row.label("gravity scale");
+            row.add(
+                egui::DragValue::new(&mut body.gravity_scale)
+                    .speed(0.1)
+                    .range(0.0..=10.0),
+            );
+        });
+        ui.horizontal(|row| {
+            row.label("mass");
+            row.add(egui::DragValue::new(&mut body.mass).range(0.0..=100.0));
+        });
+        // the preprocess button: teleport the body's ENTITY to the
+        // origin — deferred engine work through the action (a test of
+        // the extension's in-editor preprocessing shape)
+        if ui.button("reset position").clicked() {
+            let path = origin.to_vec();
+            return Some(EditorAction::Engine(Box::new(move |engine: &mut Engine| {
+                if let Some(entity) = engine.entity_at_mut(&path) {
+                    entity.transform_mut().position = Vec3::splat(0.0);
+                }
+            })));
+        }
+        None
+    };
+    register_component_editor::<crate::game::physics_body::PhysicsBody>(physics_body);
 }
 
 /// Depth-first search for an entity by name, appending child indices to
@@ -471,6 +513,15 @@ pub struct EditorState {
     /// The last autosave (the 30s dirty+saved rewrite cycle).
     #[doc(hidden)]
     pub autosave_last: Option<Instant>,
+    /// The project document under edit (Some while Project Settings is
+    /// open — the panel edits this copy; Save writes it beside the
+    /// scene).
+    project: Option<hyg::game::project::Project>,
+    /// The panel's working text for the entry scene (an Option<String>
+    /// can't bind a TextEdit; empty text = no entry).
+    entry_text: String,
+    /// The Project Settings window's open flag.
+    show_project_settings: bool,
     /// Physical-pixel rect the engine frame letterboxes into (the
     /// picking/gizmo viewport).
     viewport: Option<Viewport>,
@@ -594,6 +645,9 @@ impl EditorState {
             beam_flash: None,
             beam_base: style::BeamMode::Rainbow,
             autosave_last: None,
+            project: None,
+            entry_text: String::new(),
+            show_project_settings: false,
             viewport: None,
             name_edit: None,
             tabs: vec![SceneTab {
@@ -1158,6 +1212,25 @@ fn draw_ui(
                                 shared.touch();
                                 file.close();
                             }
+                            if file.button("Project Settings...").clicked() {
+                                // load the document beside the scene (or
+                                // a fresh default) into the panel's copy
+                                let dir = std::path::PathBuf::from(&state.scene_path)
+                                    .parent()
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_default();
+                                state.project = Some(
+                                    hyg::game::project::Project::load(&dir)
+                                        .unwrap_or_default(),
+                                );
+                                state.entry_text = state
+                                    .project
+                                    .as_ref()
+                                    .and_then(|p| p.entry.clone())
+                                    .unwrap_or_default();
+                                state.show_project_settings = true;
+                                file.close();
+                            }
                             file.separator();
                             if file.button("Quit").clicked() {
                                 shared.quit.store(true, Ordering::SeqCst);
@@ -1485,6 +1558,7 @@ fn draw_ui(
     if state.show_history {
         draw_history_window(ctx, state, engine, shared);
     }
+    draw_project_settings_window(ctx, state, engine, shared);
     poll_file_dialog(state, engine, shared);
 
     // script live reload: poll mtimes ~1/sec; a changed file swaps the
@@ -2836,15 +2910,22 @@ fn draw_inspector(
         panel.label("nothing selected — click the viewport or the hierarchy");
         return;
     };
-    let Some(entity) = engine.entity_at(&path) else {
-        state.ui.deselect();
-        state.name_edit = None;
-        panel.label("(stale selection — the tree moved)");
-        return;
+    // the display values copy OUT of the tree — the borrow ends here,
+    // so the component-editor walk below can take the engine mutably
+    // (custom editors mutate their components live)
+    let (name, enabled, transform) = {
+        let Some(entity) = engine.entity_at(&path) else {
+            state.ui.deselect();
+            state.name_edit = None;
+            panel.label("(stale selection — the tree moved)");
+            return;
+        };
+        (
+            entity.name().to_string(),
+            entity.enabled(),
+            *entity.transform(),
+        )
     };
-    let name = entity.name().to_string();
-    let enabled = entity.enabled();
-    let transform = *entity.transform();
 
     egui::ScrollArea::vertical()
         .id_salt("studio-inspector-scroll")
@@ -2924,29 +3005,61 @@ fn draw_inspector(
 
             scroll.separator();
             scroll.strong("components");
-            if let Some(entity) = engine.entity_at(&path) {
-                let mut any = false;
-                for component in entity.iter_components() {
-                    any = true;
+            // components WITH a registered editor extension get egui
+            // access (sliders, buttons for in-editor preprocessing —
+            // the review: "a test or convert button"); the rest keep
+            // the generic parameter summary. Deferred actions run
+            // after the mutable walk (the borrow never overlaps the
+            // engine's).
+            let mut deferred: Vec<crate::game::editor::component_editor::EditorAction> =
+                Vec::new();
+            if let Some(entity_mut) = engine.entity_at_mut(&path) {
+                let count = entity_mut.iter_components_mut().count();
+                let mut any = count > 0;
+                for index in 0..count {
+                    let component = entity_mut
+                        .iter_components_mut()
+                        .nth(index)
+                        .expect("index within the component count");
                     let type_name = component.scene_type().unwrap_or("(runtime only)");
-                    let ctx = crate::game::scene::ComponentContext::new(entity.name());
-                    let params = component.scene_params(&ctx);
-                    let detail = match &params {
-                        Some(var) => match var.as_object() {
-                            Some(object) if !object.is_empty() => {
-                                let keys: Vec<String> =
-                                    object.entries().iter().map(|(k, _)| k.clone()).collect();
-                                format!("  · {type_name}  [{}]", keys.join(", "))
+                    let registered =
+                        crate::game::editor::component_editor::editor_for_component(component);
+                    match registered {
+                        Some(editor) => {
+                            scroll.strong(type_name.to_string());
+                            if let Some(action) = editor(scroll, component, &path) {
+                                deferred.push(action);
                             }
-                            _ => format!("  · {type_name}  (defaults)"),
-                        },
-                        None => format!("  · {type_name}"),
-                    };
-                    scroll.label(detail);
+                        }
+                        None => {
+                            any = true;
+                            let ctx = crate::game::scene::ComponentContext::new(&name);
+                            let params = component.scene_params(&ctx);
+                            let detail = match &params {
+                                Some(var) => match var.as_object() {
+                                    Some(object) if !object.is_empty() => {
+                                        let keys: Vec<String> = object
+                                            .entries()
+                                            .iter()
+                                            .map(|(k, _)| k.clone())
+                                            .collect();
+                                        format!("  · {type_name}  [{}]", keys.join(", "))
+                                    }
+                                    _ => format!("  · {type_name}  (defaults)"),
+                                },
+                                None => format!("  · {type_name}"),
+                            };
+                            scroll.label(detail);
+                        }
+                    }
                 }
                 if !any {
                     scroll.label("  (none)");
                 }
+            }
+            for action in deferred {
+                action.run(engine);
+                shared.touch();
             }
 
             // add a component: the scene registry's types, spawned with
@@ -3361,6 +3474,91 @@ pub fn locate_runtime() -> Result<std::path::PathBuf, String> {
         .ok_or_else(|| {
             "no runtime binary found — build it once: cargo build --release --bin hyg-runtime --features wgpu,winit,script,gltf,physics,audio,pack (or set HYG_RUNTIME)".to_string()
         })
+}
+
+/// The Project Settings window: the game's identity and defaults
+/// (name, version, entry scene, window shape) edited in one panel and
+/// written to `project.json.hyg` beside the scene — the document
+/// `hyg build`/`hyg fuse` and the runtime all read.
+fn draw_project_settings_window(
+    ctx: &egui::Context,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) {
+    if !state.show_project_settings {
+        return;
+    }
+    let Some(open) = state.project.as_mut() else {
+        return;
+    };
+    let mut save = false;
+    egui::Window::new("Project Settings")
+        .open(&mut state.show_project_settings)
+        .resizable(false)
+        .default_size([320.0, 200.0])
+        .show(ctx, |panel| {
+            egui::Grid::new("project-grid")
+                .num_columns(2)
+                .spacing([8.0, 6.0])
+                .show(panel, |grid| {
+                    grid.label("name");
+                    grid.add(
+                        egui::TextEdit::singleline(&mut open.name)
+                            .desired_width(180.0),
+                    );
+                    grid.end_row();
+                    grid.label("version");
+                    grid.add(
+                        egui::TextEdit::singleline(&mut open.version)
+                            .desired_width(180.0),
+                    );
+                    grid.end_row();
+                    grid.label("entry scene");
+                    grid.add(
+                        egui::TextEdit::singleline(&mut state.entry_text)
+                            .desired_width(180.0),
+                    );
+                    grid.end_row();
+                    grid.label("window");
+                    grid.horizontal(|row| {
+                        row.add(
+                            egui::DragValue::new(&mut open.window.width)
+                                .range(320..=7680)
+                                .suffix("w"),
+                        );
+                        row.add(
+                            egui::DragValue::new(&mut open.window.height)
+                                .range(240..=4320)
+                                .suffix("h"),
+                        );
+                    });
+                    grid.end_row();
+                });
+            panel.separator();
+            if panel.button("Save project.json.hyg").clicked() {
+                save = true;
+            }
+        });
+    if save {
+        open.entry = {
+            let text = state.entry_text.trim().to_string();
+            (!text.is_empty()).then_some(text)
+        };
+        let dir = std::path::PathBuf::from(&state.scene_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        match open.write(&dir) {
+            Ok(path) => {
+                state.set_status(format!("project saved: {}", path.display()));
+                state.flash_beam(style::BeamMode::Saved, std::time::Duration::from_millis(1200));
+            }
+            Err(e) => state.set_status(format!("project save failed: {e}")),
+        }
+        shared.touch();
+    }
+    let _ = engine;
 }
 
 /// Poll the in-flight dialog; on completion, run its flow. Returns

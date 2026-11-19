@@ -102,6 +102,16 @@ pub fn build(scene_path: &Path, out_dir: &Path) -> Result<BundleReport, String> 
     std::fs::copy(scene_path, &scene_dest)
         .map_err(|e| format!("{} -> {}: {e}", scene_path.display(), scene_dest.display()))?;
 
+    // the project document rides along when one sits beside the scene
+    // (the runtime reads name/version/window from it)
+    let project = scene_dir.join(crate::game::project::Project::FILE_NAME);
+    if project.exists() {
+        let dest = out_dir.join(crate::game::project::Project::FILE_NAME);
+        std::fs::copy(&project, &dest)
+            .map_err(|e| format!("{} -> {}: {e}", project.display(), dest.display()))?;
+        files.push(dest);
+    }
+
     Ok(BundleReport {
         scene: scene_dest,
         files,

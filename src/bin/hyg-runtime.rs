@@ -85,15 +85,35 @@ fn main() {
             std::process::exit(1);
         }
     };
+
+    // the project document beside the scene (project.json.hyg) carries
+    // the game's identity and window shape — corporate configuration,
+    // optional: a bare scene still runs
+    let project = hyg::game::project::Project::load(
+        scene_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default()
+            .as_path(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("project document ignored: {e}");
+        hyg::game::project::Project::default()
+    });
     println!(
-        "loaded {} ({} root entities) — playing",
+        "{} v{} — loaded {} ({} root entities) — playing",
+        project.name,
+        project.version,
         scene.name,
         scene.entities.len()
     );
 
     // the event loop + window: created and run on the main thread
-    let title = format!("☿ {} — Hydrargyros runtime", scene.name);
-    let window = match WinitWindow::new(&title, (1280, 720)) {
+    let title = format!("☿ {} v{} — Hydrargyros runtime", project.name, project.version);
+    let window = match WinitWindow::new(
+        &title,
+        (project.window.width.max(320), project.window.height.max(240)),
+    ) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("no windowing system: {e}");

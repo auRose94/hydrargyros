@@ -42,6 +42,31 @@ fn main() {
                 }
             }
         }
+        Some("new") => {
+            let Some(name) = args.get(1) else {
+                eprintln!("hyg new: a project name is required");
+                eprintln!("USAGE: hyg new <name> [--out DIR]");
+                std::process::exit(2);
+            };
+            let out = args
+                .iter()
+                .position(|a| a == "--out")
+                .and_then(|i| args.get(i + 1))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from(name));
+            match hyg::game::project::Project::scaffold(&out, name) {
+                Ok(project_path) => {
+                    println!("new project: {}", project_path.display());
+                    println!("  scene:  {}", out.join("scene.json.hyg").display());
+                    println!("  script: {}", out.join("scripts/main.js").display());
+                    println!("play it: hyg-runtime {} (or open it in the Studio)", out.join("scene.json.hyg").display());
+                }
+                Err(e) => {
+                    eprintln!("hyg new: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some("build") => {
             let Some(scene) = args.get(1) else {
                 usage();
@@ -92,6 +117,7 @@ fn usage() {
     eprintln!("hyg - the Hydrargyros packaging CLI");
     eprintln!();
     eprintln!("USAGE:");
+    eprintln!("  hyg new <name> [--out DIR]");
     eprintln!("  hyg build <scene.json.hyg> [--out DIR]");
     #[cfg(feature = "pack")]
     eprintln!("  hyg fuse --runtime <hyg-runtime> --scene <scene.json.hyg> [--out game.bin]");

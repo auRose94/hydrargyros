@@ -84,6 +84,17 @@ impl Entity {
         self.components.iter().map(|slot| slot.component.as_ref())
     }
 
+    /// The components, MUTABLE — the editor's component-editor
+    /// extensions write through this (sliders, toggles, preprocess
+    /// buttons), the same walk the scene save reads.
+    pub fn iter_components_mut<'a>(
+        &'a mut self,
+    ) -> impl Iterator<Item = &'a mut (dyn Component + 'static)> + 'a {
+        self.components
+            .iter_mut()
+            .map(|slot| slot.component.as_mut())
+    }
+
     pub fn children(&self) -> &[Entity] {
         &self.children
     }

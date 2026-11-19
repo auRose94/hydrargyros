@@ -1980,3 +1980,100 @@ fn autosave_rewrites_saved_dirty_scenes_only() {
         "a clean scene is not rewritten"
     );
 }
+
+// ---- component-editor extensions (the inspector's egui hooks) ----
+
+/// A component WITH a registered editor gets egui access in the
+/// inspector: the editor mutates the component live (this test's
+/// editor bumps a counter on paint) and may return a deferred engine
+/// action (this one moves the camera — the preprocess-button shape).
+/// Unregistered components keep the generic summary.
+#[cfg(all(feature = "editor", feature = "physics"))]
+#[test]
+fn component_editors_get_egui_access_and_deferred_actions() {
+    use hyg::game::component::Component as ComponentTrait;
+    use hyg::game::editor::component_editor::{register_component_editor, EditorAction};
+    use hyg::game::editor::shell::{draw_inspector_panel, EditorState, ShellShared};
+
+    // a runtime-only test component with a live counter
+    struct Counter {
+        hits: u32,
+    }
+    impl ComponentTrait for Counter {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
+
+    // the test's editor: bump on paint, defer a camera move
+    fn counter_editor(
+        ui: &mut egui::Ui,
+        component: &mut dyn hyg::game::Component,
+        _origin: &[usize],
+    ) -> Option<EditorAction> {
+        let counter = component.as_any_mut().downcast_mut::<Counter>()?;
+        counter.hits += 1;
+        ui.label("counter editor painted");
+        Some(EditorAction::Engine(Box::new(|engine: &mut Engine| {
+            engine.set_camera(Camera {
+                position: Vec3::new(42.0, 0.0, 0.0),
+                ..Camera::default()
+            });
+        })))
+    }
+    register_component_editor::<Counter>(counter_editor);
+
+    // the engine: a counter component + a camera to observe the action
+    let mut engine = Engine::new("acme", "editor-test");
+    let mut counted = Entity::new("counted");
+    counted.add_component(Box::new(Counter { hits: 0 }));
+    engine.add_entity(counted);
+
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.ui.select(vec![0]);
+    let shared = ShellShared {
+        playing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
+        pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        error_beam: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    // one inspector pass: the editor paints, the action applies
+    let ctx = egui::Context::default();
+    ctx.begin_pass(egui::RawInput::default());
+    ctx.root_ui(|root| {
+        draw_inspector_panel(root, &mut state, &mut engine, &shared);
+    });
+    // egui asserts at drop when textures go unhandled — clear them
+    // (the same pattern the glass paint tests use)
+    let mut output = ctx.end_pass();
+    for (_id, deltas) in std::mem::take(&mut output.textures_delta.set) {
+        for _delta in deltas {}
+    }
+    std::mem::take(&mut output.textures_delta.free);
+
+    // the component was MUTATED by the editor (egui access confirmed)
+    let hits = engine
+        .entity_at(&[0])
+        .and_then(|entity| {
+            entity
+                .iter_components()
+                .find_map(|c| c.as_any().downcast_ref::<Counter>().map(|c| c.hits))
+        })
+        .expect("the counter component");
+    assert_eq!(hits, 1, "the editor painted exactly once");
+
+    // the deferred action ran against the engine: the camera moved
+    assert_eq!(
+        engine.camera().position,
+        Vec3::new(42.0, 0.0, 0.0),
+        "the preprocess action moved the camera"
+    );
+}

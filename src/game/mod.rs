@@ -51,6 +51,7 @@ pub mod audio;
 #[cfg(feature = "winit")]
 pub mod native_view;
 pub mod physics;
+pub mod project;
 pub mod physics_body;
 #[cfg(feature = "physics")]
 pub mod physics_rapier;

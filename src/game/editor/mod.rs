@@ -12,6 +12,8 @@
 //!   under egui panels on one surface.
 
 pub mod camera_ctl;
+#[cfg(feature = "editor")]
+pub mod component_editor;
 pub mod debug;
 pub mod gizmo;
 pub mod pick;
