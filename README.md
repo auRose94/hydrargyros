@@ -10,6 +10,8 @@ the planet and the swift messenger god, fitting the fast-prototyping goal.
 The project is Hydrargyros; the crate and namespace are `hyg` (short, and
 distinct from `hg`, which is the Mercurial VCS binary).
 
+<img src="docs/media/studio.png" alt="Hydrargyros Studio — the editor: hierarchy, inspector, viewport with gizmos, the physics debug dock, and the contextual rainbow beam" width="100%"></img>
+
 ## The idea
 
 - **Values like JavaScript.** `Var` is a COW dynamic value — objects
