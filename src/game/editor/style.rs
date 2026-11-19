@@ -299,6 +299,7 @@ pub fn paint_glass_button(
     dark: bool,
 ) -> Rect {
     paint_glow(painter, rect, accent, state, dark);
+    paint_drop_shadow(painter, rect);
     let (body_a, top_a, bottom_a, border_a, spec_a) = glass_layers(state, dark);
     let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.12);
     painter.rect_filled(rect, CornerRadius::same(BUTTON_RADIUS), with_alpha(body, body_a));
@@ -346,32 +347,47 @@ pub fn paint_glass_button(
 
 /// A segment's hue, degrees. The rainbow spreads across the window and
 /// the whole wheel rotates with `phase` (which the shell advances only
-/// while processing).
+/// while processing) — slowly: the review wants the colors to walk,
+/// not spin.
 #[must_use]
 pub fn beam_hue(segment: f32, segments: f32, phase: f32) -> f32 {
-    (segment / segments * 360.0 + phase * 40.0) % 360.0
+    (segment / segments * 360.0 + phase * 8.0) % 360.0
 }
 
-/// A segment's sparkle: a deterministic 0..=1 hot-spot intensity —
-/// pseudo-random per segment, drifting smoothly with `phase`. Idle
-/// (not processing) collapses to a low resting shimmer.
+/// The per-segment drift wave: continuous in segment AND phase — the
+/// old per-segment hash wrapped its fractional term and popped between
+/// frames (the review: "shaky, doesn't linearly interpolate"); two slow
+/// sine waves glide instead.
+#[must_use]
+fn beam_wobble(segment: f32, phase: f32) -> f32 {
+    0.5 + 0.5 * (segment * 0.55 + phase * 0.9).sin()
+}
+
+/// A segment's sparkle: a deterministic 0..=1 hot-spot intensity — the
+/// product of two drift waves, so most segments stay calm while a few
+/// glide hot, all interpolated smoothly over time. Idle (not
+/// processing) collapses to zero.
 #[must_use]
 pub fn beam_sparkle(segment: f32, _segments: f32, phase: f32, processing: bool) -> f32 {
     if !processing {
         return 0.0;
     }
-    // hash of segment + slow time → per-segment random walk
-    let n = (segment * 12.9898 + (phase * 0.7).sin() * 78.233).fract() * 43758.55;
-    let wobble = (n * std::f32::consts::TAU + phase * 3.0).sin() * 0.5 + 0.5;
-    wobble * wobble // sharpen: most segments calm, a few blaze
+    let w = beam_wobble(segment, phase);
+    let v = beam_wobble(segment * 1.7 + 11.3, phase * 0.83);
+    let s = w * v; // the product: sparse hot spots
+    s * s // sharpen further: a few blaze, the rest rest
 }
 
-/// One segment's color: fully saturated HSV, value lifted by the
-/// sparkle (processing) or at a calm rest level.
+/// One segment's color: fully saturated HSV. Processing lifts the
+/// value with the sparkle; at rest the ribbon sits at a calm mid value.
 #[must_use]
 pub fn beam_color(segment: f32, segments: f32, phase: f32, processing: bool) -> Color32 {
     let hue = beam_hue(segment, segments, phase);
-    let value = 0.8 + 0.2 * beam_sparkle(segment, segments, phase, processing);
+    let value = if processing {
+        0.75 + 0.25 * beam_sparkle(segment, segments, phase, processing)
+    } else {
+        0.5
+    };
     hsv_to_color(hue, 1.0, value)
 }
 
@@ -398,15 +414,18 @@ fn hsv_to_color(hue: f32, s: f32, v: f32) -> Color32 {
 }
 
 /// The beam's height: a 2px rainbow line plus the light it beams down.
-pub const BEAM_HEIGHT: f32 = 22.0;
+/// Short — the review cut the length by 65%: the light hugs the edge
+/// instead of washing the menu bar.
+pub const BEAM_HEIGHT: f32 = 8.0;
 
 /// Paint the beam across `rect` (the window's top strip). One mesh: the
-/// top vertex row carries the segment colors at full alpha (the ribbon
-/// line), the bottom row the same hues fading to transparent — the
-/// light shining down into the chrome. Alpha is modest so the menu bar
-/// under it stays readable.
+/// top vertex row carries the segment colors (the ribbon line), the
+/// bottom row the same hues fading to transparent — the light shining
+/// down. SUBTLE at rest (low alpha, mid value — a quiet rainbow),
+/// OBVIOUS while processing (full alpha, brightened hot spots).
 pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, processing: bool) {
     let segments = 64.0f32;
+    let (top_alpha, fade_alpha) = if processing { (255, 42) } else { (95, 12) };
     let mut mesh = Mesh::default();
     let step = rect.width() / segments;
     let x0 = rect.left();
@@ -416,11 +435,11 @@ pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, processing: bool) {
         let x = x0 + seg * step;
         mesh.colored_vertex(
             egui::pos2(x, rect.top()),
-            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 255),
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), top_alpha),
         );
         mesh.colored_vertex(
             egui::pos2(x, rect.top() + BEAM_HEIGHT),
-            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 26),
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), fade_alpha),
         );
     }
     let top = (0..=(segments as u32)).map(|i| i * 2).collect::<Vec<_>>();
@@ -428,6 +447,30 @@ pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, processing: bool) {
         mesh.indices.extend_from_slice(&[w[0], w[0] + 1, w[1] + 1, w[0], w[1] + 1, w[1]]);
     }
     painter.add(Shape::mesh(mesh));
+}
+
+/// A soft dark drop shadow under a button body (two layered offsets —
+/// egui has no blur; layered alpha fakes the softness). The review: the
+/// menu bar needs shadows to fight the beam's light for contrast.
+fn paint_drop_shadow(painter: &Painter, rect: Rect) {
+    let wide = Rect::from_min_size(
+        egui::pos2(rect.left(), rect.top() + 2.5),
+        rect.size(),
+    );
+    painter.rect_filled(
+        wide,
+        CornerRadius::same(BUTTON_RADIUS + 1),
+        Color32::from_black_alpha(40),
+    );
+    let tight = Rect::from_min_size(
+        egui::pos2(rect.left(), rect.top() + 1.5),
+        rect.size(),
+    );
+    painter.rect_filled(
+        tight,
+        CornerRadius::same(BUTTON_RADIUS),
+        Color32::from_black_alpha(75),
+    );
 }
 
 /// Paint the flat alternative: an opaque semantic fill with a thin
@@ -442,6 +485,7 @@ pub fn paint_flat_button(
     dark: bool,
 ) -> Rect {
     paint_glow(painter, rect, accent, state, dark);
+    paint_drop_shadow(painter, rect);
     let fill = if state == ButtonState::Disabled {
         accent.gamma_multiply(0.5)
     } else {

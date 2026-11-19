@@ -961,9 +961,32 @@ fn draw_ui(
     ctx.root_ui(|root| {
 // the menu bar spans the top: menus left, transport FAR RIGHT (the
         // user's color language — play GREEN, stop RED, restart ORANGE)
-        let menu_bar = egui::containers::Panel::top("studio-menu")
+        // the rainbow beam's clock advances ONLY while something is
+        // processing (sim playing, or the AI seam busy) — at rest the
+        // ribbon holds a calm, still rainbow
+        let processing =
+            shared.playing.load(Ordering::SeqCst) || shared.ai_busy.load(Ordering::SeqCst);
+        let now = ctx.input(|i| i.time);
+        if let Some(last) = state.beam_last {
+            if processing {
+                // clamp: a paused tab's resume jump shouldn't fast-forward
+                state.beam_clock += (now - last).min(0.1) as f32;
+            }
+        }
+        state.beam_last = Some(now);
+        egui::containers::Panel::top("studio-menu")
             .exact_size(34.0)
             .show(root, |bar| {
+                // the beam paints FIRST — background: the menus and
+                // buttons render OVER it, and their drop shadows hold the
+                // contrast against the light
+                let bar_rect = bar.max_rect();
+                let beam_rect = egui::Rect::from_min_size(
+                    bar_rect.min,
+                    egui::vec2(bar_rect.width(), style::BEAM_HEIGHT),
+                );
+                let beam_painter = bar.painter_at(beam_rect);
+                style::paint_beam(&beam_painter, beam_rect, state.beam_clock, processing);
                 bar.horizontal(|row| {
                     egui::MenuBar::new().ui(row, |menu| {
                         menu.menu_button("File", |file| {
@@ -1174,28 +1197,6 @@ fn draw_ui(
             });
 
 
-        // the rainbow beam: the window's top edge. The clock advances
-        // ONLY while something is processing (sim playing, or the AI
-        // seam busy) — at rest the ribbon is a calm, still rainbow.
-        let processing =
-            shared.playing.load(Ordering::SeqCst) || shared.ai_busy.load(Ordering::SeqCst);
-        let now = ctx.input(|i| i.time);
-        if let Some(last) = state.beam_last {
-            if processing {
-                // clamp: a paused tab's resume jump shouldn't fast-forward
-                state.beam_clock += (now - last).min(0.1) as f32;
-            }
-        }
-        state.beam_last = Some(now);
-        {
-            let rect = menu_bar.response.rect;
-            let beam_rect = egui::Rect::from_min_size(
-                rect.min,
-                egui::vec2(rect.width(), style::BEAM_HEIGHT),
-            );
-            let painter = root.painter_at(beam_rect);
-            style::paint_beam(&painter, beam_rect, state.beam_clock, processing);
-        }
 
         // the toolbar: gizmo modes, scene tabs, fps (transport moved to
         // the menu bar's right end)
