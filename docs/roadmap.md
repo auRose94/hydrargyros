@@ -1047,6 +1047,28 @@ seams it grows through.
    unreadable mod file and skips filesystem-edge executables rather
    than walking `/`.
 
+8d. **ObjectPaths landed (2026-11-19): stable string references into
+   the tree — the Godot NodePath shape for hyg.** Rose's ask: scene
+   documents reference entities/components as strings (a knob, not
+   hard-coded wiring). `game/object_path.rs` (feature-free):
+   `ObjectPath::parse` covers absolute (`/world/stack`), relative
+   (`../sibling`, `./child`, bare `name` descends), climb (`..`,
+   clamped at the scene's roots), explicit self (`.`), and a component
+   suffix (`path:physics_body` — the DOCUMENT type name, so documents
+   never learn Rust types); parse errors name the rule. Resolution
+   walks names first-in-tree-order (indices shuffle, names survive)
+   and refuses to climb above a scene root. Engine template helpers
+   deliver the GameObject or the typed component:
+   `entity_at_object_path(origin, path)` and
+   `component_at_object_path::<T>(origin, path)` — the suffix must
+   agree with the requested component or the answer is None. `FromVar`
+   means any scene document field can carry one as a plain string.
+   Contract tests: grammar, round trip, resolution (absolute/
+   relative/climb/self/missing), helpers, FromVar. Suite **394
+   `--all-features`**, clippy 0 both configs. Consumers grow on this
+   knob (script host `find(path)`, follow/target components, project
+   entry-scene references).
+
 ## What hyg will NOT do
 
 ## What hyg will NOT do

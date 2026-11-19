@@ -43,6 +43,7 @@ pub mod engine;
 pub mod entity;
 pub mod light;
 pub mod mesh;
+pub mod object_path;
 pub mod model;
 pub mod scene;
 #[cfg(feature = "audio")]
