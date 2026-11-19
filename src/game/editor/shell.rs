@@ -1151,27 +1151,11 @@ fn draw_ui(
                                 state.set_status("stepped one frame");
                                 shared.touch();
                             }
+                            // one flip-flop: green "play" while paused, a
+                            // glowing gold "pause" while the sim runs
                             if style::color_button(
                                 right,
-                                "pause",
-                                if playing_now {
-                                    style::GOLD_DIM
-                                } else {
-                                    style::ACCENT_DIM
-                                },
-                                playing_now,
-                                true,
-                                state.dark,
-                                state.button_style,
-                            )
-                            .on_hover_text("pause the sim, keep the played state")
-                            .clicked()
-                            {
-                                pause(state, shared);
-                            }
-                            if style::color_button(
-                                right,
-                                "play",
+                                if playing_now { "pause" } else { "play" },
                                 if playing_now {
                                     style::GOLD_DIM
                                 } else {
@@ -1182,7 +1166,9 @@ fn draw_ui(
                                 state.dark,
                                 state.button_style,
                             )
-                            .on_hover_text("snapshot the edit state and run")
+                            .on_hover_text(
+                                "snapshot the edit state and run — flips to pause while the sim runs",
+                            )
                             .clicked()
                             {
                                 if playing_now {
