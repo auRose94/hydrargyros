@@ -1674,3 +1674,108 @@ fn restart_cycles_preserve_the_scene() {
         "restore returns the snapshot pose"
     );
 }
+
+// ---- M5: the fly camera ----
+
+/// Fly thrust along the view axes at the DEFAULT pose (yaw π = looking
+/// −z from +z, world +x = screen right): forward moves −z, strafe moves
+/// +x, up moves +y — screen-relative like every editor trains.
+#[cfg(feature = "editor")]
+#[test]
+fn fly_thrust_is_screen_relative() {
+    use hyg::game::editor::camera_ctl::Fly;
+    // LEVEL (pitch 0): the axis assertions are then exact — the default
+    // fly has a 0.15 pitch whose cosine scales the ground-plane thrust
+    let mut fly = Fly {
+        pitch: 0.0,
+        ..Fly::default()
+    };
+    assert_eq!(fly.yaw, std::f32::consts::PI, "the default looks −z");
+
+    fly.thrust(1.0, 0.0, 0.0, 1.0); // 1s forward
+    assert!(
+        (fly.position.z - (9.0 - fly.speed)).abs() < 1e-4,
+        "forward = −z at the default pose: {:?}",
+        fly.position
+    );
+
+    fly.thrust(0.0, 1.0, 0.0, 1.0); // 1s right
+    assert!(
+        (fly.position.x - fly.speed).abs() < 1e-4,
+        "strafe = +x (screen right): {:?}",
+        fly.position
+    );
+
+    fly.thrust(0.0, 0.0, 1.0, 1.0); // 1s up
+    assert!(
+        (fly.position.y - (2.0 + fly.speed)).abs() < 1e-4,
+        "up = +y: {:?}",
+        fly.position
+    );
+}
+
+/// Look turns the heading; thrust then follows the NEW forward (a
+/// 180° look reverses forward's world direction), and the pitch clamps
+/// before the poles.
+#[cfg(feature = "editor")]
+#[test]
+fn fly_look_then_thrust_follows_the_heading() {
+    use hyg::game::editor::camera_ctl::Fly;
+    // LEVEL: exact axis math (look's sensitivity: 0.005 rad/px — a
+    // yaw π drag is π/0.005 ≈ 628 px, flipping the heading 180°)
+    let mut fly = Fly {
+        pitch: 0.0,
+        ..Fly::default()
+    };
+    let speed = fly.speed;
+
+    fly.look(std::f32::consts::PI / 0.005, 0.0);
+    fly.thrust(1.0, 0.0, 0.0, 1.0);
+    assert!(
+        (fly.position.z - (9.0 + speed)).abs() < 1e-4,
+        "a 180° look flipped forward: thrust moves +z now"
+    );
+
+    // pitch clamps before the pole
+    let mut steep = Fly::default();
+    for _ in 0..40 {
+        steep.look(0.0, 100.0);
+    }
+    assert!(
+        steep.pitch.abs() <= 1.54,
+        "pitch clamps near the poles: {}",
+        steep.pitch
+    );
+}
+
+/// The fly's camera looks down its heading: target = eye + forward,
+/// and `from_camera` round-trips a pose (eye kept, heading recovered).
+#[cfg(feature = "editor")]
+#[test]
+fn fly_camera_looks_down_the_heading() {
+    use hyg::game::editor::camera_ctl::Fly;
+    let fly = Fly {
+        position: Vec3::new(3.0, 2.0, 7.0),
+        yaw: 1.2,
+        pitch: 0.3,
+        speed: 6.0,
+    };
+    let camera = fly.camera(16.0 / 9.0);
+    assert_eq!(camera.position, fly.position, "eye kept");
+    let forward = (camera.target - camera.position).normalize();
+    let expected = Vec3::new(
+        fly.yaw.sin() * fly.pitch.cos(),
+        -fly.pitch.sin(),
+        fly.yaw.cos() * fly.pitch.cos(),
+    );
+    assert!(
+        (forward - expected).length() < 1e-4,
+        "the camera aims down the heading: {forward:?} vs {expected:?}"
+    );
+
+    // from_camera recovers the same heading from a plain camera
+    let round = Fly::from_camera(&camera);
+    assert!((round.yaw - fly.yaw).abs() < 1e-3, "yaw recovered");
+    assert!((round.pitch - fly.pitch).abs() < 1e-3, "pitch recovered");
+    assert_eq!(round.position, fly.position, "position kept");
+}

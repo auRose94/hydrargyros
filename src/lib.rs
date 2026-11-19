@@ -35,6 +35,7 @@
 // inside the crate itself (the crate referring to itself by its own name).
 extern crate self as hyg;
 
+pub mod bundle;
 pub mod carrier;
 pub mod dynamic;
 pub mod from_var;

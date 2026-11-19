@@ -419,6 +419,8 @@ pub struct EditorState {
     scene_camera: crate::game::Camera,
     /// The editor's viewport camera (orbit).
     orbit: crate::game::editor::camera_ctl::Orbit,
+    /// Some = free-fly camera (the View menu toggles); None = the orbit.
+    fly: Option<crate::game::editor::camera_ctl::Fly>,
     /// The history panel's open flag.
     show_history: bool,
     /// The native file dialog in flight (None when idle).
@@ -498,6 +500,7 @@ impl EditorState {
         EditorState {
             scene_camera,
             orbit: crate::game::editor::camera_ctl::Orbit::default(),
+            fly: None,
             ui: EditorUi::new(),
             mode: GizmoMode::Translate,
             drag: None,
@@ -924,7 +927,11 @@ fn draw_ui(
             shared.touch();
         }
         if let Some(mode) = mode_key {
-            state.mode = mode;
+            // fly mode consumes W/E as thrust keys — the gizmo-mode
+            // shortcut yields while flying
+            if state.fly.is_none() {
+                state.mode = mode;
+            }
         }
         if delete_hit && state.ui.delete_selected(engine, state.now()) {
             state.set_status("deleted (Ctrl+Z restores)");
@@ -955,7 +962,10 @@ fn draw_ui(
                 frame_dims[1].max(1) as f32,
             ),
         };
-        engine.set_camera(state.orbit.camera(vw / vh));
+        engine.set_camera(match state.fly {
+            Some(fly) => fly.camera(vw / vh),
+            None => state.orbit.camera(vw / vh),
+        });
     }
 
     ctx.root_ui(|root| {
@@ -1093,6 +1103,31 @@ fn draw_ui(
                                     style::ButtonStyle::Glass => style::ButtonStyle::Flat,
                                     style::ButtonStyle::Flat => style::ButtonStyle::Glass,
                                 };
+                                view.close();
+                            }
+                            if view
+                                .button(match state.fly {
+                                    Some(_) => "orbit camera",
+                                    None => "fly camera (WASD)",
+                                })
+                                .clicked()
+                            {
+                                // the toggle seeds the fly from the orbit's
+                                // CURRENT pose — no jump at the switch
+                                state.fly = match state.fly {
+                                    None => Some(
+                                        crate::game::editor::camera_ctl::Fly::from_camera(
+                                            &state.orbit.camera(16.0 / 9.0),
+                                        ),
+                                    ),
+                                    Some(_) => None,
+                                };
+                                state.set_status(match state.fly {
+                                    Some(_) => {
+                                        "fly camera - WASD move, QE up/down, RMB look, Shift boosts"
+                                    }
+                                    None => "orbit camera",
+                                });
                                 view.close();
                             }
                         });
@@ -2068,10 +2103,15 @@ fn draw_viewport(
     let drag_px = response.drag_delta();
     let drag_phys = [drag_px.x * ppp, drag_px.y * ppp];
 
-    // the editor camera: right-drag orbits, middle-drag pans, the wheel
-    // zooms (while the pointer is over the viewport)
+    // the editor camera: right-drag LOOKS while flying, orbits
+    // otherwise; middle-drag pans and the wheel zooms are orbit tools
+    // (while the pointer is over the viewport)
     if response.dragged_by(egui::PointerButton::Secondary) {
-        state.orbit.orbit_by(drag_px.x, drag_px.y);
+        if let Some(fly) = state.fly.as_mut() {
+            fly.look(drag_px.x, drag_px.y);
+        } else {
+            state.orbit.orbit_by(drag_px.x, drag_px.y);
+        }
         shared.touch();
     }
     if response.dragged_by(egui::PointerButton::Middle) {
@@ -2083,6 +2123,40 @@ fn draw_viewport(
         if wheel != 0.0 {
             state.orbit.zoom_by(wheel);
             shared.touch();
+        }
+    }
+    // fly thrust: WASD + QE (Shift boosts) while the pointer is over
+    // the viewport; dt from egui keeps the speed frame-rate honest
+    if let Some(fly) = state.fly.as_mut() {
+        if response.hovered() {
+            let dt = ctx.input(|i| i.stable_dt.max(1.0 / 240.0));
+            let boost = if ctx.input(|i| i.modifiers.shift) { 3.0 } else { 1.0 };
+            let mut thrusts = (0.0f32, 0.0f32, 0.0f32);
+            ctx.input(|i| {
+                if i.key_down(egui::Key::W) {
+                    thrusts.0 += 1.0;
+                }
+                if i.key_down(egui::Key::S) {
+                    thrusts.0 -= 1.0;
+                }
+                if i.key_down(egui::Key::D) {
+                    thrusts.1 += 1.0;
+                }
+                if i.key_down(egui::Key::A) {
+                    thrusts.1 -= 1.0;
+                }
+                if i.key_down(egui::Key::E) {
+                    thrusts.2 += 1.0;
+                }
+                if i.key_down(egui::Key::Q) {
+                    thrusts.2 -= 1.0;
+                }
+            });
+            let (fwd, strafe, up) = thrusts;
+            if fwd != 0.0 || strafe != 0.0 || up != 0.0 {
+                fly.thrust(fwd, strafe, up, dt * boost);
+                shared.touch();
+            }
         }
     }
 

@@ -109,3 +109,106 @@ impl Orbit {
             + up.scaled(Vec3::splat(dy * scale));
     }
 }
+
+/// The editor's other camera: free-fly. The orbit orbits a target; the
+/// fly is EYE-first — position, yaw/pitch heading, thrust along the
+/// view axes — for walking through a scene at any height. The View menu
+/// toggles them; toggling seeds the fly from the orbit's current pose.
+///
+/// Conventions match [`Orbit`]: yaw radians around world +y (yaw π
+/// views from +z looking −z, world +x = screen right), pitch radians
+/// above the horizon (positive = looking down), forward = (sin yaw·cos
+/// p, −sin p, cos yaw·cos p).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fly {
+    /// The eye (world).
+    pub position: Vec3,
+    /// Heading around world +y (radians).
+    pub yaw: f32,
+    /// Pitch above the horizon (radians, clamped to ±~89°).
+    pub pitch: f32,
+    /// Thrust speed: world units per second at key factor 1.
+    pub speed: f32,
+}
+
+impl Default for Fly {
+    /// Eye height over the default scene origin, looking −z (the orbit
+    /// default's view direction, un-orphited).
+    fn default() -> Self {
+        Fly {
+            position: Vec3::new(0.0, 2.0, 9.0),
+            yaw: std::f32::consts::PI,
+            pitch: 0.15,
+            speed: 6.0,
+        }
+    }
+}
+
+impl Fly {
+    /// Seed a fly from ANY camera's pose (the orbit → fly toggle keeps
+    /// the eye and heading so the switch doesn't jump).
+    #[must_use]
+    pub fn from_camera(camera: &Camera) -> Fly {
+        let forward = (camera.target - camera.position).normalize();
+        let pitch = (-forward.y).clamp(-0.999, 0.999).asin();
+        let flat = Vec3::new(forward.x, 0.0, forward.z);
+        // forward = (sin yaw·cos p, −sin p, cos yaw·cos p): yaw =
+        // atan2(x, z) (the same convention Orbit's yaw π default gives
+        // forward −z)
+        let yaw = if flat.dot(flat) > 1e-8 {
+            flat.x.atan2(flat.z)
+        } else {
+            0.0
+        };
+        Fly {
+            position: camera.position,
+            yaw,
+            pitch,
+            speed: 6.0,
+        }
+    }
+
+    /// Mouse-look: deltas in pixels, the orbit's feel (0.005 rad/px,
+    /// pitch clamped before the poles).
+    pub fn look(&mut self, dx: f32, dy: f32) {
+        self.yaw += dx * 0.005;
+        self.pitch = (self.pitch + dy * 0.005).clamp(-1.53, 1.53);
+    }
+
+    /// Thrust: `forward`/`strafe`/`up` are key factors (−1..=1, strafe
+    /// right-positive, up world-up-positive) applied for `dt` seconds
+    /// at the fly's speed.
+    pub fn thrust(&mut self, forward: f32, strafe: f32, up: f32, dt: f32) {
+        let (sin_y, cos_y) = (self.yaw.sin(), self.yaw.cos());
+        let (sin_p, cos_p) = (self.pitch.sin(), self.pitch.cos());
+        let fwd = Vec3::new(sin_y * cos_p, -sin_p, cos_y * cos_p);
+        // forward × world up: horizontal screen-right (at yaw π that's
+        // world +x — the same convention the gizmo trains)
+        let right = Vec3::new(-cos_y, 0.0, sin_y);
+        let world_up = Vec3::new(0.0, 1.0, 0.0);
+        let delta = fwd
+            .scaled(Vec3::splat(forward))
+            + right.scaled(Vec3::splat(strafe))
+            + world_up.scaled(Vec3::splat(up));
+        self.position = self.position + delta.scaled(Vec3::splat(self.speed * dt));
+    }
+
+    /// The perspective camera at this pose (target = eye + forward — a
+    /// look-at down the heading).
+    #[must_use]
+    pub fn camera(&self, aspect: f32) -> Camera {
+        let (sin_y, cos_y) = (self.yaw.sin(), self.yaw.cos());
+        let (sin_p, cos_p) = (self.pitch.sin(), self.pitch.cos());
+        let forward = Vec3::new(sin_y * cos_p, -sin_p, cos_y * cos_p);
+        Camera {
+            position: self.position,
+            target: self.position + forward,
+            projection: Projection::Perspective {
+                fov_y_degrees: 60.0,
+                near: 0.05,
+                far: 500.0,
+                aspect: aspect.max(0.1),
+            },
+        }
+    }
+}

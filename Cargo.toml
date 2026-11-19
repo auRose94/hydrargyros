@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Hydrargyros — a Rust reimagining of gold (the Greek name for mercury, Hg): JS-like dynamic values (var) with copy-on-write ergonomics, plus the sugar that makes prototyping feel like JavaScript."
 license = "MIT"
+# bins are declared explicitly (hyg = packaging CLI, hyg-runtime = the
+# bundle player); discovery stays on for any future src/bin targets
+autobins = true
 
 [workspace]
 members = ["derive", "plugin-api"]
@@ -23,6 +26,15 @@ exclude = ["tests/ffi-plugin"]
 #   Send + Sync — which Arc/Mutex payloads deliver for the game module's
 #   future job system too.
 # No engine deps yet; Bevy coexistence is a later concern (see docs/roadmap.md).
+
+[[bin]]
+name = "hyg"
+path = "src/bin/hyg.rs"
+
+[[bin]]
+name = "hyg-runtime"
+path = "src/bin/hyg-runtime.rs"
+required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio"]
 
 [dependencies]
 indexmap = "2"
