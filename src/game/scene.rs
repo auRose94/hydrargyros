@@ -585,6 +585,23 @@ impl Scene {
         })
     }
 
+    /// The LOSSLESS in-memory document (the editor's play snapshot):
+    /// components may carry session-lifetime params they would never
+    /// write to a file — a compiled model references the session's
+    /// model registry, so restore rebuilds the EXACT geometry instead
+    /// of silently dropping it (the restart bug: a file-shaped snapshot
+    /// stripped every procedural mesh renderer, leaving entities that
+    /// had nothing to draw). The factory resolves `runtime_model` ids
+    /// through the registry; a file never carries them.
+    pub fn snapshot_document(name: &str, camera: &Camera, entities: &[Entity]) -> Var {
+        Var::from(o! {
+            "scene": Var::from(name),
+            "format": Var::from(SCENE_FORMAT),
+            "camera": camera_to_var(camera),
+            "entities": Var::from(List::from_iter(entities.iter().map(entity_snapshot_to_var))),
+        })
+    }
+
     /// The canonical document of this scene.
     #[must_use]
     pub fn to_var(&self) -> Var {
@@ -741,6 +758,45 @@ fn component_to_var(component: &dyn Component, entity_name: &str) -> Option<Var>
         }
     }
     Some(Var::from(obj))
+}
+
+/// The snapshot walk: `runtime_params` (lossless) over `scene_params`.
+fn component_snapshot_to_var(component: &dyn Component, entity_name: &str) -> Option<Var> {
+    let type_name = component.scene_type()?;
+    let ctx = ComponentContext::new(entity_name);
+    let params = component
+        .runtime_params(&ctx)
+        .or_else(|| component.scene_params(&ctx))?;
+    let obj = Object::new();
+    obj.set("type", Var::from(type_name));
+    if let Some(entries) = params.as_object() {
+        for (key, value) in entries.entries() {
+            obj.set(key, value);
+        }
+    }
+    Some(Var::from(obj))
+}
+
+/// The snapshot's entity walk: children and components via the
+/// lossless path.
+fn entity_snapshot_to_var(entity: &Entity) -> Var {
+    let transform = entity.transform();
+    let children: List = entity.children().iter().map(entity_snapshot_to_var).collect();
+    let components: List = entity
+        .iter_components()
+        .filter_map(|c| component_snapshot_to_var(c, entity.name()))
+        .collect();
+    Var::from(o! {
+        "name": Var::from(entity.name()),
+        "enabled": Var::from(entity.enabled()),
+        "transform": Var::from(o! {
+            "position": vec3_to_var(transform.position),
+            "rotation": quat_to_var(transform.rotation),
+            "scale": vec3_to_var(transform.scale),
+        }),
+        "children": Var::from(children),
+        "components": Var::from(components),
+    })
 }
 
 /// The camera's document object — all fields, always written.

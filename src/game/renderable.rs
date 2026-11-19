@@ -213,16 +213,34 @@ impl MeshRenderer {
 
     /// Build from a scene document's params object (the component
     /// registry's `mesh_renderer` factory): either `model` (an asset
-    /// path, resolved by the load against the scene directory) or `shape`
-    /// (`"rect"` / `"circle"`) with optional `half_size` `[x, y, z]`
-    /// (default unit); optional `color` `[r, g, b, a]` (default white).
-    /// Compiled-model renderers (`MeshGeometry::Model`) are runtime-only —
-    /// procedural geometry has no provenance to save.
+    /// path, resolved by the load against the scene directory),
+    /// `runtime_model` (a session registry id — the in-memory play
+    /// snapshot's shape), or `shape` (`"rect"` / `"circle"`) with
+    /// optional `half_size` `[x, y, z]` (default unit); optional `color`
+    /// `[r, g, b, a]` (default white).
     ///
     /// # Errors
-    /// A `FromVarError` at the offending field (or neither `model` nor
-    /// `shape` present).
+    /// A `FromVarError` at the offending field (or no geometry key
+    /// present, or a `runtime_model` id the session's registry doesn't
+    /// hold).
     pub fn from_params(v: &Var) -> Result<MeshRenderer, FromVarError> {
+        // the snapshot shape first: a registry id resolves to the
+        // session's compiled model
+        if let Some(id_var) = super::scene::opt_field(v, "runtime_model") {
+            let id = id_var
+                .as_i64()
+                .ok_or_else(|| FromVarError::new("expected a model id (int)").at("runtime_model"))?
+                as u64;
+            let model = crate::game::model::runtime_model(id).ok_or_else(|| {
+                FromVarError::new(format!("runtime model #{id} is not in this session's registry"))
+                    .at("runtime_model")
+            })?;
+            let mut color = [1.0, 1.0, 1.0, 1.0];
+            if let Some(tint) = super::scene::opt_field(v, "color") {
+                color = super::scene::SceneVec4::from_var(&tint).map_err(|e| e.at("color"))?.0;
+            }
+            return Ok(MeshRenderer::new(MeshGeometry::Model { model }, color));
+        }
         let model = super::scene::opt_field(v, "model");
         let shape_var = super::scene::opt_field(v, "shape");
         let geometry = match (model, shape_var) {
@@ -307,6 +325,27 @@ impl Component for MeshRenderer {
             obj.set("color", super::scene::f32s_to_var(&self.color));
         }
         Some(Var::from(obj))
+    }
+
+    /// The LOSSLESS snapshot params: compiled models reference the
+    /// session's registry (`{"runtime_model": id}`) — the play
+    /// snapshot's in-memory round trip is exact where the file save
+    /// must skip.
+    fn runtime_params(&self, ctx: &super::scene::ComponentContext) -> Option<Var> {
+        match &self.geometry {
+            MeshGeometry::Model { model } => {
+                let obj = Object::new();
+                obj.set(
+                    "runtime_model",
+                    Var::from(model.id() as i64),
+                );
+                if self.color != [1.0, 1.0, 1.0, 1.0] {
+                    obj.set("color", super::scene::f32s_to_var(&self.color));
+                }
+                Some(Var::from(obj))
+            }
+            _ => self.scene_params(ctx),
+        }
     }
 }
 

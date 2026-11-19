@@ -269,3 +269,73 @@ fn audio_snapshot_records_plays() {
     assert_eq!(plays.len(), 1);
     assert!((plays[0].volume - 0.5).abs() < 1e-6, "the spec volume recorded");
 }
+
+// ---- the restart bug (round 13): play snapshots must keep compiled
+// models ----
+
+/// The play snapshot's LOSSLESS walk: a compiled (procedural) model
+/// renderer survives snapshot → restore with its geometry INTACT — the
+/// restart bug stripped every procedural mesh renderer at restore,
+/// leaving entities with nothing to draw.
+#[test]
+fn snapshot_document_preserves_compiled_models() {
+    let mesh = std::sync::Arc::new(hyg::game::Mesh::sphere(0.5, 16, 12));
+    let model = std::sync::Arc::new(hyg::game::Model::single(mesh));
+    let model_id = model.id();
+    let mut entity = hyg::game::Entity::new("ball");
+    entity.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::clone(&model),
+        [1.0, 0.4, 0.1, 1.0],
+    )));
+
+    let doc = Scene::snapshot_document("snap", &Camera::default(), &[entity]);
+    let reloaded = Scene::from_var(&doc).expect("restore");
+    let renderer = reloaded.entities[0]
+        .iter_components()
+        .find_map(|c| c.as_any().downcast_ref::<MeshRenderer>())
+        .expect("the renderer survived the snapshot");
+    match &renderer.geometry {
+        MeshGeometry::Model { model } => {
+            assert_eq!(model.id(), model_id, "the same session model");
+            assert!(!model.parts().is_empty(), "with its geometry");
+        }
+        other => panic!("expected a compiled model, got {other:?}"),
+    }
+    // and the tint rode along
+    assert_eq!(renderer.color, [1.0, 0.4, 0.1, 1.0]);
+}
+
+/// The FILE document keeps its contract: compiled models are
+/// runtime-only and skipped at save (a .hyg never carries registry
+/// references another process couldn't resolve).
+#[test]
+fn file_document_still_skips_compiled_models() {
+    let mesh = std::sync::Arc::new(hyg::game::Mesh::sphere(0.5, 16, 12));
+    let model = std::sync::Arc::new(hyg::game::Model::single(mesh));
+    let mut entity = hyg::game::Entity::new("ball");
+    entity.add_component(Box::new(MeshRenderer::model(model, [1.0; 4])));
+
+    let doc = Scene::document("file", &Camera::default(), &[entity]);
+    let reloaded = Scene::from_var(&doc).expect("loads");
+    let renderers: usize = reloaded.entities[0]
+        .iter_components()
+        .filter(|c| c.as_any().downcast_ref::<MeshRenderer>().is_some())
+        .count();
+    assert_eq!(renderers, 0, "compiled models stay runtime-only in files");
+
+    // the snapshot document is the ONLY one carrying them
+    let mut entity2 = hyg::game::Entity::new("ball");
+    entity2.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+            hyg::game::Mesh::sphere(0.5, 16, 12),
+        ))),
+        [1.0; 4],
+    )));
+    let snap = Scene::snapshot_document("snap", &Camera::default(), &[entity2]);
+    let reloaded = Scene::from_var(&snap).expect("loads");
+    let renderers: usize = reloaded.entities[0]
+        .iter_components()
+        .filter(|c| c.as_any().downcast_ref::<MeshRenderer>().is_some())
+        .count();
+    assert_eq!(renderers, 1, "the snapshot keeps it");
+}

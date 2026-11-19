@@ -98,4 +98,15 @@ pub trait Component: Send {
     fn scene_params(&self, _ctx: &super::scene::ComponentContext) -> Option<Var> {
         None
     }
+
+    /// The LOSSLESS params object for an IN-MEMORY snapshot (the
+    /// editor's play snapshot): state that can't serialize to a file may
+    /// still round-trip inside one session. Defaults to
+    /// [`scene_params`](Self::scene_params); components with
+    /// process-lifetime state override it (a compiled model references
+    /// the session's model registry — a file could never resolve it, a
+    /// snapshot can).
+    fn runtime_params(&self, ctx: &super::scene::ComponentContext) -> Option<Var> {
+        self.scene_params(ctx)
+    }
 }

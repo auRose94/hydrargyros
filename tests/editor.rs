@@ -13,6 +13,7 @@ use hyg::game::physics::Shape;
 use hyg::game::physics_body::PhysicsBody;
 use hyg::game::renderable::{MeshGeometry, MeshRenderer, MeshShape};
 use hyg::game::scene::Scene;
+use hyg::game::Mesh;
 use hyg::game::{Engine, Entity};
 use hyg::var::{Quat, Vec3};
 
@@ -1594,4 +1595,82 @@ fn beam_sparkle_is_deterministic_and_localized() {
         .count();
     assert!(hot < 48, "the hot spots stay sparse ({hot}/64)");
     assert!(hot > 0, "something actually blazes at this phase");
+}
+
+/// The restart bug (round 13): hitting restart repeatedly STRIPPED the
+/// scene — the play snapshot was file-shaped, and compiled models are
+/// runtime-only in files, so restore rebuilt entities with no render
+/// components (nothing drawn, inspector intact). The lossless snapshot
+/// keeps them: restart cycles preserve every renderer, the entity
+/// count, and the snapshot poses.
+#[cfg(all(feature = "editor", feature = "physics"))]
+#[test]
+fn restart_cycles_preserve_the_scene() {
+    use hyg::game::editor::shell::{play, restart, stop, EditorState, ShellShared};
+    use hyg::game::Model;
+    use std::sync::Arc;
+
+    let mut engine = Engine::new("acme", "restart-test");
+    let mut floor = Entity::new("floor");
+    floor.add_component(Box::new(MeshRenderer::model(
+        Arc::new(Model::single(Arc::new(Mesh::cube(Vec3::new(6.0, 0.5, 6.0))))),
+        [0.30, 0.34, 0.40, 1.0],
+    )));
+    engine.add_entity(floor);
+    let mut ball = Entity::new("ball");
+    ball.transform_mut().position = Vec3::new(0.0, 8.0, 0.0);
+    ball.add_component(Box::new(PhysicsBody::new("ball", Shape::Sphere(0.5))));
+    ball.add_component(Box::new(MeshRenderer::model(
+        Arc::new(Model::single(Arc::new(Mesh::sphere(0.5, 24, 16)))),
+        [1.0, 0.4, 0.1, 1.0],
+    )));
+    engine.add_entity(ball);
+
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    let shared = ShellShared {
+        playing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
+        pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    // play, let the sim mutate (the ball drops), then restart hard
+    play(&mut state, &mut engine, &shared);
+    for _ in 0..10 {
+        engine.update(1.0 / 60.0);
+    }
+    restart(&mut state, &mut engine, &shared);
+    restart(&mut state, &mut engine, &shared);
+    stop(&mut state, &mut engine, &shared);
+
+    assert_eq!(engine.entities().len(), 2, "no duplication across cycles");
+    for name in ["floor", "ball"] {
+        let entity = engine
+            .entities()
+            .iter()
+            .find(|e| e.name() == name)
+            .unwrap_or_else(|| panic!("{name} survived"));
+        let renderer = entity
+            .iter_components()
+            .find_map(|c| c.as_any().downcast_ref::<MeshRenderer>())
+            .unwrap_or_else(|| panic!("{name} kept its renderer"));
+        assert!(
+            matches!(renderer.geometry, MeshGeometry::Model { .. }),
+            "{name} renders through the compiled model"
+        );
+    }
+    // the ball restored to its SNAPSHOT pose (play had dropped it)
+    let ball = engine
+        .entities()
+        .iter()
+        .find(|e| e.name() == "ball")
+        .expect("checked");
+    assert_eq!(
+        ball.transform().position,
+        Vec3::new(0.0, 8.0, 0.0),
+        "restore returns the snapshot pose"
+    );
 }

@@ -8,10 +8,10 @@
 //! texture at draw time, glTF's `factor × texture` convention); the
 //! renderer's tint multiplies on top of everything.
 
-// glTF-gated: textures resolve once per image in `from_gltf*` (used only there)
-#[cfg(feature = "gltf")]
+// textures resolve once per image in `from_gltf*`; the session
+// registry holds the constructed models
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::game::mesh::Mesh;
 use crate::game::texture::Texture;
@@ -24,31 +24,86 @@ pub struct ModelPart {
     pub texture: Option<Arc<Texture>>,
 }
 
-/// A whole model: parts drawn together at one entity transform.
+/// A whole model: parts drawn together at one entity transform. Every
+/// model carries a session id and registers itself in
+/// [`runtime_models`](Self::runtime_models) at construction — the handle
+/// an in-memory snapshot references (a file never does: compiled
+/// geometry is session state, not data).
 #[derive(Debug, Clone)]
 pub struct Model {
+    id: u64,
     parts: Vec<ModelPart>,
 }
 
+/// The session model registry: every constructed model lands here under
+/// its id, the same process-lifetime pattern as the function table —
+/// the editor's play snapshot references these, restore looks them up.
+fn runtime_models() -> &'static RwLock<HashMap<u64, Arc<Model>>> {
+    static REGISTRY: OnceLock<RwLock<HashMap<u64, Arc<Model>>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+static MODEL_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The session's model for a snapshot id.
+#[must_use]
+pub fn runtime_model(id: u64) -> Option<Arc<Model>> {
+    runtime_models().read().unwrap().get(&id).cloned()
+}
+
 impl Model {
+    /// Stamp the session id and register — every constructor's last
+    /// step (the Arc lands in the registry; the caller keeps the owned
+    /// model, its Arcs share the registered parts).
+    fn register(mut self) -> Model {
+        let id = MODEL_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.id = id;
+        let owned = Arc::new(self.clone());
+        runtime_models()
+            .write()
+            .unwrap()
+            .insert(id, owned);
+        self
+    }
+
+    /// The model's session id (what a snapshot's `runtime_model` param
+    /// carries; [runtime_model](crate::game::model::runtime_model) resolves it).
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// The session's registered models, as `(id, part count)` rows —
+    /// the registry's introspection for debug views.
+    #[must_use]
+    pub fn runtime_ids() -> Vec<u64> {
+        let mut ids: Vec<u64> = runtime_models().read().unwrap().keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
     /// A one-part untextured model (the procedural-mesh path).
     pub fn single(mesh: Arc<Mesh>) -> Model {
         Model {
+            id: 0,
             parts: vec![ModelPart {
                 mesh,
                 texture: None,
             }],
         }
+        .register()
     }
 
     /// A one-part textured model (the sprite path).
     pub fn textured(mesh: Arc<Mesh>, texture: Arc<Texture>) -> Model {
         Model {
+            id: 0,
             parts: vec![ModelPart {
                 mesh,
                 texture: Some(texture),
             }],
         }
+        .register()
     }
 
     /// Build from parts (validated non-empty).
@@ -59,7 +114,7 @@ impl Model {
         if parts.is_empty() {
             return Err("model: no parts".into());
         }
-        Ok(Model { parts })
+        Ok(Model { id: 0, parts }.register())
     }
 
     pub fn parts(&self) -> &[ModelPart] {

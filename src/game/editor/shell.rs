@@ -1460,13 +1460,22 @@ fn blank_camera() -> crate::game::Camera {
 /// Play: snapshot the edit state, resolve the MAIN camera (the scene's
 /// dimensionality), then run. No main camera = a blank scene, per the
 /// contract.
-fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+#[doc(hidden)]
+pub fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     let label = state
         .tabs
         .get(state.active_tab)
         .map(|t| t.label.clone())
         .unwrap_or_else(|| "scene".to_string());
-    state.snapshot = Some(Scene::document(&label, &state.scene_camera, engine.entities()));
+    // LOSSLESS: compiled models reference the session registry — the
+    // file-shaped document would silently strip every procedural mesh
+    // renderer (the restart bug: restore rebuilt entities with nothing
+    // to draw)
+    state.snapshot = Some(Scene::snapshot_document(
+        &label,
+        &state.scene_camera,
+        engine.entities(),
+    ));
     let main_camera = find_main_camera(engine);
     state.scene_camera = main_camera.unwrap_or_else(blank_camera);
     engine.set_camera(state.scene_camera);
@@ -1486,7 +1495,8 @@ fn pause(state: &mut EditorState, shared: &ShellShared) {
 }
 
 /// Stop: back to the edit state (restore the play snapshot), sim off.
-fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+#[doc(hidden)]
+pub fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     shared.playing.store(false, Ordering::SeqCst);
     restore_snapshot(state, engine);
     state.set_status("stopped — back to the edit state");
@@ -1494,7 +1504,8 @@ fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
 }
 
 /// Restart: restore the snapshot, then play again from the top.
-fn restart(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
+#[doc(hidden)]
+pub fn restart(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     restore_snapshot(state, engine);
     play(state, engine, shared);
 }
