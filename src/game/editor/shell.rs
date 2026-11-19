@@ -1021,6 +1021,16 @@ fn draw_ui(
                                 open_file_dialog(state, DialogPurpose::ModelImport);
                                 file.close();
                             }
+                            if file.button("Export Game...").clicked() {
+                                match locate_runtime()
+                                    .and_then(|runtime| export_game(state, &runtime))
+                                {
+                                    Ok(out) => println!("exported {}", out.display()),
+                                    Err(e) => state.set_status(format!("export: {e}")),
+                                }
+                                shared.touch();
+                                file.close();
+                            }
                             file.separator();
                             if file.button("Quit").clicked() {
                                 shared.quit.store(true, Ordering::SeqCst);
@@ -3094,6 +3104,81 @@ pub fn import_model(
 
     state.ui.select(vec![engine.entities().len() - 1]);
     Ok(name.to_string_lossy().to_string())
+}
+
+/// The M5 export: the WHOLE packaging flow inside the Studio — bundle
+/// the saved scene with its references (the M4 walk), fuse it onto the
+/// runtime binary, and land ONE game file beside the scene. The
+/// runtime binary is located via `HYG_RUNTIME`, then
+/// `target/release/hyg-runtime`, then `target/debug/hyg-runtime`
+/// (beside the crate manifest and the working directory) — the status
+/// line names the build command when none is found.
+///
+/// Returns the fused game's path for the status line.
+///
+/// # Errors
+/// The scene isn't saved yet, the runtime binary isn't found, or the
+/// bundle/fuse fails — every message says what to do next.
+#[doc(hidden)]
+pub fn export_game(
+    state: &mut EditorState,
+    runtime: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    let scene_path = std::path::PathBuf::from(&state.scene_path);
+    if !scene_path.exists() {
+        return Err("save the scene first — Export packages the SAVED file".to_string());
+    }
+    let scene_dir = scene_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let stem = scene_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("scene")
+        .trim_end_matches(".json")
+        .to_string();
+
+    // bundle BESIDE the scene (visible artifact, same layout the CLI
+    // produces), then fuse onto the runtime — ONE file out
+    let staging = scene_dir.join(format!("{stem}-bundle"));
+    let report = hyg::bundle::build(&scene_path, &staging)?;
+    let out = scene_dir.join(format!("{stem}.bin"));
+    let size = hyg::pack::fuse(runtime, &staging, &out)?;
+    state.set_status(format!(
+        "exported {} ({} files, {} KB) — the single file plays the game",
+        out.display(),
+        report.files.len(),
+        size / 1024
+    ));
+    Ok(out)
+}
+
+/// Locate the runtime binary for exports: `HYG_RUNTIME` overrides,
+/// then the cargo target dirs (beside the crate manifest and the
+/// working directory). The error names the build command — the
+/// approachable failure tells the newcomer what to do, not just what
+/// broke.
+///
+/// # Errors
+/// None of the candidates exists.
+#[doc(hidden)]
+pub fn locate_runtime() -> Result<std::path::PathBuf, String> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(p) = std::env::var_os("HYG_RUNTIME") {
+        candidates.push(std::path::PathBuf::from(p));
+    }
+    candidates.push(std::path::PathBuf::from("target/release/hyg-runtime"));
+    candidates.push(std::path::PathBuf::from("target/debug/hyg-runtime"));
+    if let Ok(dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        candidates.push(std::path::PathBuf::from(dir).join("target/release/hyg-runtime"));
+    }
+    candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .ok_or_else(|| {
+            "no runtime binary found — build it once: cargo build --release --bin hyg-runtime --features wgpu,winit,script,gltf,physics,audio,pack (or set HYG_RUNTIME)".to_string()
+        })
 }
 
 /// Poll the in-flight dialog; on completion, run its flow. Returns

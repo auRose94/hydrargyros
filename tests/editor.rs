@@ -14,6 +14,7 @@ use hyg::game::physics_body::PhysicsBody;
 use hyg::game::renderable::{MeshGeometry, MeshRenderer, MeshShape};
 use hyg::game::scene::Scene;
 use hyg::game::Mesh;
+use hyg::game::Model;
 use hyg::game::{Engine, Entity};
 use hyg::var::{Quat, Vec3};
 
@@ -1778,4 +1779,86 @@ fn fly_camera_looks_down_the_heading() {
     assert!((round.yaw - fly.yaw).abs() < 1e-3, "yaw recovered");
     assert!((round.pitch - fly.pitch).abs() < 1e-3, "pitch recovered");
     assert_eq!(round.position, fly.position, "position kept");
+}
+
+/// The editor's export: the WHOLE flow inside the Studio — bundle the
+/// saved scene, fuse it onto a runtime binary, land ONE game file
+/// beside the scene. A missing scene or runtime fails with the fix in
+/// the message (the approachable contract).
+#[cfg(all(feature = "editor", feature = "pack"))]
+#[test]
+fn export_game_bundles_and_fuses() {
+    use hyg::game::editor::shell::{export_game, EditorState};
+
+    let dir = temp_dir("hyg-export-test");
+    std::fs::create_dir_all(dir.join("scripts")).expect("dirs");
+    std::fs::write(dir.join("scripts/patrol.js"), "function update(dt) {}").expect("script");
+
+    // the scene SAVED beside its script (export packages the saved file)
+    let mut drifter = Entity::new("drifter");
+    drifter.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::new(Model::single(std::sync::Arc::new(Mesh::sphere(0.25, 16, 12)))),
+        [0.4, 0.9, 0.6, 1.0],
+    )));
+    let script = hyg::script::Script::new(
+        std::fs::read_to_string(dir.join("scripts/patrol.js")).expect("read"),
+    )
+    .expect("compiles");
+    drifter.add_component(Box::new(
+        hyg::game::ScriptedComponent::new(script)
+            .expect("arms")
+            .with_source_path("scripts/patrol.js"),
+    ));
+    let scene = Scene::snapshot_document("export-me", &hyg::game::Camera::default(), &[drifter]);
+    hyg::carrier::write(&dir.join("my-game.json.hyg"), &scene).expect("saves");
+
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.scene_path = dir.join("my-game.json.hyg").to_string_lossy().to_string();
+
+    // a "runtime" binary: fuse accepts any bytes (the header of the
+    // fused file is the runtime verbatim)
+    let runtime = dir.join("hyg-runtime");
+    std::fs::write(&runtime, b"FAKERUNTIMEDATA".repeat(64)).expect("runtime");
+
+    let out = export_game(&mut state, &runtime).expect("exports");
+    assert!(out.exists(), "the single game file landed");
+    assert_eq!(out.file_name().unwrap(), "my-game.bin");
+    // the bundle sits beside it (the visible artifact, CLI-shaped)
+    assert!(dir.join("my-game-bundle/scripts/patrol.js").exists(), "the bundle");
+}
+
+/// The approachable failures: an unsaved scene names the fix, and a
+/// missing runtime binary names the build command.
+#[cfg(all(feature = "editor", feature = "pack"))]
+#[test]
+fn export_game_failures_teach() {
+    use hyg::game::editor::shell::{export_game, EditorState};
+
+    let dir = temp_dir("hyg-export-miss");
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.scene_path = dir.join("never-saved.json.hyg").to_string_lossy().to_string();
+    let runtime = dir.join("hyg-runtime");
+    std::fs::write(&runtime, b"fake").expect("runtime");
+
+    // unsaved scene: the fix is "save first"
+    let err = export_game(&mut state, &runtime).expect_err("no saved scene");
+    assert!(err.contains("save the scene first"), "{err}");
+
+    // saved scene + missing runtime: the fix is the build command
+    let scene = Scene::snapshot_document("x", &hyg::game::Camera::default(), &[]);
+    hyg::carrier::write(state.scene_path.as_ref(), &scene).expect("writes a valid scene");
+    let missing = dir.join("no-such-runtime");
+    let err = export_game(&mut state, &missing).expect_err("no such runtime");
+    assert!(
+        err.contains("no-such-runtime") || err.contains("No such"),
+        "the error names the runtime: {err}"
+    );
+}
+
+/// A fresh temp directory for one test (cleared on entry).
+fn temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    dir
 }

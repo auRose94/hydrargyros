@@ -240,3 +240,83 @@ pub fn overlay_loose(override_root: &Path, extraction: &Path) -> Result<usize, S
     }
     Ok(overlaid)
 }
+
+/// Extract a fused file's archive into `out_dir`. With `skip_existing`,
+/// a file already on disk is LEFT ALONE — nondestructive out of the
+/// gate (the review's ask: `--extract` gives players the full asset
+/// set without clobbering their edits; run it again after a mod and
+/// the mod survives).
+///
+/// Returns how many entries were written (skipped ones don't count).
+///
+/// # Errors
+/// The file isn't fused, or the extraction fails mid-way.
+pub fn extract_archive(
+    fused: &Path,
+    out_dir: &Path,
+    skip_existing: bool,
+) -> Result<usize, String> {
+    let size = std::fs::metadata(fused)
+        .map_err(|e| format!("{}: {e}", fused.display()))?
+        .len();
+    if size < FOOTER_SIZE {
+        return Err(format!("{} carries no fused archive", fused.display()));
+    }
+    let tail = {
+        let mut file = std::fs::File::open(fused)
+            .map_err(|e| format!("{}: {e}", fused.display()))?;
+        file.seek(std::io::SeekFrom::Start(size - FOOTER_SIZE))
+            .map_err(|e| format!("{}: {e}", fused.display()))?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail)
+            .map_err(|e| format!("{}: {e}", fused.display()))?;
+        tail
+    };
+    if tail[..8] != *FUSE_MAGIC {
+        return Err(format!("{} carries no fused archive", fused.display()));
+    }
+    let archive_len = u64::from_le_bytes(
+        tail[8..16]
+            .try_into()
+            .expect("the footer carries 8 length bytes"),
+    );
+    let archive_start = size
+        .checked_sub(FOOTER_SIZE)
+        .and_then(|tail_start| tail_start.checked_sub(archive_len))
+        .ok_or_else(|| "corrupt footer: archive longer than the file".to_string())?;
+
+    let archive_bytes = {
+        let mut file = std::fs::File::open(fused)
+            .map_err(|e| format!("{}: {e}", fused.display()))?;
+        file.seek(std::io::SeekFrom::Start(archive_start))
+            .map_err(|e| format!("{}: {e}", fused.display()))?;
+        let mut bytes = vec![0u8; archive_len as usize];
+        file.read_exact(&mut bytes)
+            .map_err(|e| format!("reading the archive: {e}"))?;
+        bytes
+    };
+
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let mut written = 0usize;
+    {
+        let mut archive = tar::Archive::new(&archive_bytes[..]);
+        let entries = archive
+            .entries()
+            .map_err(|e| format!("reading the archive: {e}"))?;
+        for entry in entries {
+            let mut entry = entry.map_err(|e| format!("archive entry: {e}"))?;
+            let path = entry.path().map_err(|e| format!("archive entry path: {e}"))?;
+            let dest = out_dir.join(&path);
+            if skip_existing && dest.exists() {
+                continue;
+            }
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("{}: {e}", parent.display()))?;
+            }
+            entry.unpack(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+            written += 1;
+        }
+    }
+    Ok(written)
+}

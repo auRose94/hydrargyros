@@ -153,7 +153,7 @@ dynamic-wasm = ["dep:wasmtime", "dep:hyg-plugin-api"]
 # editor: the Studio shell — egui panels composited over the engine's frame
 # the editor's scripting story (live reload, console) rides the same
 # v12 seam — script comes with the editor
-editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:rfd", "wgpu", "winit", "script"]
+editor = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit", "dep:rfd", "wgpu", "winit", "script", "pack"]
 rfd = ["dep:rfd"]
 
 [dev-dependencies]

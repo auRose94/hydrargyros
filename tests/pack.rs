@@ -170,3 +170,53 @@ fn overlay_skips_a_rooted_executable() {
     let overlaid = pack::overlay_loose(Path::new("/"), &dir.join("game")).expect("no error");
     assert_eq!(overlaid, 0, "nothing walked from the filesystem root");
 }
+
+// ---- the nondestructive extract (--extract) ----
+
+/// Extract skips files that already exist: run it, MODIFY a file, run
+/// it again — the modification SURVIVES (the review's "skipping if the
+/// file exists so it's nondestructive out the gate"). A fresh
+/// extraction still writes everything, and a forced overwrite works —
+/// the caller chooses.
+#[test]
+fn extract_is_nondestructive_by_default() {
+    let dir = temp_dir("hyg-pack-extract");
+
+    let runtime_bytes: Vec<u8> = b"RUNTIMEPAYLOAD".to_vec();
+    let runtime_path = dir.join("runtime.bin");
+    std::fs::write(&runtime_path, &runtime_bytes).expect("runtime");
+    let bundle = dir.join("bundle");
+    std::fs::create_dir_all(&bundle).expect("bundle dirs");
+    std::fs::write(bundle.join("scene.json.hyg"), "{\"scene\":\"v1\"}").expect("scene");
+    std::fs::write(bundle.join("mod.js"), "SPEED = 1").expect("script");
+
+    let fused = dir.join("game.bin");
+    pack::fuse(&runtime_path, &bundle, &fused).expect("fuses");
+
+    // first extract: both files land
+    let out = dir.join("assets-out");
+    let written = pack::extract_archive(&fused, &out, true).expect("extracts");
+    assert_eq!(written, 2, "a fresh extraction writes everything");
+
+    // the player edits the extracted script
+    std::fs::write(out.join("mod.js"), "SPEED = 99 (player tuned)").expect("player edits");
+
+    // re-extract, skip-existing: the edit SURVIVES, nothing rewrites
+    let written = pack::extract_archive(&fused, &out, true).expect("re-extracts");
+    assert_eq!(written, 0, "everything skipped");
+    assert_eq!(
+        std::fs::read_to_string(out.join("mod.js")).expect("read"),
+        "SPEED = 99 (player tuned)",
+        "the player's edit survives the re-extract"
+    );
+
+    // an explicit overwrite pass (skip_existing = false) replaces it —
+    // the caller chooses destructiveness
+    let written = pack::extract_archive(&fused, &out, false).expect("forced extract");
+    assert_eq!(written, 2);
+    assert_eq!(
+        std::fs::read_to_string(out.join("mod.js")).expect("read"),
+        "SPEED = 1",
+        "the forced pass restores the shipped file"
+    );
+}

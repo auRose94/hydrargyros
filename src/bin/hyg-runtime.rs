@@ -10,10 +10,44 @@ use hyg::game::scene::Scene;
 use hyg::game::{Engine, PhysicsWorld, WgpuRenderer, WinitWindow};
 
 fn main() {
+    let mut args = std::env::args().skip(1);
+
+    // --extract [dir]: unpack the fused archive's files (the full asset
+    // set) and exit — NONDESTRUCTIVE, existing files are skipped, so
+    // players get the defaults without clobbering their mods, and
+    // modders get the loose layout to edit (the overlay then picks it
+    // up on every later launch). Default destination: beside the exe,
+    // where the loose-files overlay looks first.
+    if args.next().map(|a| a == "--extract").unwrap_or(false) {
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("current_exe: {e}"))
+            .expect("exe path");
+        let dir = args.next().map(std::path::PathBuf::from).unwrap_or_else(|| {
+            exe.parent()
+                .map(|p| p.to_path_buf())
+                .expect("the exe has a parent")
+        });
+        match hyg::pack::extract_archive(&exe, &dir, true) {
+            Ok(written) => {
+                println!(
+                    "extracted {} file{} to {} (existing files skipped)",
+                    written,
+                    if written == 1 { "" } else { "s" },
+                    dir.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("hyg-runtime: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     // BARE invocation: this binary may be FUSED (a bundle tarred onto
     // its tail) — detect our own archive, unpack it to a temp home,
     // and play the scene it carries. With a scene path, play that.
-    let scene_path = match std::env::args().nth(1) {
+    let scene_path = match args.next() {
         Some(path) => std::path::PathBuf::from(path),
         None => {
             let exe = std::env::current_exe()
