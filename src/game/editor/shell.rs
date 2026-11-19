@@ -236,6 +236,19 @@ fn run_shell(
             handler.state.ui.select(path);
         }
     }
+    // EDITOR_DOCK=<tab>: open a bottom-dock tab at launch (physics /
+    // audio / log / stats / console / debugger / profiler) — the
+    // screenshot hook's other half; unset keeps the Log tab
+    match std::env::var("EDITOR_DOCK").ok().as_deref() {
+        Some("physics") => handler.state.dock_tab = DockTab::Physics,
+        Some("audio") => handler.state.dock_tab = DockTab::Audio,
+        Some("stats") => handler.state.dock_tab = DockTab::Stats,
+        Some("console") => handler.state.dock_tab = DockTab::Console,
+        Some("debugger") => handler.state.dock_tab = DockTab::Debugger,
+        Some("profiler") => handler.state.dock_tab = DockTab::Profiler,
+        Some("log") | None => {}
+        Some(other) => eprintln!("studio: unknown EDITOR_DOCK {other:?} (log kept)"),
+    }
     event_loop
         .run_app(&mut handler)
         .map_err(|e| format!("studio: event loop error: {e}"))
@@ -340,7 +353,10 @@ pub struct EditorState {
     /// What the PRESS landed on (a gizmo handle claims the drag; empty
     /// space claims the pick on release — the two are decided at press).
     press_hit: Option<GizmoHit>,
-    scene_path: String,
+    /// The active tab's scene file path — asset imports resolve against
+    /// its directory. Doc-hidden pub: the headless probe tests set it.
+    #[doc(hidden)]
+    pub scene_path: String,
     dark: bool,
     /// The color buttons' paint (glass is the default; a View menu
     /// toggle swaps in the flat fills).
@@ -406,6 +422,10 @@ enum DockTab {
     Log,
     Stats,
     Console,
+    /// The physics debug view (M4): the world's declared bodies + gravity.
+    Physics,
+    /// The audio debug view (M4): backend, master volume, play records.
+    Audio,
     Debugger,
     Profiler,
 }
@@ -426,9 +446,18 @@ struct SceneTab {
 /// the platform dialog everywhere else). The blocking call runs on a
 /// worker thread; the UI polls `done` each frame.
 struct NativeDialog {
-    save: bool,
+    purpose: DialogPurpose,
     result: Arc<Mutex<Option<Option<std::path::PathBuf>>>>,
     done: Arc<AtomicBool>,
+}
+
+/// What the in-flight native dialog completes INTO — the poll matches
+/// the completion to its flow (scene save/load, model import).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogPurpose {
+    SceneSave,
+    SceneOpen,
+    ModelImport,
 }
 
 impl EditorState {
@@ -908,7 +937,7 @@ fn draw_ui(
                                 file.close();
                             }
                             if file.button("Open...").clicked() {
-                                open_file_dialog(state, false);
+                                open_file_dialog(state, DialogPurpose::SceneOpen);
                                 file.close();
                             }
                             if file.button("Save").clicked() {
@@ -916,7 +945,12 @@ fn draw_ui(
                                 file.close();
                             }
                             if file.button("Save As...").clicked() {
-                                open_file_dialog(state, true);
+                                open_file_dialog(state, DialogPurpose::SceneSave);
+                                file.close();
+                            }
+                            file.separator();
+                            if file.button("Import Model...").clicked() {
+                                open_file_dialog(state, DialogPurpose::ModelImport);
                                 file.close();
                             }
                             file.separator();
@@ -1506,7 +1540,7 @@ fn save_active_tab(state: &mut EditorState, engine: &mut Engine) {
         }
         None => {
             state.set_status("save as — name the scene");
-            open_file_dialog(state, true);
+            open_file_dialog(state, DialogPurpose::SceneSave);
         }
     }
 }
@@ -1533,12 +1567,19 @@ fn open_scene_path(state: &mut EditorState, engine: &mut Engine, path: &Path, sh
 /// The bottom dock: a tab strip and its content. Log is the status
 /// history; Stats is live engine telemetry; the staged tabs name their
 /// milestone (the dock is the extension point for more).
-fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shared: &ShellShared) {
+fn draw_dock(
+    dock: &mut egui::Ui,
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+) {
     dock.horizontal(|tabs| {
         for (tab, label) in [
             (DockTab::Log, "Log"),
             (DockTab::Stats, "Stats"),
             (DockTab::Console, "Console"),
+            (DockTab::Physics, "Physics"),
+            (DockTab::Audio, "Audio"),
             (DockTab::Debugger, "Debugger"),
             (DockTab::Profiler, "Profiler"),
         ] {
@@ -1608,6 +1649,117 @@ fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shar
                     }
                 });
         }
+        DockTab::Physics => {
+            // the read-only rows: what the world DECLARES. The simulation
+            // stays the backend's — the view reads its records (a no-op
+            // backend's declarations are real data too: a scene's bodies
+            // show even while transforms stay under script control)
+            match engine.physics() {
+                Some(world) => {
+                    let snap = crate::game::editor::debug::PhysicsSnapshot::from_world(world);
+                    dock.monospace(format!(
+                        "backend: {}   gravity: {}",
+                        snap.backend,
+                        match snap.gravity {
+                            Some(g) => format!("{:.2}, {:.2}, {:.2}", g.x, g.y, g.z),
+                            None => "(backend reports none)".to_string(),
+                        }
+                    ));
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(dock, |scroll| {
+                            if snap.bodies.is_empty() {
+                                scroll.weak("(no bodies registered)");
+                            }
+                            for body in &snap.bodies {
+                                scroll.monospace(
+                                    egui::RichText::new(format!(
+                                        "{}   {}   {}   at ({:.2}, {:.2}, {:.2})",
+                                        body.name,
+                                        shape_label(&body.shape),
+                                        body.body_type.as_str(),
+                                        body.position.x,
+                                        body.position.y,
+                                        body.position.z,
+                                    ))
+                                    .small(),
+                                );
+                            }
+                        });
+                }
+                None => {
+                    dock.weak("no physics world attached (set_physics attaches one)");
+                }
+            }
+        }
+        #[cfg(feature = "audio")]
+        DockTab::Audio => {
+            match engine.audio() {
+                Some(world) => {
+                    let snap = crate::game::editor::debug::AudioSnapshot::from_world(world);
+                    dock.monospace(format!("backend: {}", snap.backend));
+                    // master volume: the slider writes straight through
+                    let mut volume = snap.master_volume.unwrap_or(1.0);
+                    let slider = dock.add(
+                        egui::Slider::new(&mut volume, 0.0..=1.0).text("master volume"),
+                    );
+                    if slider.changed() {
+                        if let Some(world) = engine.audio_mut() {
+                            world.set_master_volume(volume);
+                        }
+                        shared.touch();
+                    }
+                    if dock.button("play test tone (440 Hz)").clicked() {
+                        let tone = crate::game::audio::AudioSource::Tone {
+                            frequency: 440.0,
+                            duration: 0.2,
+                            shape: crate::game::audio::WaveShape::Sine,
+                        };
+                        match engine
+                            .audio_mut()
+                            .expect("checked Some above")
+                            .play(&tone, &crate::game::audio::PlaySpec::new(0.8, false))
+                        {
+                            Ok(id) => state.set_status(format!("tone playing (id {id})")),
+                            Err(e) => state.set_status(format!("tone failed: {e}")),
+                        }
+                        shared.touch();
+                    }
+                    dock.separator();
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(dock, |scroll| match snap.plays {
+                            Some(plays) if plays.is_empty() => {
+                                scroll.weak("(no plays recorded)");
+                            }
+                            Some(plays) => {
+                                for play in &plays {
+                                    scroll.monospace(
+                                        egui::RichText::new(format!(
+                                            "#{}   {}   vol {:.2}{}",
+                                            play.id,
+                                            source_label(&play.source),
+                                            play.volume,
+                                            if play.looping { "  looping" } else { "" },
+                                        ))
+                                        .small(),
+                                    );
+                                }
+                            }
+                            None => {
+                                scroll.weak("(this backend keeps no play records)");
+                            }
+                        });
+                }
+                None => {
+                    dock.weak("no audio world attached (set_audio attaches one)");
+                }
+            }
+        }
+        #[cfg(not(feature = "audio"))]
+        DockTab::Audio => {
+            dock.weak("the audio view rides the `audio` feature");
+        }
         DockTab::Debugger => {
             dock.weak("graph runs attach here — the debugger panel ships with the dynamic seam UI");
         }
@@ -1619,6 +1771,38 @@ fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shar
 
 fn count_subtree(entity: &Entity) -> usize {
     1 + entity.children().iter().map(count_subtree).sum::<usize>()
+}
+
+/// A collision shape as the physics view's row text.
+fn shape_label(shape: &crate::game::physics::Shape) -> String {
+    match shape {
+        crate::game::physics::Shape::Box(h) => {
+            format!("box {:.2}x{:.2}x{:.2} (half)", h.x, h.y, h.z)
+        }
+        crate::game::physics::Shape::Sphere(r) => format!("sphere r={r:.2}"),
+    }
+}
+
+/// An audio source as the audio view's row text.
+#[cfg(feature = "audio")]
+fn source_label(source: &crate::game::audio::AudioSource) -> String {
+    match source {
+        crate::game::audio::AudioSource::File(path) => format!("file {path}"),
+        crate::game::audio::AudioSource::Tone {
+            frequency,
+            duration,
+            shape,
+        } => format!(
+            "tone {:.0} Hz {:.2}s {}",
+            frequency,
+            duration,
+            match shape {
+                crate::game::audio::WaveShape::Sine => "sine",
+                crate::game::audio::WaveShape::Square => "square",
+                crate::game::audio::WaveShape::Noise => "noise",
+            },
+        ),
+    }
 }
 
 fn count_child_components(entity: &Entity) -> usize {
@@ -1725,7 +1909,7 @@ fn draw_toolbar(
             }
         }
         if row.small_button("+").clicked() {
-            open_file_dialog(state, false);
+            open_file_dialog(state, DialogPurpose::SceneOpen);
         }
         if let Some(i) = switch_tab {
             if i != state.active_tab {
@@ -2643,9 +2827,9 @@ pub fn ensure_hyg_suffix(name: &str) -> String {
 
 /// Open the NATIVE file dialog (save or load) on a worker thread; the
 /// UI polls for the result each frame.
-fn open_file_dialog(state: &mut EditorState, save: bool) {
-    let default_name = if save {
-        state
+fn open_file_dialog(state: &mut EditorState, purpose: DialogPurpose) {
+    let default_name = match purpose {
+        DialogPurpose::SceneSave => state
             .tabs
             .get(state.active_tab)
             .map(|t| {
@@ -2655,9 +2839,8 @@ fn open_file_dialog(state: &mut EditorState, save: bool) {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| format!("{}.json.hyg", t.label))
             })
-            .unwrap_or_else(|| "scene.json.hyg".to_string())
-    } else {
-        String::new()
+            .unwrap_or_else(|| "scene.json.hyg".to_string()),
+        DialogPurpose::SceneOpen | DialogPurpose::ModelImport => String::new(),
     };
     let result: Arc<Mutex<Option<Option<std::path::PathBuf>>>> = Arc::new(Mutex::new(None));
     let done = Arc::new(AtomicBool::new(false));
@@ -2667,15 +2850,17 @@ fn open_file_dialog(state: &mut EditorState, save: bool) {
         std::thread::Builder::new()
             .name("hyg-studio-file-dialog".to_string())
             .spawn(move || {
-                let picked = if save {
-                    rfd::FileDialog::new()
+                let picked = match purpose {
+                    DialogPurpose::SceneSave => rfd::FileDialog::new()
                         .add_filter("hyg scene", &["hyg"])
                         .set_file_name(&default_name)
-                        .save_file()
-                } else {
-                    rfd::FileDialog::new()
+                        .save_file(),
+                    DialogPurpose::SceneOpen => rfd::FileDialog::new()
                         .add_filter("hyg scene", &["hyg"])
-                        .pick_file()
+                        .pick_file(),
+                    DialogPurpose::ModelImport => rfd::FileDialog::new()
+                        .add_filter("glTF model", &["glb", "gltf"])
+                        .pick_file(),
                 };
                 *result.lock().unwrap() = Some(picked);
                 done.store(true, Ordering::SeqCst);
@@ -2686,13 +2871,94 @@ fn open_file_dialog(state: &mut EditorState, save: bool) {
         state.set_status("file dialog thread failed to spawn");
         return;
     }
-    state.files = Some(NativeDialog { save, result, done });
+    state.files = Some(NativeDialog {
+        purpose,
+        result,
+        done,
+    });
 }
 
-/// Poll the in-flight dialog; on completion, run the save/load. Returns
+/// The M4 model import: copy the picked `.glb`/`.gltf` into the active
+/// scene's `assets/` directory (the scene references ITS OWN tree, not
+/// the original location), spawn a root entity carrying an asset-backed
+/// renderer (path relative to the scene file), select it. Under the
+/// `gltf` feature the copy is parse-checked and the renderer materializes
+/// immediately — a broken file refuses the import loudly instead of
+/// landing a blank entity. Headless-testable: the dialog is the only UI.
+///
+/// Returns the copied file name for the status line.
+///
+/// # Errors
+/// The copy or (gltf) the parse fails — the message names the path.
+#[doc(hidden)]
+pub fn import_model(
+    state: &mut EditorState,
+    engine: &mut Engine,
+    src: &std::path::Path,
+) -> Result<String, String> {
+    let scene_dir = std::path::Path::new(&state.scene_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_default();
+    let Some(name) = src.file_name() else {
+        return Err(format!("{} has no file name", src.display()));
+    };
+
+    // parse-check BEFORE anything lands (gltf builds): the import is
+    // loud — a bad file copies nowhere and spawns nothing
+    #[cfg(feature = "gltf")]
+    {
+        let probe = crate::game::Model::from_gltf_file(src)
+            .map_err(|e| format!("{}: {e}", src.display()))?;
+        let (_, half) = probe.bounds();
+        if half.x + half.y + half.z <= 0.0 {
+            return Err(format!("{} contains no vertices", src.display()));
+        }
+    }
+
+    let assets = scene_dir.join("assets");
+    std::fs::create_dir_all(&assets).map_err(|e| format!("assets dir: {e}"))?;
+    let dest = assets.join(name);
+    if src != dest {
+        std::fs::copy(src, &dest).map_err(|e| format!("copy: {e}"))?;
+    }
+    let rel_path = format!("assets/{}", name.to_string_lossy());
+
+    let stem = dest
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model")
+        .to_string();
+    let mut entity = Entity::new(&stem);
+    // spawn where the editor is looking (the orbit target — the new
+    // model is in frame immediately)
+    entity.transform_mut().position = state.orbit.target;
+    entity.add_component(Box::new(
+        crate::game::renderable::MeshRenderer::asset(rel_path.clone(), [1.0, 1.0, 1.0, 1.0]),
+    ));
+    engine.add_entity(entity);
+
+    // materialize now: no scene reload needed for the first look
+    #[cfg(feature = "gltf")]
+    {
+        let path = vec![engine.entities().len() - 1];
+        if let Some(at) = engine.entity_at_mut(&path) {
+            if let Some(renderer) = at.component_mut::<crate::game::renderable::MeshRenderer>() {
+                // the entity stays even on a resolution failure (the file
+                // copied fine) — the status names it; the renderer keeps
+                // its path
+                renderer.resolve(&scene_dir)?;
+            }
+        }
+    }
+
+    state.ui.select(vec![engine.entities().len() - 1]);
+    Ok(name.to_string_lossy().to_string())
+}
+
+/// Poll the in-flight dialog; on completion, run its flow. Returns
 /// while it stays open (harmless — the frame just re-polls).
-fn poll_file_dialog(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
-    let Some(task) = state.files.as_ref() else {
+fn poll_file_dialog(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {    let Some(task) = state.files.as_ref() else {
         return;
     };
     if !task.done.load(Ordering::SeqCst) {
@@ -2701,7 +2967,14 @@ fn poll_file_dialog(state: &mut EditorState, engine: &mut Engine, shared: &Shell
     let task = state.files.take().expect("checked done");
     let picked = task.result.lock().unwrap().take().flatten();
     match picked {
-        Some(path) if task.save => {
+        Some(path) if task.purpose == DialogPurpose::ModelImport => {
+            match import_model(state, engine, &path) {
+                Ok(name) => state.set_status(format!("imported {name} — it renders at the orbit target")),
+                Err(e) => state.set_status(format!("import failed: {e}")),
+            }
+            shared.touch();
+        }
+        Some(path) if task.purpose == DialogPurpose::SceneSave => {
             // the carrier owns the suffix rule — repair what the OS
             // dialog let through
             let name = ensure_hyg_suffix(&path.to_string_lossy());

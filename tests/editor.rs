@@ -1471,3 +1471,85 @@ fn button_labels_land_inside_the_body() {
         );
     }
 }
+
+// ---- M4: the model import flow ----
+
+/// Import copies the model into the active scene's assets/ tree, spawns
+/// a root entity carrying an asset-backed renderer (path relative to the
+/// scene file), and selects it. Under the gltf feature the copy is
+/// parse-checked and the renderer materializes immediately.
+#[cfg(all(feature = "editor", feature = "gltf"))]
+#[test]
+fn import_model_copies_spawns_and_selects() {
+    use hyg::game::editor::shell::{import_model, EditorState};
+    use std::path::Path;
+
+    let dir = std::env::temp_dir().join("hyg-import-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scene dir");
+
+    let mut state = EditorState::new(Camera::default());
+    state.scene_path = dir.join("scene.json.hyg").to_string_lossy().to_string();
+    let mut engine = Engine::new("acme", "import-test");
+
+    // the "picked" file lives OUTSIDE the scene tree — import COPIES it in
+    let src = dir.join("external").join("cube.gltf");
+    std::fs::create_dir_all(src.parent().expect("parent")).expect("src dir");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/cube.gltf"),
+        &src,
+    )
+    .expect("seed the external model");
+
+    let name = import_model(&mut state, &mut engine, &src).expect("imports");
+    assert_eq!(name, "cube.gltf");
+
+    // the copy landed in the scene's assets/
+    assert!(dir.join("assets/cube.gltf").exists(), "copied into assets/");
+
+    // the entity: last root, named after the file, selected, resolved
+    let idx = engine.entities().len() - 1;
+    assert_eq!(state.ui.selection(), Some(&[idx][..]), "the import selects");
+    let entity = engine.entity_at(&[idx]).expect("spawned");
+    assert_eq!(entity.name(), "cube");
+    let renderer = entity
+        .iter_components()
+        .find_map(|c| c.as_any().downcast_ref::<MeshRenderer>())
+        .expect("carries the renderer");
+    assert_eq!(renderer.asset_path(), Some("assets/cube.gltf"));
+    assert!(
+        matches!(
+            renderer.geometry,
+            MeshGeometry::Asset { model: Some(_), .. }
+        ),
+        "materialized immediately — no reload needed"
+    );
+}
+
+/// A broken model refuses the import LOUDLY and lands nothing: no copy
+/// reaches assets/, no entity spawns, the selection is untouched.
+#[cfg(all(feature = "editor", feature = "gltf"))]
+#[test]
+fn import_model_refuses_a_broken_file() {
+    use hyg::game::editor::shell::{import_model, EditorState};
+
+    let dir = std::env::temp_dir().join("hyg-import-broken");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("scene dir");
+
+    let mut state = EditorState::new(Camera::default());
+    state.scene_path = dir.join("scene.json.hyg").to_string_lossy().to_string();
+    let mut engine = Engine::new("acme", "import-broken");
+
+    let src = dir.join("junk.gltf");
+    std::fs::write(&src, "{ not a gltf document").expect("write junk");
+
+    let err = import_model(&mut state, &mut engine, &src).expect_err("refuses");
+    assert!(err.contains("junk.gltf"), "names the path: {err}");
+    assert!(
+        !dir.join("assets").exists(),
+        "the parse runs before the copy lands (nothing in assets/)"
+    );
+    assert!(engine.entities().is_empty(), "no entity spawned");
+    assert_eq!(state.ui.selection(), None, "selection untouched");
+}

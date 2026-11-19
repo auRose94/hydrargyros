@@ -406,6 +406,10 @@ impl Engine {
     /// chain), then non-mesh draw-tier components get their `draw()`.
     /// Public so tests and headless code can drive frames without a window.
     pub fn draw(&mut self) {
+        // a paused editor's frames still materialize declared bodies (the
+        // physics debug view reads them); a running game materialized
+        // them in update already — idempotent either way
+        self.physics_materialize();
         let order = self.update_order();
         let Self {
             renderer,
@@ -504,14 +508,55 @@ impl Engine {
         if self.physics.is_none() {
             return;
         }
+        self.physics_materialize();
+        self.physics.as_mut().expect("checked above").step(dt);
+        let paths = self.all_slot_paths();
+        let physics = self.physics.as_ref();
+        let entities = &mut self.entities;
+        let Some(physics) = physics else {
+            return;
+        };
+
+        // sync poses → entity transforms
+        for path in &paths {
+            let name = {
+                let slot = entities[path[0]].slot_at_mut(&path[1..]);
+                match slot.component.as_any().downcast_ref::<PhysicsBody>() {
+                    Some(body) if body.materialized => body.name.clone(),
+                    _ => continue,
+                }
+            };
+            let Some((position, rotation)) = physics.body_pose(&name) else {
+                continue;
+            };
+            let entity_path = &path[..path.len() - 1];
+            let [first, rest @ ..] = entity_path else {
+                continue;
+            };
+            let Some(entity) = walk_mut(entities, *first, rest) else {
+                continue;
+            };
+            entity.transform_mut().position = position;
+            entity.transform_mut().rotation = rotation;
+        }
+    }
+
+    /// Register any not-yet-registered physics bodies — each spawns at
+    /// its ENTITY's current transform (idempotent: the body's
+    /// `materialized` flag guards it). The step path calls it before
+    /// stepping; the DRAW pass calls it too, so an editor's paused scene
+    /// still shows its declared bodies (the physics debug view reads the
+    /// same records).
+    pub fn physics_materialize(&mut self) {
+        if self.physics.is_none() {
+            return;
+        }
         let paths = self.all_slot_paths();
         let Self {
             physics, entities, ..
         } = self;
         let Some(physics) = physics else { return };
 
-        // materialize bodies that joined since the last frame — each one
-        // spawns at its ENTITY's current transform
         for path in &paths {
             let entity_path = &path[..path.len() - 1];
             let [first, rest @ ..] = entity_path else {
@@ -538,31 +583,6 @@ impl Engine {
                 );
                 body.materialized = true;
             }
-        }
-
-        physics.step(dt);
-
-        // sync poses → entity transforms
-        for path in &paths {
-            let name = {
-                let slot = entities[path[0]].slot_at_mut(&path[1..]);
-                match slot.component.as_any().downcast_ref::<PhysicsBody>() {
-                    Some(body) if body.materialized => body.name.clone(),
-                    _ => continue,
-                }
-            };
-            let Some((position, rotation)) = physics.body_pose(&name) else {
-                continue;
-            };
-            let entity_path = &path[..path.len() - 1];
-            let [first, rest @ ..] = entity_path else {
-                continue;
-            };
-            let Some(entity) = walk_mut(entities, *first, rest) else {
-                continue;
-            };
-            entity.transform_mut().position = position;
-            entity.transform_mut().rotation = rotation;
         }
     }
 
