@@ -82,6 +82,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
     // the camera-preview camera (Some = render the preview each tick)
     let pip_camera = Arc::new(Mutex::new(None));
     let console = Arc::new(Mutex::new(Vec::new()));
+    let ai_busy = Arc::new(AtomicBool::new(false));
     let pump = {
         let engine = Arc::clone(&engine);
         let pumping = Arc::clone(&pumping);
@@ -162,7 +163,17 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
             .map_err(|e| format!("studio pump thread: {e}"))?
     };
 
-    let result = run_shell(engine, sink, title.into(), playing, dirty, frame_size, pip_camera, console);
+    let result = run_shell(
+        engine,
+        sink,
+        title.into(),
+        playing,
+        dirty,
+        frame_size,
+        pip_camera,
+        console,
+        ai_busy,
+    );
     pumping.store(false, Ordering::SeqCst);
     let _ = pump.join();
     result
@@ -179,6 +190,7 @@ fn run_shell(
     frame_size: Arc<Mutex<[u32; 2]>>,
     pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
     console: Arc<Mutex<Vec<String>>>,
+    ai_busy: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut builder = winit::event_loop::EventLoop::<ShellMessage>::with_user_event();
     // the editor normally owns the main thread; the escape hatches cost
@@ -212,6 +224,7 @@ fn run_shell(
         frame_size,
         pip_camera,
         console,
+        ai_busy,
         state: EditorState::new(scene_camera),
         window: None,
         view: None,
@@ -235,6 +248,12 @@ fn run_shell(
         if let Some(path) = found {
             handler.state.ui.select(path);
         }
+    }
+    // EDITOR_PLAY=1: start in play mode (the deterministic-screenshot
+    // hook set's third member — also the rainbow beam's processing
+    // state, since playing counts as processing)
+    if std::env::var("EDITOR_PLAY").as_deref() == Ok("1") {
+        handler.playing.store(true, Ordering::SeqCst);
     }
     // EDITOR_DOCK=<tab>: open a bottom-dock tab at launch (physics /
     // audio / log / stats / console / debugger / profiler) — the
@@ -297,6 +316,12 @@ pub struct ShellShared {
     /// statuses) — the dock's Console tab reads it.
     #[doc(hidden)]
     pub console: Arc<Mutex<Vec<String>>>,
+    /// The AI seam, in embryo: an embedding/agentic harness flips this
+    /// while it works, and the top rainbow beam responds (hues rotate,
+    /// hot spots blaze — the review's "processing or AI is connected
+    /// and they're processing it"). Playing counts as processing too.
+    #[doc(hidden)]
+    pub ai_busy: Arc<AtomicBool>,
 }
 
 impl ShellShared {
@@ -335,6 +360,8 @@ struct ShellHandler {
     pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
     /// The editor console (the dock's Console tab).
     console: Arc<Mutex<Vec<String>>>,
+    /// The AI seam (the rainbow beam's second trigger).
+    ai_busy: Arc<AtomicBool>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -366,6 +393,11 @@ pub struct EditorState {
     fps_frames: u32,
     fps_since: Instant,
     fps: u32,
+    /// The rainbow beam's clock — advances ONLY while something is
+    /// processing (the hues rotate then; at rest the ribbon is still).
+    beam_clock: f32,
+    /// The last frame's egui time (the clock's delta source).
+    beam_last: Option<f64>,
     /// Physical-pixel rect the engine frame letterboxes into (the
     /// picking/gizmo viewport).
     viewport: Option<Viewport>,
@@ -478,6 +510,8 @@ impl EditorState {
             fps_frames: 0,
             fps_since: Instant::now(),
             fps: 0,
+            beam_clock: 0.0,
+            beam_last: None,
             viewport: None,
             name_edit: None,
             tabs: vec![SceneTab {
@@ -716,6 +750,7 @@ impl ShellHandler {
                 frame_size: Arc::clone(&self.frame_size),
                 pip_camera: Arc::clone(&self.pip_camera),
                 console: Arc::clone(&self.console),
+                ai_busy: Arc::clone(&self.ai_busy),
             };
             draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, &shared);
         }
@@ -926,8 +961,8 @@ fn draw_ui(
     ctx.root_ui(|root| {
 // the menu bar spans the top: menus left, transport FAR RIGHT (the
         // user's color language — play GREEN, stop RED, restart ORANGE)
-        egui::containers::Panel::top("studio-menu")
-            .exact_size(30.0)
+        let menu_bar = egui::containers::Panel::top("studio-menu")
+            .exact_size(34.0)
             .show(root, |bar| {
                 bar.horizontal(|row| {
                     egui::MenuBar::new().ui(row, |menu| {
@@ -1138,6 +1173,29 @@ fn draw_ui(
                 });
             });
 
+
+        // the rainbow beam: the window's top edge. The clock advances
+        // ONLY while something is processing (sim playing, or the AI
+        // seam busy) — at rest the ribbon is a calm, still rainbow.
+        let processing =
+            shared.playing.load(Ordering::SeqCst) || shared.ai_busy.load(Ordering::SeqCst);
+        let now = ctx.input(|i| i.time);
+        if let Some(last) = state.beam_last {
+            if processing {
+                // clamp: a paused tab's resume jump shouldn't fast-forward
+                state.beam_clock += (now - last).min(0.1) as f32;
+            }
+        }
+        state.beam_last = Some(now);
+        {
+            let rect = menu_bar.response.rect;
+            let beam_rect = egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(rect.width(), style::BEAM_HEIGHT),
+            );
+            let painter = root.painter_at(beam_rect);
+            style::paint_beam(&painter, beam_rect, state.beam_clock, processing);
+        }
 
         // the toolbar: gizmo modes, scene tabs, fps (transport moved to
         // the menu bar's right end)
@@ -1601,7 +1659,12 @@ fn draw_dock(
             }
         }
     });
-    dock.add(egui::Separator::default().spacing(2.0));
+    // the divider TOUCHES the tab row: scoped zero item spacing (the
+    // default 8pt gap read as a floating line)
+    dock.scope(|sep| {
+        sep.style_mut().spacing.item_spacing = egui::Vec2::ZERO;
+        sep.add(egui::Separator::default().spacing(2.0));
+    });
     match state.dock_tab {
         DockTab::Log => {
             egui::ScrollArea::vertical()

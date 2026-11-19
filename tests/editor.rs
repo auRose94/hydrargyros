@@ -956,6 +956,7 @@ fn inspector_panel_does_not_grow_over_time() {
         frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
         pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
         console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     let ctx = egui::Context::default();
@@ -1552,4 +1553,45 @@ fn import_model_refuses_a_broken_file() {
     );
     assert!(engine.entities().is_empty(), "no entity spawned");
     assert_eq!(state.ui.selection(), None, "selection untouched");
+}
+
+// ---- the rainbow beam ----
+
+/// The wheel turns while processing: the same segment's color differs
+/// across the phase (the shell advances the clock only while the sim
+/// runs or the AI seam is busy — at rest the ribbon holds still, and
+/// the sparkle collapses to its resting level).
+#[cfg(feature = "editor")]
+#[test]
+fn beam_hues_rotate_with_the_processing_clock() {
+    use hyg::game::editor::style::beam_color;
+    let a = beam_color(8.0, 64.0, 0.0, true);
+    let b = beam_color(8.0, 64.0, 0.5, true);
+    assert!(a != b, "the hues rotate with the clock");
+
+    // the hot spots rest when nothing is processing
+    let hot = hyg::game::editor::style::beam_sparkle(9.0, 64.0, 4.0, true);
+    let rest = hyg::game::editor::style::beam_sparkle(9.0, 64.0, 4.0, false);
+    assert_eq!(rest, 0.0, "idle = no sparkle lift");
+    assert!(hot > rest, "processing blazes above the rest state");
+}
+
+/// The hot spots are a deterministic random pattern: same inputs give
+/// the same intensity, segments differ, and most segments stay calm —
+/// a few blaze, not all.
+#[cfg(feature = "editor")]
+#[test]
+fn beam_sparkle_is_deterministic_and_localized() {
+    use hyg::game::editor::style::beam_sparkle;
+    assert_eq!(
+        beam_sparkle(7.0, 64.0, 1.25, true),
+        beam_sparkle(7.0, 64.0, 1.25, true),
+        "deterministic"
+    );
+    let hot = (0..64)
+        .map(|i| beam_sparkle(i as f32, 64.0, 2.0, true))
+        .filter(|s| *s > 0.7)
+        .count();
+    assert!(hot < 48, "the hot spots stay sparse ({hot}/64)");
+    assert!(hot > 0, "something actually blazes at this phase");
 }

@@ -10,21 +10,23 @@ use egui::{
     StrokeKind, ThemePreference, Ui, Visuals,
 };
 
-// chrome colors (dim button fills — text stays the palette's TEXT on
-// them). Single source for the transport's color coding and any future
-// accent widgets.
-pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x2e, 0x45, 0x62);
-pub const GOLD_DIM: Color32 = Color32::from_rgb(0x5e, 0x4c, 0x21);
-pub const GREEN_DIM: Color32 = Color32::from_rgb(0x27, 0x4a, 0x2c);
-pub const DANGER_DIM: Color32 = Color32::from_rgb(0x54, 0x27, 0x2b);
+// chrome colors — VIVID (the review: "bright and colorful even for
+// neutral/no-interaction"): every button fill is saturated even at rest,
+// the glass layers add the depth. Single source for the transport's
+// color coding and any future accent widgets. The *_DIM names stay
+// (call sites read them as "the not-engaged variant"); the VALUES no
+// longer are.
+pub const ACCENT_DIM: Color32 = Color32::from_rgb(0x3f, 0x8f, 0xd2);
+pub const GOLD_DIM: Color32 = Color32::from_rgb(0xc9, 0x9a, 0x1e);
+pub const GREEN_DIM: Color32 = Color32::from_rgb(0x2f, 0xa1, 0x4a);
+pub const DANGER_DIM: Color32 = Color32::from_rgb(0xd6, 0x45, 0x4d);
 // the transport's color language (user-specified): play green, stop
-// red, restart orange — bright enough to read as buttons, dark enough
-// for the dark theme
-pub const PLAY_GREEN: Color32 = Color32::from_rgb(0x2f, 0x7d, 0x3d);
-pub const STOP_RED: Color32 = Color32::from_rgb(0xb0, 0x38, 0x3d);
-pub const RESTART_ORANGE: Color32 = Color32::from_rgb(0xb5, 0x6a, 0x24);
+// red, restart orange — vivid at rest, radioactive when the halo joins
+pub const PLAY_GREEN: Color32 = Color32::from_rgb(0x2f, 0xb1, 0x4a);
+pub const STOP_RED: Color32 = Color32::from_rgb(0xe0, 0x41, 0x48);
+pub const RESTART_ORANGE: Color32 = Color32::from_rgb(0xe8, 0x86, 0x2a);
 // the create button's green
-pub const CREATE_GREEN: Color32 = Color32::from_rgb(0x2f, 0x7d, 0x3d);
+pub const CREATE_GREEN: Color32 = Color32::from_rgb(0x2f, 0xb1, 0x4a);
 
 /// The dark palette: quicksilver on deep space.
 pub mod dark {
@@ -332,6 +334,100 @@ pub fn paint_glass_button(
     );
     painter.rect_filled(spec, CornerRadius::same(3), with_alpha(Color32::WHITE, spec_a));
     paint_label(painter, rect, label, state, dark)
+}
+
+// ---- the rainbow beam ----
+//
+// A ribbon of rainbow color along the very top of the window, beaming
+// light down into the chrome. While a session is processing (sim
+// playing, or the AI seam busy — see `ShellShared::processing`) the
+// hues ROTATE and random "hot spots" brighten along the length at
+// random intensities; at rest the ribbon holds a calm, still rainbow.
+
+/// A segment's hue, degrees. The rainbow spreads across the window and
+/// the whole wheel rotates with `phase` (which the shell advances only
+/// while processing).
+#[must_use]
+pub fn beam_hue(segment: f32, segments: f32, phase: f32) -> f32 {
+    (segment / segments * 360.0 + phase * 40.0) % 360.0
+}
+
+/// A segment's sparkle: a deterministic 0..=1 hot-spot intensity —
+/// pseudo-random per segment, drifting smoothly with `phase`. Idle
+/// (not processing) collapses to a low resting shimmer.
+#[must_use]
+pub fn beam_sparkle(segment: f32, _segments: f32, phase: f32, processing: bool) -> f32 {
+    if !processing {
+        return 0.0;
+    }
+    // hash of segment + slow time → per-segment random walk
+    let n = (segment * 12.9898 + (phase * 0.7).sin() * 78.233).fract() * 43758.55;
+    let wobble = (n * std::f32::consts::TAU + phase * 3.0).sin() * 0.5 + 0.5;
+    wobble * wobble // sharpen: most segments calm, a few blaze
+}
+
+/// One segment's color: fully saturated HSV, value lifted by the
+/// sparkle (processing) or at a calm rest level.
+#[must_use]
+pub fn beam_color(segment: f32, segments: f32, phase: f32, processing: bool) -> Color32 {
+    let hue = beam_hue(segment, segments, phase);
+    let value = 0.8 + 0.2 * beam_sparkle(segment, segments, phase, processing);
+    hsv_to_color(hue, 1.0, value)
+}
+
+/// HSV → RGB (hue degrees, s/v 0..=1) — the beam's tiny color math,
+/// kept local so the ribbon needs no dependency.
+#[must_use]
+fn hsv_to_color(hue: f32, s: f32, v: f32) -> Color32 {
+    let c = v * s;
+    let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let m = v - c;
+    let (r, g, b) = match hue as u32 % 360 / 60 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    Color32::from_rgb(
+        ((r + m) * 255.0) as u8,
+        ((g + m) * 255.0) as u8,
+        ((b + m) * 255.0) as u8,
+    )
+}
+
+/// The beam's height: a 2px rainbow line plus the light it beams down.
+pub const BEAM_HEIGHT: f32 = 22.0;
+
+/// Paint the beam across `rect` (the window's top strip). One mesh: the
+/// top vertex row carries the segment colors at full alpha (the ribbon
+/// line), the bottom row the same hues fading to transparent — the
+/// light shining down into the chrome. Alpha is modest so the menu bar
+/// under it stays readable.
+pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, processing: bool) {
+    let segments = 64.0f32;
+    let mut mesh = Mesh::default();
+    let step = rect.width() / segments;
+    let x0 = rect.left();
+    for i in 0..=(segments as u32) {
+        let seg = i as f32;
+        let color = beam_color(seg, segments, phase, processing);
+        let x = x0 + seg * step;
+        mesh.colored_vertex(
+            egui::pos2(x, rect.top()),
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 255),
+        );
+        mesh.colored_vertex(
+            egui::pos2(x, rect.top() + BEAM_HEIGHT),
+            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 26),
+        );
+    }
+    let top = (0..=(segments as u32)).map(|i| i * 2).collect::<Vec<_>>();
+    for w in top.windows(2) {
+        mesh.indices.extend_from_slice(&[w[0], w[0] + 1, w[1] + 1, w[0], w[1] + 1, w[1]]);
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Paint the flat alternative: an opaque semantic fill with a thin
