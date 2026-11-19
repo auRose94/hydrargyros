@@ -140,6 +140,23 @@ pub fn fit_extents(surface: (u32, u32), image: (u32, u32)) -> [f32; 2] {
     }
 }
 
+/// The exact-rect blit uniform (xy = clip half-extents, zw = clip center)
+/// mapping a surface-pixel rect onto the surface 1:1 — the Studio's
+/// viewport underlay. Pure so the regression test can pin the mapping:
+/// the quad's corners must land on the rect's corners in pixels.
+pub fn rect_to_clip(surface: (u32, u32), rect: [f32; 4]) -> [f32; 4] {
+    let (sw, sh) = (surface.0.max(1) as f32, surface.1.max(1) as f32);
+    let (rx, ry, rw, rh) = (rect[0], rect[1], rect[2], rect[3]);
+    // clip: 1 unit = sw/2 px horizontally, sh/2 vertically; pixel y is
+    // down, clip y up (clip(y) = 1 - 2y/sh)
+    [
+        rw / sw,
+        rh / sh,
+        (rx + rw * 0.5) * 2.0 / sw - 1.0,
+        1.0 - (ry + rh * 0.5) * 2.0 / sh,
+    ]
+}
+
 /// The blit: a uv-driven quad (six vertices) whose clip rect is the
 /// letterbox fit, the frame texture sampled with the bilinear sampler.
 /// `pub(crate)`: the Studio shell composites the same underlay pass (the
@@ -368,6 +385,22 @@ impl BlitView {
             1.0 - 2.0 * rect_px[1] / sh - extents[1],
         ];
         let floats = [extents[0], extents[1], center[0], center[1]];
+        let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
+        self.queue.write_buffer(&self.fit, 0, &bytes);
+    }
+
+    /// Map the frame EXACTLY onto a pixel rect of the surface, 1:1, no
+    /// aspect fit. The Studio's viewport path: the engine renders the
+    /// frame AT the panel's size, so the blit must copy it panel-sized —
+    /// the letterbox rule here would rescale the content against the
+    /// WINDOW's aspect instead of the panel's, magnifying the frame
+    /// whenever the panel is wider-ratio than the window (a maximized
+    /// editor's central panel always is) and drifting it off the egui
+    /// overlay the gizmos draw in (caught 2026-11-19: the drifter mesh
+    /// rendered ~235 px right of the gizmo standing exactly on its
+    /// projected position).
+    pub(crate) fn set_rect_exact(&self, surface: (u32, u32), rect: [f32; 4]) {
+        let floats = rect_to_clip(surface, rect);
         let bytes: Vec<u8> = floats.iter().flat_map(|f| f.to_ne_bytes()).collect();
         self.queue.write_buffer(&self.fit, 0, &bytes);
     }

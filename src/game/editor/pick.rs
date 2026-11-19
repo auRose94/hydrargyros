@@ -62,27 +62,35 @@ impl Viewport {
     }
 }
 
-/// A 4×4 matrix in ROW-major math convention (`m[row][col]`), the shape
-/// the inverse and multipliers below work in. The camera's
-/// [`view_projection`](crate::game::Camera::view_projection) stores
-/// columns (`m[col][row]`) — [`matrix_from_camera`] transposes on the
-/// way in.
+/// A 4×4 matrix in ROW-major storage: `m[row]` is a clip row and
+/// `clip[r] = dot(m[r], world)` — the convention every function in this
+/// module consumes. The camera hands out column-major data (WGSL's
+/// order — see [`crate::game::camera::Camera::view_projection`]), so
+/// [`matrix_from_camera`] transposes once at the boundary and the rest
+/// of the module is plain row-major math.
 type Mat4 = [[f32; 4]; 4];
 
-/// The camera's view·projection as a row-major math matrix.
+/// The camera's view·projection, transposed from WGSL's column-major
+/// storage into this module's row-major [`Mat4`]. Skipping the transpose
+/// silently applies the matrix's transpose — for an eye on the world z
+/// axis the x/y rows coincide with their columns, so projected PIXELS
+/// still match the render while every depth-dependent answer (ray
+/// direction, near/far unprojection, the behind-camera w test) is bent
+/// (caught 2026-11-19: the center-pixel pick ray pointed −z, AWAY from
+/// the scene).
 #[must_use]
 fn matrix_from_camera(camera: &Camera) -> Mat4 {
-    let vp = camera.view_projection();
-    let mut m = [[0.0f32; 4]; 4];
-    for col in 0..4 {
-        for row in 0..4 {
-            m[row][col] = vp[col][row];
+    let m = camera.view_projection();
+    let mut out = [[0.0f32; 4]; 4];
+    for (r, out_row) in out.iter_mut().enumerate() {
+        for (c, cell) in out_row.iter_mut().enumerate() {
+            *cell = m[c][r];
         }
     }
-    m
+    out
 }
 
-/// Matrix·vector (w = 1).
+/// Matrix·vector (w = 1): clip[r] = dot(m[r], world).
 #[must_use]
 fn mul_point(m: &Mat4, p: Vec3) -> [f32; 4] {
     let v = [p.x, p.y, p.z, 1.0];
@@ -166,13 +174,14 @@ pub fn pick_ray(camera: &Camera, viewport: &Viewport, px: [f32; 2]) -> Option<Ra
     let inv = mat4_inverse(&m)?;
     let [nx, ny] = viewport.normalize(px);
     let unproject = |z_ndc: f32| -> Vec3 {
-        // row·(nx, ny, z_ndc, 1), then the perspective divide
-        let c = [
-            nx * 2.0 - 1.0,
-            (1.0 - ny) * 2.0 - 1.0, // pixel y down → clip y up
-            z_ndc,
-            1.0,
-        ];
+        // pixel y down → clip y up; the engine maps depth to z ∈ [0, 1]
+        let c = [nx * 2.0 - 1.0, (1.0 - ny) * 2.0 - 1.0, z_ndc, 1.0];
+        // ROW-dot, same as mul_point: mul_point consumes the array
+        // row-major (clip[r] = dot(vp[r], world)) and mat4_inverse
+        // inverts THAT in place, so the unproject is dot(inv[r], clip)
+        // — NOT inv[·][r], which applies the transpose and bends the
+        // ray (caught 2026-11-19: the round trip missed (4,0,2) by
+        // 2.29 world units with the transposed application)
         let mut out = [0.0f32; 4];
         for row in 0..4 {
             out[row] = inv[row][0] * c[0]

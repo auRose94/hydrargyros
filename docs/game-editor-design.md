@@ -181,32 +181,47 @@ the scene round-trip contract is already format-agnostic through `Var`).
   lines in that pass). Picking = raycast: physics raycasts exist; for
   non-physics entities, a CPU ray vs entity AABB pass at pick time.
 
-  **As-built (M2).** Picking landed as the CPU-ray pass: a click unprojects
-  through the camera's inverse view-projection into a world ray, and each
-  entity's pick proxy (a box — the shape-mode renderer's `half_size`, or a
-  unit cube for models) is slab-tested in its composed world transform;
-  nearest wins, disabled entities are transparent (`editor/pick.rs`,
-  feature-free). Gizmos landed in SCREEN space painted by egui (not the
-  quad pipeline): the handles are sized in pixels (grabbable at any
-  distance), each axis measures its own px-per-world-unit at the entity's
-  depth so drags map back to honest world deltas, the translate center
-  moves in the view plane, and the rotate ring turns around the camera's
-  forward — the pick/gizmo math is feature-free (`editor/gizmo.rs`) and
-  the shell paints it. Undo/redo is the designed command stack of
-  `(path, old, new)` records with per-drag coalescing (a 400ms window
-  folds a drag into one step; the folded command keeps the gesture's
-  starting value), and Delete OWNS the removed subtree (undo re-inserts
-  it; redo re-removes). Scene save/load is the M0 carrier from the
-  bottom bar (path field + buttons; loading replaces the roots + camera
-  and clears the undo history). Theme: dark default — quicksilver
-  (deep blue-gray, silver-blue accents, gold selection) — with a light
-  palette for bright rooms; style grows from here. The done-when's
-  "pixel tests assert gizmo rendering" landed as GEOMETRY-level
-  assertions: a headless egui pass tessellates the painted gizmo and
-  asserts the vertex count and that every vertex lands inside the
-  viewport (the pixel pass composites it in the shell). Editor camera
-  controls (orbit/fly) remain future work — picking runs through the
-  scene camera.
+  **As-built (M2, through round 9).** Picking landed as the CPU-ray pass:
+  a click unprojects through the camera's inverse view-projection into a
+  world ray, and each entity's pick proxy (a box — the shape-mode
+  renderer's `half_size`, or a unit cube for models) is slab-tested in its
+  composed world transform; nearest wins, disabled entities are
+  transparent (`editor/pick.rs`, feature-free). Gizmos paint in SCREEN
+  space via egui (not the quad pipeline), but their geometry is
+  WORLD-locked: the handles are true MVP projections of entity + axis ×
+  `GIZMO_WORLD_LEN` (1.4 world units — the gizmo scales with viewport
+  zoom like the geometry), with a px floor so far-zoomed handles stay
+  grabbable. Conventions pinned by round 9 (both broke as "the gizmo
+  isn't on the entity"): `Camera::view_projection()` is COLUMN-major
+  (WGSL's storage order) — the editor's math transposes once at
+  `matrix_from_camera` and is row-major after (`matrix_from_camera`
+  skipping the transpose bends every depth answer while pixels LOOK
+  right for an on-axis eye); and the shell's blit maps the frame
+  EXACTLY onto the viewport panel rect (`BlitView::set_rect_exact` —
+  the letterbox rule rescales against the window's aspect and drifts
+  the scene off the egui overlay). The proof chain — headless mesh
+  render ≡ `project_point` ≡ painted gizmo at half-pixel precision for
+  an off-axis orbit pose — lives in `tests/editor.rs` (round-trip,
+  mesh-marker pixel test, zoom-respect). Drags map px deltas back
+  through each axis's px-per-world-unit at the entity's depth; the
+  translate center moves in the view plane; the rotate ring turns
+  around the camera's forward — the pick/gizmo math is feature-free
+  (`editor/gizmo.rs`) and the shell paints it. Undo/redo is the
+  designed command stack of `(path, old, new)` records with per-drag
+  coalescing (a 400ms window folds a drag into one step; the folded
+  command keeps the gesture's starting value), and Delete OWNS the
+  removed subtree (undo re-inserts it; redo re-removes). Scene
+  save/load is the M0 carrier from the bottom bar (path field +
+  buttons; loading replaces the roots + camera and clears the undo
+  history). Theme: dark default — quicksilver (deep blue-gray,
+  silver-blue accents, gold selection) — with a light palette for
+  bright rooms; style grows from here. The done-when's "pixel tests
+  assert gizmo rendering" landed as GEOMETRY-level assertions: a
+  headless egui pass tessellates the painted gizmo and asserts the
+  vertex count and that every vertex lands inside the viewport (the
+  pixel pass composites it in the shell). The editor camera is the
+  orbit (`editor/camera_ctl.rs`: right-drag orbit, middle-drag pan,
+  wheel zoom, ortho toggle) — fly mode remains future work.
 - **Undo/redo:** a command stack of `(path, old, new)` `put()` records over
   the live `Var` tree, coalescing per drag/frame. Because scenes are plain
   data, undo is not special — it's `set_path` bookkeeping.

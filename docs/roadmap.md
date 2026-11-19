@@ -950,7 +950,35 @@ seams it grows through.
    correct; a distance-scaled world length would have canceled the
    zoom into a constant screen size — caught by the new zoom-respect
    test before it shipped). M4 — assets (import flows, debug views) —
-   is the next rung.
+   is the next rung. **Round 9 (2026-11-19): the gizmo lands on the
+   entity — two matrix-convention bugs found and killed.** Rose's
+   review: "the gizmo isn't on top of the entity"; the pick ray bent
+   away from the scene (center-pixel rays pointed −z, AWAY from the
+   world). Root cause 1: `pick.rs` consumed `Camera::view_projection()`
+   as ROW-major, but the camera hands out COLUMN-major data (WGSL's
+   order — `render_wgpu` documents it). Applying the transpose left
+   projected PIXELS looking right for an on-axis eye (the x/y rows
+   coincide with their columns) while every depth answer — ray
+   direction, near/far unprojection, the behind-camera w test — bent;
+   `matrix_from_camera` now transposes once at the boundary and the
+   module is honest row-major math. Root cause 2: the shell's blit
+   underlay sized the frame quad by the LETTERBOX rule against the
+   WINDOW's aspect, but the frame is rendered at the PANEL's size — a
+   maximized editor's central panel is always wider-ratio than the
+   window, so the scene magnified ~×1.19 and drifted ~235 px off the
+   egui layer the gizmos draw in; `BlitView::set_rect_exact` maps the
+   frame 1:1 onto the panel rect (corner-pinned, regression-tested).
+   Proof chain: headless mesh render ≡ `project_point` ≡ live gizmo
+   position at half-pixel precision for the editor's off-axis orbit
+   pose; the round-trip test (`pick_ray(project_point(p))` passes
+   through p) and the mesh-marker pixel test pin the conventions.
+   Also landed: `EDITOR_SELECT=<name>` env hook (deterministic
+   pre-selection for review screenshots), demo scene fully 3D (mesh
+   floor/ball/drifter — the quad path is 2D-only under perspective
+   cameras). 34 editor tests; suite 360 `--all-features`, clippy
+   clean; visual gate passed live (gizmo on the drifter, Rose
+   confirmed). M4 — assets (import flows, debug views) — is the next
+   rung.
 
 ## What hyg will NOT do
 

@@ -451,7 +451,28 @@ mod qr_contract {
 mod native_view_helpers {
     // the native view's pure seams: the loop can't run in CI, but the
     // letterbox fit math and the frame-skip rule are extracted and tested
-    use hyg::game::native_view::{fit_extents, should_present};
+    use hyg::game::native_view::{fit_extents, rect_to_clip, should_present};
+
+    #[test]
+    fn rect_to_clip_maps_a_panel_rect_one_to_one() {
+        // the round-9 shape: a maximized editor's central panel is
+        // WIDER-ratio than the window — the letterbox rule magnified the
+        // frame past the panel and drifted the scene ~235 px off the
+        // egui layer the gizmos draw in. The exact mapping must land
+        // the blit quad's corners on the rect's corners, in pixels.
+        let surface = (3440u32, 1440u32);
+        let rect = [240.0f32, 121.0, 2900.0, 1179.0]; // x, y, w, h
+        let [ex, ey, cx, cy] = rect_to_clip(surface, rect);
+        // clip back to pixels: px = (clip + 1)/2 · dim (x), (1 − clip)/2 · dim (y)
+        let left = (cx - ex + 1.0) * 0.5 * surface.0 as f32;
+        let right = (cx + ex + 1.0) * 0.5 * surface.0 as f32;
+        let top = (1.0 - (cy + ey)) * 0.5 * surface.1 as f32;
+        let bottom = (1.0 - (cy - ey)) * 0.5 * surface.1 as f32;
+        assert!((left - rect[0]).abs() < 1e-3, "left {left} vs {}", rect[0]);
+        assert!((right - (rect[0] + rect[2])).abs() < 1e-3, "right {right}");
+        assert!((top - rect[1]).abs() < 1e-3, "top {top} vs {}", rect[1]);
+        assert!((bottom - (rect[1] + rect[3])).abs() < 1e-3, "bottom {bottom}");
+    }
 
     #[test]
     fn fit_extents_letterboxes_any_aspect() {

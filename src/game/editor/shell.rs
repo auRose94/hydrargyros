@@ -218,9 +218,40 @@ fn run_shell(
         egui_ctx: None,
         egui_state: None,
     };
+    // EDITOR_SELECT=<name>: pre-select the first entity bearing that name
+    // (depth-first through the roots) — a deterministic hook for review
+    // screenshots and pixel probes; unset, the studio starts unselected
+    if let Ok(want) = std::env::var("EDITOR_SELECT") {
+        let engine = crate::lock(&handler.engine);
+        let mut found = None;
+        for (i, root) in engine.entities().iter().enumerate() {
+            let mut path = vec![i];
+            if root.name() == want || find_by_name(root, &want, &mut path) {
+                found = Some(path);
+                break;
+            }
+        }
+        drop(engine);
+        if let Some(path) = found {
+            handler.state.ui.select(path);
+        }
+    }
     event_loop
         .run_app(&mut handler)
         .map_err(|e| format!("studio: event loop error: {e}"))
+}
+
+/// Depth-first search for an entity by name, appending child indices to
+/// `path` as it descends. `Some(())` (with `path` completed) when found.
+fn find_by_name(entity: &crate::game::Entity, want: &str, path: &mut Vec<usize>) -> bool {
+    for (i, child) in entity.children().iter().enumerate() {
+        path.push(i);
+        if child.name() == want || find_by_name(child, want, path) {
+            return true;
+        }
+        path.pop();
+    }
+    false
 }
 
 /// Internal message through the event-loop proxy (the M3 surface: pump
@@ -713,12 +744,14 @@ impl ShellHandler {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             // the frame maps exactly onto the viewport panel's rect
-            // (last frame's layout — panels are stable between frames)
+            // (last frame's layout — panels are stable between frames).
+            // EXACT, not the letterbox rule: the frame is rendered at
+            // the panel's size, so any rescale against the window's
+            // aspect drifts the scene off the egui layer (the gizmos)
             match self.state.viewport {
-                Some(vp_view) => view.blit.set_fit_rect(
-                    (surface_wh.0, surface_wh.1),
-                    (frame_dims[0].max(1), frame_dims[1].max(1)),
-                    [vp_view.x, vp_view.y],
+                Some(vp_view) => view.blit.set_rect_exact(
+                    surface_wh,
+                    [vp_view.x, vp_view.y, vp_view.width, vp_view.height],
                 ),
                 None => view.blit.set_fit_rect(
                     (surface_wh.0, surface_wh.1),

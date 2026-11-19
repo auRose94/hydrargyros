@@ -320,24 +320,23 @@ fn picking_hits_the_frontmost_entity() {
     let camera = pick_camera();
     let view = view();
 
+    // MESH entities — 3D scenes render through the mesh/VP path, and
+    // the pick/gizmo must match THAT (quads are the 2D/ortho path;
+    // their x maps oppositely under perspective cameras)
+    let box_renderer = || {
+        MeshRenderer::model(
+            std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+                hyg::game::Mesh::cube(Vec3::new(1.0, 1.0, 1.0)),
+            ))),
+            [1.0, 1.0, 1.0, 1.0],
+        )
+    };
     let mut near = Entity::new("near");
     near.transform_mut().position = Vec3::new(0.0, 0.0, 0.0);
-    near.add_component(Box::new(MeshRenderer::new(
-        MeshGeometry::Shape {
-            shape: MeshShape::Rect,
-            half_size: Vec3::new(1.0, 1.0, 1.0),
-        },
-        [1.0, 1.0, 1.0, 1.0],
-    )));
+    near.add_component(Box::new(box_renderer()));
     let mut far = Entity::new("far");
     far.transform_mut().position = Vec3::new(4.0, 0.0, 2.0);
-    far.add_component(Box::new(MeshRenderer::new(
-        MeshGeometry::Shape {
-            shape: MeshShape::Rect,
-            half_size: Vec3::new(1.0, 1.0, 1.0),
-        },
-        [1.0, 1.0, 1.0, 1.0],
-    )));
+    far.add_component(Box::new(box_renderer()));
     engine.add_entity(near);
     engine.add_entity(far);
 
@@ -778,6 +777,73 @@ fn failed_reload_keeps_the_old_script() {
     std::fs::remove_dir_all(dir).ok();
 }
 
+// ---- round 9: the gizmo placement vs THE RENDERER (the real contract) ----
+
+/// THE placement contract, pinned against the renderer's actual pixels:
+/// a bright marker rendered at a known world position must appear at
+/// exactly the pixel `project_point` predicts. The drag math was self-
+/// consistent (project_point on both sides); THIS is the test that
+/// would catch a convention mismatch between the editor's math and the
+/// render pipeline (transpose, y-flip, aspect).
+#[cfg(feature = "editor")]
+#[test]
+fn gizmo_projection_matches_the_rendered_pixels() {
+    use hyg::game::editor::pick::{project_point, Viewport};
+    use hyg::game::render_wgpu::WgpuRenderer;
+    use hyg::game::render::RenderBackend;
+
+    let camera = pick_camera();
+    let (width, height) = (960u32, 540u32);
+    let viewport = Viewport::new(0.0, 0.0, width as f32, height as f32);
+    let world = Vec3::new(1.2, 0.8, 0.0); // off-center, so the test has teeth
+
+    let mut renderer = pollster::block_on(WgpuRenderer::new_offscreen(width, height))
+        .expect("a wgpu adapter for the pixel test");
+    renderer.begin_scene(&camera, &[]);
+    // a MESH marker (red cube) — 3D scenes render through the mesh/VP
+    // path, so the placement contract pins to THAT path (the quad
+    // pipeline maps x differently under perspective cameras — the two
+    // paths are the known 2D/3D split)
+    let model = std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+        hyg::game::Mesh::cube(Vec3::new(0.08, 0.08, 0.08)),
+    )));
+    renderer.push_model(
+        &hyg::game::Transform {
+            position: world,
+            ..hyg::game::Transform::default()
+        },
+        &model,
+        [2.5, 0.1, 0.1, 1.0], // bright red over the 0.45 ambient
+    );
+    renderer.render_frame();
+
+    // find the red marker's pixel centroid in the readback
+    let shot = renderer.screenshot();
+    assert_eq!(shot.len(), (width * height * 4) as usize, "rgba readback");
+    let mut sum_x = 0.0f64;
+    let mut sum_y = 0.0f64;
+    let mut count = 0u64;
+    for py in 0..height as usize {
+        for px in 0..width as usize {
+            let i = (py * width as usize + px) * 4;
+            let (r, g, b) = (shot[i], shot[i + 1], shot[i + 2]);
+            if r > 140 && g < 80 && b < 80 {
+                sum_x += px as f64;
+                sum_y += py as f64;
+                count += 1;
+            }
+        }
+    }
+    assert!(count > 4, "the marker rendered: {count} red pixels");
+    let rendered = [(sum_x / count as f64) as f32, (sum_y / count as f64) as f32];
+
+    let predicted = project_point(&camera, &viewport, world).expect("in front");
+    assert!(
+        (rendered[0] - predicted[0]).abs() < 3.0 && (rendered[1] - predicted[1]).abs() < 3.0,
+        "project_point predicted {predicted:?}, the renderer drew {rendered:?}"
+    );
+}
+
 // ---- round 6: the camera component defaults ----
 
 /// A fresh camera component is the 3D default (perspective, framed on
@@ -796,6 +862,28 @@ fn camera_component_defaults_to_3d_and_main() {
     );
     assert!(camera.main);
     assert_eq!(camera.camera.position, Vec3::new(0.0, 0.0, -8.0));
+}
+
+// ---- round 8: the pick ray must round-trip through the projection ----
+
+/// pick_ray(project_point(p)) must be the ray through p — the pick and
+/// the placement share one convention. This pins it at (4, 0, 2): the
+/// click through the projected point must pass through the point.
+#[test]
+fn pick_ray_round_trips_through_the_projection() {
+    let camera = pick_camera();
+    let view = view();
+    let point = Vec3::new(4.0, 0.0, 2.0);
+
+    let px = pick::project_point(&camera, &view, point).expect("projects");
+    let ray = pick::pick_ray(&camera, &view, px).expect("ray");
+
+    // the ray's closest approach to the point
+    let to_point = point - ray.origin;
+    let t = to_point.dot(ray.dir);
+    let closest = ray.origin + ray.dir.scaled(Vec3::splat(t));
+    let miss = (closest - point).length();
+    assert!(miss < 0.05, "the ray misses the point by {miss}");
 }
 
 // ---- round 7: the gizmo respects zoom ----

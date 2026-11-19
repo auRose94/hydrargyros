@@ -13,7 +13,7 @@ use hyg::game::camera::Projection;
 use hyg::game::editor::shell;
 use hyg::game::physics::PhysicsWorld;
 use hyg::game::physics_body::PhysicsBody;
-use hyg::game::renderable::{MeshGeometry, MeshRenderer, MeshShape};
+use hyg::game::renderable::MeshRenderer;
 use hyg::game::render_wgpu::WgpuRenderer;
 use hyg::game::{Camera, Engine, Entity};
 use hyg::var::Vec3;
@@ -64,16 +64,19 @@ fn build_engine(sink: hyg::game::FrameSink) -> Engine {
     renderer.attach_sink(sink);
     engine.set_renderer(Box::new(renderer));
 
+    // 3D primitives for the 3D default scene: meshes (cubes/spheres)
+    // render through the perspective/VP path — the quad pipeline is the
+    // 2D/ortho path, and mixing them under a perspective camera reads
+    // as mirrored halves
     let mut floor = Entity::new("floor");
     floor.add_component(Box::new(
         PhysicsBody::new("floor", hyg::game::physics::Shape::Box(Vec3::new(6.0, 0.5, 6.0)))
             .static_body(),
     ));
-    floor.add_component(Box::new(MeshRenderer::new(
-        MeshGeometry::Shape {
-            shape: MeshShape::Rect,
-            half_size: Vec3::new(6.0, 0.5, 6.0),
-        },
+    floor.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+            hyg::game::Mesh::cube(Vec3::new(6.0, 0.5, 6.0)),
+        ))),
         [0.30, 0.34, 0.40, 1.0],
     )));
     engine.add_entity(floor);
@@ -84,11 +87,10 @@ fn build_engine(sink: hyg::game::FrameSink) -> Engine {
         "ball",
         hyg::game::physics::Shape::Sphere(0.5),
     )));
-    ball.add_component(Box::new(MeshRenderer::new(
-        MeshGeometry::Shape {
-            shape: MeshShape::Circle,
-            half_size: Vec3::new(0.5, 0.5, 0.5),
-        },
+    ball.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+            hyg::game::Mesh::sphere(0.5, 24, 16),
+        ))),
         [1.0, 0.4, 0.1, 1.0],
     )));
     engine.add_entity(ball);
@@ -112,11 +114,10 @@ fn build_engine(sink: hyg::game::FrameSink) -> Engine {
             .expect("the demo script arms")
             .with_source_path("patrol.js"),
     ));
-    drifter.add_component(Box::new(MeshRenderer::new(
-        MeshGeometry::Shape {
-            shape: MeshShape::Circle,
-            half_size: Vec3::new(0.25, 0.25, 0.25),
-        },
+    drifter.add_component(Box::new(MeshRenderer::model(
+        std::sync::Arc::new(hyg::game::Model::single(std::sync::Arc::new(
+            hyg::game::Mesh::sphere(0.25, 16, 12),
+        ))),
         [0.4, 0.9, 0.6, 1.0],
     )));
     engine.add_entity(drifter);
