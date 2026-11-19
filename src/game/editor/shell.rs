@@ -83,6 +83,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
     let pip_camera = Arc::new(Mutex::new(None));
     let console = Arc::new(Mutex::new(Vec::new()));
     let ai_busy = Arc::new(AtomicBool::new(false));
+    let error_beam = Arc::new(AtomicBool::new(false));
     let pump = {
         let engine = Arc::clone(&engine);
         let pumping = Arc::clone(&pumping);
@@ -91,6 +92,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
         let frame_size = Arc::clone(&frame_size);
         let pip_camera = Arc::clone(&pip_camera);
         let console = Arc::clone(&console);
+        let error_beam = Arc::clone(&error_beam);
         std::thread::Builder::new()
             .name("hyg-studio-pump".to_string())
             .spawn(move || {
@@ -138,6 +140,9 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
                                 .unwrap()
                                 .push(format!("SCRIPT PANIC: {message}"));
                             playing.store(false, Ordering::SeqCst);
+                            // the beam turns HARD RED: an error is an
+                            // alarm, it sticks until the session clears it
+                            error_beam.store(true, Ordering::SeqCst);
                         }
                         // the camera preview: render the pip camera's
                         // view into tag 1 (tags keep the slots apart)
@@ -173,6 +178,7 @@ pub fn launch(engine: Engine, sink: FrameSink, title: impl Into<String>) -> Resu
         pip_camera,
         console,
         ai_busy,
+        error_beam,
     );
     pumping.store(false, Ordering::SeqCst);
     let _ = pump.join();
@@ -191,6 +197,7 @@ fn run_shell(
     pip_camera: Arc<Mutex<Option<crate::game::Camera>>>,
     console: Arc<Mutex<Vec<String>>>,
     ai_busy: Arc<AtomicBool>,
+    error_beam: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut builder = winit::event_loop::EventLoop::<ShellMessage>::with_user_event();
     // the editor normally owns the main thread; the escape hatches cost
@@ -225,6 +232,7 @@ fn run_shell(
         pip_camera,
         console,
         ai_busy,
+        error_beam,
         state: EditorState::new(scene_camera),
         window: None,
         view: None,
@@ -271,6 +279,45 @@ fn run_shell(
     event_loop
         .run_app(&mut handler)
         .map_err(|e| format!("studio: event loop error: {e}"))
+}
+
+impl EditorState {
+    /// Switch the beam's TARGET mode: the paint ramps from the
+    /// previous target over BEAM_TRANSITION_SECONDS. An explicit
+    /// switch cancels any timed flash.
+    fn set_beam(&mut self, mode: style::BeamMode) {
+        if self.beam_mode != mode {
+            self.beam_prev = self.beam_mode;
+            self.beam_mode = mode;
+            self.beam_blend = 0.0;
+        }
+        self.beam_flash = None;
+    }
+
+    /// A TIMED flash: the mode takes over, then the beam returns to
+    /// `beam_base` (Saved hums green, then the rainbow returns).
+    fn flash_beam(&mut self, mode: style::BeamMode, hold: std::time::Duration) {
+        self.beam_prev = self.beam_mode;
+        self.beam_mode = mode;
+        self.beam_blend = 0.0;
+        self.beam_flash = Some((mode, Instant::now() + hold));
+    }
+
+    /// Per-frame: advance the blend and expire timed flashes.
+    #[doc(hidden)]
+    pub fn beam_tick(&mut self, dt: f32) {
+        if self.beam_blend < 1.0 {
+            self.beam_blend =
+                (self.beam_blend + dt / style::BEAM_TRANSITION_SECONDS).min(1.0);
+        }
+        if let Some((_, until)) = self.beam_flash {
+            if Instant::now() >= until {
+                self.beam_flash = None;
+                let base = self.beam_base;
+                self.set_beam(base);
+            }
+        }
+    }
 }
 
 /// Depth-first search for an entity by name, appending child indices to
@@ -320,6 +367,11 @@ pub struct ShellShared {
     /// while it works, and the top rainbow beam responds (hues rotate,
     /// hot spots blaze — the review's "processing or AI is connected
     /// and they're processing it"). Playing counts as processing too.
+    /// The beam's ERROR trigger: the pump stores true when a script
+    /// panics (hard red until the session clears it — the next play or
+    /// save). The UI reads AND clears it each frame.
+    #[doc(hidden)]
+    pub error_beam: Arc<AtomicBool>,
     #[doc(hidden)]
     pub ai_busy: Arc<AtomicBool>,
 }
@@ -362,6 +414,8 @@ struct ShellHandler {
     console: Arc<Mutex<Vec<String>>>,
     /// The AI seam (the rainbow beam's second trigger).
     ai_busy: Arc<AtomicBool>,
+    /// The beam's error trigger (script panics).
+    error_beam: Arc<AtomicBool>,
     state: EditorState,
     window: Option<Arc<winit::window::Window>>,
     view: Option<ShellView>,
@@ -398,6 +452,25 @@ pub struct EditorState {
     beam_clock: f32,
     /// The last frame's egui time (the clock's delta source).
     beam_last: Option<f64>,
+    /// The beam's TARGET mode; the paint blends from `beam_prev`.
+    #[doc(hidden)]
+    pub beam_mode: style::BeamMode,
+    /// The mode the blend is leaving (the previous target).
+    beam_prev: style::BeamMode,
+    /// The blend ramp 0..1 toward `beam_mode` (seconds over
+    /// BEAM_TRANSITION_SECONDS — quick, never instant).
+    #[doc(hidden)]
+    pub beam_blend: f32,
+    /// A timed flash (mode + expiry): AutoSaving flickers, Saved hums,
+    /// then the beam returns to `beam_base`.
+    #[doc(hidden)]
+    pub beam_flash: Option<(style::BeamMode, Instant)>,
+    /// The session's rest mode (Rainbow normally; Error STICKS — the
+    /// base stays red until the session clears it with a play/save).
+    beam_base: style::BeamMode,
+    /// The last autosave (the 30s dirty+saved rewrite cycle).
+    #[doc(hidden)]
+    pub autosave_last: Option<Instant>,
     /// Physical-pixel rect the engine frame letterboxes into (the
     /// picking/gizmo viewport).
     viewport: Option<Viewport>,
@@ -515,6 +588,12 @@ impl EditorState {
             fps: 0,
             beam_clock: 0.0,
             beam_last: None,
+            beam_mode: style::BeamMode::Rainbow,
+            beam_prev: style::BeamMode::Rainbow,
+            beam_blend: 1.0,
+            beam_flash: None,
+            beam_base: style::BeamMode::Rainbow,
+            autosave_last: None,
             viewport: None,
             name_edit: None,
             tabs: vec![SceneTab {
@@ -754,6 +833,7 @@ impl ShellHandler {
                 pip_camera: Arc::clone(&self.pip_camera),
                 console: Arc::clone(&self.console),
                 ai_busy: Arc::clone(&self.ai_busy),
+                error_beam: Arc::clone(&self.error_beam),
             };
             draw_ui(egui_ctx, &mut self.state, &mut engine, frame_dims, &shared);
         }
@@ -977,6 +1057,7 @@ fn draw_ui(
         let processing =
             shared.playing.load(Ordering::SeqCst) || shared.ai_busy.load(Ordering::SeqCst);
         let now = ctx.input(|i| i.time);
+        let dt = ctx.input(|i| i.stable_dt.max(1.0 / 240.0));
         if let Some(last) = state.beam_last {
             if processing {
                 // clamp: a paused tab's resume jump shouldn't fast-forward
@@ -984,6 +1065,39 @@ fn draw_ui(
             }
         }
         state.beam_last = Some(now);
+        // the mode machine: blend ramp + timed flash expiry
+        state.beam_tick(dt);
+        // ERROR: the pump raises the flag on a script panic — the UI
+        // reads AND clears it, and the beam goes HARD RED (the stick:
+        // the base stays error until a play or save clears it)
+        if shared
+            .error_beam
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            state.beam_base = style::BeamMode::Error;
+            state.set_beam(style::BeamMode::Error);
+        }
+        // AUTOSAVE: a saved scene with unsaved edits rewrites itself on
+        // a cadence (never while playing) — the beam whispers
+        {
+            let tab_dirty = state
+                .tabs
+                .get(state.active_tab)
+                .map(|t| t.dirty)
+                .unwrap_or(false);
+            let tab_path = state
+                .tabs
+                .get(state.active_tab)
+                .and_then(|t| t.path.clone());
+            if autosave_tick(state, engine, shared, tab_path.clone(), tab_dirty).is_ok()
+                && tab_dirty
+            {
+                if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                    tab.dirty = false;
+                }
+            }
+        }
         egui::containers::Panel::top("studio-menu")
             .exact_size(34.0)
             .show(root, |bar| {
@@ -996,7 +1110,14 @@ fn draw_ui(
                     egui::vec2(bar_rect.width(), style::BEAM_HEIGHT),
                 );
                 let beam_painter = bar.painter_at(beam_rect);
-                style::paint_beam(&beam_painter, beam_rect, state.beam_clock, processing);
+                style::paint_beam(
+                    &beam_painter,
+                    beam_rect,
+                    state.beam_clock,
+                    state.beam_prev,
+                    state.beam_mode,
+                    state.beam_blend,
+                );
                 bar.horizontal(|row| {
                     egui::MenuBar::new().ui(row, |menu| {
                         menu.menu_button("File", |file| {
@@ -1025,7 +1146,13 @@ fn draw_ui(
                                 match locate_runtime()
                                     .and_then(|runtime| export_game(state, &runtime))
                                 {
-                                    Ok(out) => println!("exported {}", out.display()),
+                                    Ok(out) => {
+                                        println!("exported {}", out.display());
+                                        state.flash_beam(
+                                            style::BeamMode::Saved,
+                                            std::time::Duration::from_millis(2000),
+                                        );
+                                    }
                                     Err(e) => state.set_status(format!("export: {e}")),
                                 }
                                 shared.touch();
@@ -1511,6 +1638,10 @@ pub fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) 
     state.scene_camera = main_camera.unwrap_or_else(blank_camera);
     engine.set_camera(state.scene_camera);
     shared.playing.store(true, Ordering::SeqCst);
+    // the beam: processing rainbow (and an Error stick CLEARS — the
+    // session answered the alarm by running again)
+    state.beam_base = style::BeamMode::Processing;
+    state.set_beam(style::BeamMode::Processing);
     if main_camera.is_some() {
         state.set_status("playing — Space or pause to edit");
     } else {
@@ -1521,6 +1652,9 @@ pub fn play(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) 
 /// Pause: stop the sim, keep the played state (resume from here).
 fn pause(state: &mut EditorState, shared: &ShellShared) {
     shared.playing.store(false, Ordering::SeqCst);
+    // the beam holds YELLOW while paused (the review's pause signal)
+    state.beam_base = style::BeamMode::Paused;
+    state.set_beam(style::BeamMode::Paused);
     state.set_status("paused — edits stick; play resumes");
     shared.touch();
 }
@@ -1530,6 +1664,10 @@ fn pause(state: &mut EditorState, shared: &ShellShared) {
 pub fn stop(state: &mut EditorState, engine: &mut Engine, shared: &ShellShared) {
     shared.playing.store(false, Ordering::SeqCst);
     restore_snapshot(state, engine);
+    // the beam rests: rainbow (an Error stick clears — the session
+    // answered by returning to edit)
+    state.beam_base = style::BeamMode::Rainbow;
+    state.set_beam(style::BeamMode::Rainbow);
     state.set_status("stopped — back to the edit state");
     shared.touch();
 }
@@ -1882,6 +2020,50 @@ fn draw_dock(
 
 fn count_subtree(entity: &Entity) -> usize {
     1 + entity.children().iter().map(count_subtree).sum::<usize>()
+}
+
+/// The autosave tick: a SAVED scene with unsaved edits rewrites
+/// itself every 30s (never while playing — the played state is the
+/// sim's, not the author's). The beam flickers AutoSaving during the
+/// write and hums green after; failures land in the status line.
+/// `#[doc(hidden)] pub` for the headless growth-probe tests.
+#[doc(hidden)]
+pub fn autosave_tick(
+    state: &mut EditorState,
+    engine: &mut Engine,
+    shared: &ShellShared,
+    path: Option<std::path::PathBuf>,
+    dirty: bool,
+) -> Result<(), String> {
+    if shared.playing.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let due = state
+        .autosave_last
+        .map(|t| t.elapsed() >= std::time::Duration::from_secs(30))
+        .unwrap_or(true);
+    if !(due && dirty && path.is_some()) {
+        return Ok(());
+    }
+    state.autosave_last = Some(Instant::now());
+    state.flash_beam(
+        style::BeamMode::AutoSaving,
+        std::time::Duration::from_millis(600),
+    );
+    let path = path.expect("checked Some");
+    let result = save_scene(&path, &state.scene_camera, engine);
+    match &result {
+        Ok(()) => {
+            state.set_status(format!("autosaved {}", path.display()));
+            state.flash_beam(
+                style::BeamMode::Saved,
+                std::time::Duration::from_millis(1200),
+            );
+        }
+        Err(e) => state.set_status(format!("autosave failed: {e}")),
+    }
+    shared.touch();
+    result
 }
 
 /// A collision shape as the physics view's row text.
@@ -3218,6 +3400,8 @@ fn poll_file_dialog(state: &mut EditorState, engine: &mut Engine, shared: &Shell
                         tab.dirty = false;
                     }
                     state.set_status(format!("saved {}", path.to_string_lossy()));
+                    // the beam HUMS GREEN: a save landed
+                    state.flash_beam(style::BeamMode::Saved, std::time::Duration::from_millis(1500));
                 }
                 Err(e) => state.set_status(format!("save failed: {e}")),
             }

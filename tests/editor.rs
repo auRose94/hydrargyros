@@ -959,6 +959,7 @@ fn inspector_panel_does_not_grow_over_time() {
         pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
         console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        error_beam: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     let ctx = egui::Context::default();
@@ -1636,6 +1637,7 @@ fn restart_cycles_preserve_the_scene() {
         pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
         console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        error_beam: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     // play, let the sim mutate (the ball drops), then restart hard
@@ -1861,4 +1863,120 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
+}
+
+// ---- the beam's modes, transitions, and autosave ----
+
+/// The beam's modes READ contextually: processing is a bright rotating
+/// rainbow, the solid modes are their semantic hues (red error, yellow
+/// pause, green saved), and the solid hues are UNIFORM across segments
+/// (an alarm shouldn't be a rainbow).
+#[cfg(feature = "editor")]
+#[test]
+fn beam_modes_read_contextually() {
+    use hyg::game::editor::style::{beam_mode_color, BeamMode};
+
+    // the rest rainbow is calm; processing blazes (a brighter value)
+    let rest = beam_mode_color(BeamMode::Rainbow, 4.0, 64.0, 1.0);
+    let busy = beam_mode_color(BeamMode::Processing, 4.0, 64.0, 1.0);
+    let busy_sum = u32::from(busy.r()) + u32::from(busy.g()) + u32::from(busy.b());
+    let rest_sum = u32::from(rest.r()) + u32::from(rest.g()) + u32::from(rest.b());
+    assert!(busy_sum > rest_sum, "processing blazes above rest");
+
+    // the solid modes: UNIFORM across the length (an alarm isn't a
+    // rainbow), and each reads as its hue
+    let error = beam_mode_color(BeamMode::Error, 0.0, 64.0, 2.0);
+    assert_eq!(error, beam_mode_color(BeamMode::Error, 64.0, 64.0, 2.0), "uniform");
+    assert!(error.r() > error.g() + 60 && error.r() > error.b() + 60, "error reads red: {error:?}");
+
+    let paused = beam_mode_color(BeamMode::Paused, 0.0, 64.0, 2.0);
+    assert_eq!(paused, beam_mode_color(BeamMode::Paused, 64.0, 64.0, 2.0), "uniform");
+    assert!(paused.r() > paused.b() + 40 && paused.g() > paused.b() + 40, "pause reads yellow: {paused:?}");
+
+    let saved = beam_mode_color(BeamMode::Saved, 0.0, 64.0, 2.0);
+    assert_eq!(saved, beam_mode_color(BeamMode::Saved, 64.0, 64.0, 2.0), "uniform");
+    assert!(saved.g() > saved.r() && saved.g() > saved.b(), "saved reads green: {saved:?}");
+}
+
+/// Transitions GLIDE: the blend at the endpoints is exactly each
+/// mode's color, and the midpoint sits strictly between (no snapping).
+#[cfg(feature = "editor")]
+#[test]
+fn beam_transition_blends_the_modes() {
+    use hyg::game::editor::style::{beam_mode_color, mix_colors, BeamMode};
+
+    let from = beam_mode_color(BeamMode::Rainbow, 10.0, 64.0, 0.0);
+    let to = beam_mode_color(BeamMode::Error, 10.0, 64.0, 0.0);
+
+    let start = mix_colors(from, to, 0.0);
+    let mid = mix_colors(from, to, 0.5);
+    let end = mix_colors(from, to, 1.0);
+    assert_eq!(start, from, "blend 0 = the leaving mode");
+    assert_eq!(end, to, "blend 1 = the arriving mode");
+    let between = (i32::from(mid.r()) - i32::from(from.r())).abs()
+        + (i32::from(mid.g()) - i32::from(from.g())).abs()
+        + (i32::from(mid.b()) - i32::from(from.b())).abs();
+    let span = (i32::from(to.r()) - i32::from(from.r())).abs()
+        + (i32::from(to.g()) - i32::from(from.g())).abs()
+        + (i32::from(to.b()) - i32::from(from.b())).abs();
+    assert!(
+        between * 2 <= span + 2,
+        "the midpoint is between the modes: {mid:?} from {from:?} to {to:?}"
+    );
+}
+
+/// The autosave tick: a SAVED scene with unsaved edits rewrites the
+/// file and hums green (the Saved flash); a clean scene is untouched;
+/// an unsaved scene (no path) is never written.
+#[cfg(all(feature = "editor", feature = "physics"))]
+#[test]
+fn autosave_rewrites_saved_dirty_scenes_only() {
+    use hyg::game::editor::shell::{autosave_tick, EditorState, ShellShared};
+
+    let dir = temp_dir("hyg-autosave");
+    let scene_path = dir.join("autosaved.json.hyg");
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.scene_path = scene_path.to_string_lossy().to_string();
+    let shared = ShellShared {
+        playing: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        dirty: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quit: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        frame_size: std::sync::Arc::new(std::sync::Mutex::new([960, 540])),
+        pip_camera: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        console: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        ai_busy: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        error_beam: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    let mut engine = Engine::new("acme", "autosave");
+    let mut entity = Entity::new("keeper");
+    entity.add_component(Box::new(MeshRenderer::rect(
+        Vec3::new(0.5, 0.5, 0.5),
+        [1.0; 4],
+    )));
+    engine.add_entity(entity);
+
+    let mut state = EditorState::new(hyg::game::Camera::default());
+    state.scene_path = scene_path.to_string_lossy().to_string();
+    state.autosave_last = None;
+
+    let ok = autosave_tick(&mut state, &mut engine, &shared, Some(scene_path.clone()), true);
+    ok.expect("the tick saves");
+    assert!(scene_path.exists(), "the scene rewritten");
+    assert_eq!(state.beam_mode, hyg::game::editor::style::BeamMode::Saved, "green hum after");
+    assert!(
+        state.beam_flash.is_some(),
+        "the flash is live (flicker then hum)"
+    );
+
+    // a clean scene (not dirty) is untouched: no rewrite, no flash
+    let before = std::fs::read(&scene_path).expect("read");
+    let ok = autosave_tick(&mut state, &mut engine, &shared, Some(scene_path.clone()), false);
+    ok.expect("clean scenes pass through");
+    assert_eq!(state.beam_mode, hyg::game::editor::style::BeamMode::Saved, "still humming");
+    assert_eq!(
+        std::fs::read(&scene_path).expect("read"),
+        before,
+        "a clean scene is not rewritten"
+    );
 }

@@ -418,20 +418,31 @@ fn hsv_to_color(hue: f32, s: f32, v: f32) -> Color32 {
 /// instead of washing the menu bar.
 pub const BEAM_HEIGHT: f32 = 8.0;
 
-/// Paint the beam across `rect` (the window's top strip). One mesh: the
-/// top vertex row carries the segment colors (the ribbon line), the
-/// bottom row the same hues fading to transparent — the light shining
-/// down. SUBTLE at rest (low alpha, mid value — a quiet rainbow),
-/// OBVIOUS while processing (full alpha, brightened hot spots).
-pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, processing: bool) {
+/// The beam's transition ramp: seconds to blend from one mode to the
+/// next (the review: it should never snap — quick, not instant).
+pub const BEAM_TRANSITION_SECONDS: f32 = 0.35;
+
+/// Paint the beam across `rect` (the window's top strip) as a BLEND
+/// between two modes: `from` at `blend` 0, `to` at 1 (the ramp runs
+/// [`BEAM_TRANSITION_SECONDS`]; the shell advances it). One mesh: the
+/// top vertex row is the ribbon line, the bottom row fades to
+/// transparent — the light shining down. Per-segment colors come from
+/// the modes; the blend interpolates them so the transition glides.
+pub fn paint_beam(painter: &Painter, rect: Rect, phase: f32, from: BeamMode, to: BeamMode, blend: f32) {
     let segments = 64.0f32;
-    let (top_alpha, fade_alpha) = if processing { (255, 42) } else { (95, 12) };
+    let t = blend.clamp(0.0, 1.0);
     let mut mesh = Mesh::default();
     let step = rect.width() / segments;
     let x0 = rect.left();
+    let top_from = BeamMode::line_alpha(from) as f32 * (1.0 - t);
+    let top_to = BeamMode::line_alpha(to) as f32 * t;
+    let top_alpha = (top_from + top_to).max(30.0) as u8; // never fully invisible
+    let fade_alpha = if t >= 0.5 { 42 } else { 12 };
     for i in 0..=(segments as u32) {
         let seg = i as f32;
-        let color = beam_color(seg, segments, phase, processing);
+        let a = beam_mode_color(from, seg, segments, phase);
+        let b = beam_mode_color(to, seg, segments, phase);
+        let color = mix_colors(a, b, t);
         let x = x0 + seg * step;
         mesh.colored_vertex(
             egui::pos2(x, rect.top()),
@@ -650,4 +661,106 @@ pub fn tab_button(
     let painter = ui.painter_at(rect.expand(3.0));
     paint_tab(&painter, rect, label, accent, state, dark);
     response
+}
+
+// ---- the beam's modes ----
+//
+// The beam is CONTEXTUAL: it answers what the Studio is doing. Modes
+// are colors-with-behaviors; the transition between two modes is a
+// smooth ramp (the review: it should never snap — quick, not instant).
+
+/// What the beam is saying right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BeamMode {
+    /// Idle rest: a calm, still rainbow (subtle).
+    Rainbow,
+    /// The sim is playing (or the AI seam is busy): the rainbow
+    /// rotates, hot spots blaze.
+    Processing,
+    /// The sim is paused: solid yellow.
+    Paused,
+    /// Something failed (a script panic): hard red. Sticks until the
+    /// session clears it (the next play or save).
+    Error,
+    /// A save/export just landed: a green hum, timed — it fades back
+    /// to the session's rest mode on its own.
+    Saved,
+    /// An autosave is writing: a gentle flicker over the rest rainbow.
+    AutoSaving,
+}
+
+impl BeamMode {
+    /// The SOLID hue for the mode's non-rainbow states (error red,
+    /// pause yellow, saved green) — `None` for the rainbow modes,
+    /// which color per-segment instead.
+    #[must_use]
+    pub fn solid_hue(mode: BeamMode) -> Option<Color32> {
+        match mode {
+            BeamMode::Error => Some(Color32::from_rgb(0xd6, 0x2c, 0x2c)),
+            BeamMode::Paused => Some(Color32::from_rgb(0xd9, 0xa4, 0x1e)),
+            BeamMode::Saved => Some(Color32::from_rgb(0x2f, 0xb1, 0x4a)),
+            BeamMode::AutoSaving => Some(Color32::from_rgb(0xd9, 0xa4, 0x1e)),
+            BeamMode::Rainbow | BeamMode::Processing => None,
+        }
+    }
+
+    /// The line alpha for the mode (rest is subtle; processing and the
+    /// signals are loud).
+    #[must_use]
+    pub fn line_alpha(mode: BeamMode) -> u8 {
+        match mode {
+            BeamMode::Rainbow => 95,
+            BeamMode::Processing => 255,
+            BeamMode::Paused => 210,
+            BeamMode::Error => 255,
+            BeamMode::Saved => 235,
+            BeamMode::AutoSaving => 190,
+        }
+    }
+}
+
+/// Linear color mix, alpha included (the transition ramp's tool).
+#[must_use]
+pub fn mix_colors(a: Color32, b: Color32, t: f32) -> Color32 {
+    let lerp = |x: u8, y: u8| {
+        (x as f32 + (y as f32 - x as f32) * t.clamp(0.0, 1.0))
+            .round()
+            .clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_unmultiplied(lerp(a.r(), b.r()), lerp(a.g(), b.g()), lerp(a.b(), b.b()), lerp(a.a(), b.a()))
+}
+
+/// One segment's color for a MODE: rainbow modes spread the wheel;
+/// solid modes paint one hue. `phase` drives processing rotation and
+/// the AutoSaving flicker.
+#[must_use]
+pub fn beam_mode_color(mode: BeamMode, segment: f32, segments: f32, phase: f32) -> Color32 {
+    match mode {
+        BeamMode::Rainbow => {
+            let hue = beam_hue(segment, segments, phase);
+            hsv_to_color(hue, 1.0, 0.5)
+        }
+        BeamMode::Processing => {
+            let hue = beam_hue(segment, segments, phase);
+            let sparkle = beam_sparkle(segment, segments, phase, true);
+            hsv_to_color(hue, 1.0, 0.75 + 0.25 * sparkle)
+        }
+        BeamMode::AutoSaving => {
+            // the rest rainbow with a GENTLE flutter (low amplitude,
+            // slow) — it whispers "writing", it doesn't shout
+            let hue = beam_hue(segment, segments, phase);
+            let flutter = 0.5 + 0.12 * (segment * 0.8 + phase * 6.0).sin();
+            hsv_to_color(hue, 0.9, flutter)
+        }
+        BeamMode::Error => {
+            // hard red with a slow pulse — it should read as ALARM
+            let pulse = 0.75 + 0.25 * (phase * 2.0).sin();
+            Color32::from_rgb(
+                (0xd6 as f32 * pulse) as u8,
+                (0x2c as f32 * pulse) as u8,
+                (0x2c as f32 * pulse) as u8,
+            )
+        }
+        solid => BeamMode::solid_hue(solid).unwrap_or_else(|| Color32::from_rgb(0x2f, 0xb1, 0x4a)),
+    }
 }
