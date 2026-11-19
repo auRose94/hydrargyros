@@ -977,8 +977,50 @@ seams it grows through.
    floor/ball/drifter — the quad path is 2D-only under perspective
    cameras). 34 editor tests; suite 360 `--all-features`, clippy
    clean; visual gate passed live (gizmo on the drifter, Rose
-   confirmed). M4 — assets (import flows, debug views) — is the next
-   rung.
+   confirmed).
+
+8b. **Studio M4 landed (2026-11-19): assets — the import flow and the
+   debug views — plus the Frutiger Aero glass chrome.** **Asset-backed
+   renderers:** `mesh_renderer` scene params gained `{"model":
+   "assets/x.glb"}` — `MeshGeometry::Asset` stores the PATH (data:
+   scenes round-trip byte-identically feature-free) and the gltf-gated
+   factory resolves it against the scene file's directory at load
+   (the script-path rule); unresolved renderers contribute the new
+   `Geometry::None` (draws nothing, keeps the path). **Pick bounds:**
+   `Model::bounds()` (center + half-extents over the baked vertices)
+   replaces the unit-cube proxy — the slab test shifts by the bounds
+   center (glTF models rarely center on their origin). **Import
+   flow:** File → Import Model… (rfd, .glb/.gltf) copies into the
+   scene's `assets/`, spawns + selects an entity carrying the renderer
+   at the orbit target, parse-checks the SOURCE before anything lands
+   (a broken file refuses loudly: nothing copied, nothing spawned).
+   **Debug views:** `PhysicsWorldBackend::bodies()/gravity()` read-only
+   records (none backend records declarations verbatim; rapier keeps
+   the add_body spec) feed the dock's new Physics tab; the Audio tab
+   rides `AudioWorld`'s introspection seam — backend, master-volume
+   slider (writes through), test-tone button, play records.
+   `Engine::physics_materialize()` split out of the step path and
+   called from the DRAW pass too, so a paused editor's view shows the
+   scene's declared bodies without a play step. `EDITOR_DOCK=<tab>`
+   joins `EDITOR_SELECT` as the screenshot hooks. **Glass chrome (the
+   review's aesthetic ask, agent-built):** `style::ButtonStyle`
+   (Glass default / Flat, View-menu toggle) — layered translucent
+   bodies (a 4-vertex mesh fade), inner border, specular, and a state
+   halo (hover = loose glow in the semantic color, engaged = tighter
+   brighter pinch) on the transport, the TRS modes, and the scene/dock
+   tabs (rounded-top strip); ASCII labels throughout (no icon glyphs
+   in the default font). Known limits stated: collider OVERLAYS in the
+   viewport are future work (the view is the data table), deleted
+   entities' backend bodies linger until replace semantics touch them
+   (the sync has no removal path yet), and compiled (procedural)
+   models stay runtime-only. Tests: `tests/assets.rs` (path
+   round-trips, ambiguous-params errors, resolve + corner-click pick
+   through real bounds, snapshot contracts — feature-free and gltf
+   halves) + import-flow tests + 3 glass paint tests. 39 editor
+   tests; suite **371 `--all-features`**, clippy clean; physics view
+   live-verified (rapier + gravity + sorted body rows).
+
+## What hyg will NOT do
 
 ## What hyg will NOT do
 

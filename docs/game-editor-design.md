@@ -307,6 +307,22 @@ entity, textures decoded via the `image` feature, audio via the audio
 backend's `loadSound`-shaped API. Import is pure data in → data out, so it
 runs in headless tests.
 
+**As-built (M4).** Import is File → Import Model… (a native dialog, not
+drag-drop yet): the picked file parse-checks, copies into the active
+scene's `assets/` directory, and spawns a selected root entity carrying
+an asset-backed `mesh_renderer` (`{"model": "assets/<name>"}` — the path
+is the scene's data; the `gltf` feature resolves it against the scene
+file's directory at load, the script-path rule). Unresolved renderers
+draw nothing (`Geometry::None`) but round-trip by path. Pick proxies use
+`Model::bounds()` — real center + half-extents, slab test shifted by the
+center. The physics view reads `PhysicsWorldBackend::bodies()` records
+(the `none` backend records declarations verbatim — a paused editor's
+bodies materialize via `Engine::physics_materialize()`, called from the
+draw pass); the audio view reads `AudioWorld`'s introspection seam
+(master-volume slider writes through; a test-tone button; the none
+recorder's play records). Collider overlays in the viewport and model
+removal from the physics world are future work.
+
 ## Milestones (proposed)
 
 | Stage | Deliverable | Done when |
@@ -315,7 +331,7 @@ runs in headless tests.
 | M1 | Editor core | **LANDED 2026-11-16.** winit shell + egui panels + viewport presenting `FrameSink`; hierarchy + inspector editing a live `Engine`; headless UI-logic tests (`src/game/editor/`, `tests/editor.rs`, `examples/editor_shell.rs`) |
 | M2 | Manipulation | **LANDED 2026-11-16 (overnight).** Viewport picking (camera-ray vs entity boxes), screen-space T/R/S gizmos, undo/redo with per-drag coalescing, entity delete + restore, scene save/load from the UI (`src/game/editor/{pick,gizmo}.rs` feature-free; `tests/editor.rs`) |
 | M3 | Play mode | Play/pause/step with snapshot-restore; script editing + live reload; console shows script errors |
-| M4 | Assets | glTF/texture/audio import flow; physics + audio debug views (colliders, raycasts, sound list) |
+| M4 | Assets | **LANDED 2026-11-19.** `{"model": path}` mesh renderers (path data, gltf-gated resolve against the scene dir), File → Import Model… (copy into `assets/`, parse-checked, spawns + selects), pick proxies on real model bounds, Physics/Audio dock views over read-only backend records (`tests/assets.rs`, `tests/editor.rs`) |
 | M5 | Polish | Multi-viewport (camera preview), scene tabs, project settings UI, packaging: `hyg build` emits a runtime binary + data bundle |
 
 M0/M1 are the honest test of the thesis: if the scene model and the shell
