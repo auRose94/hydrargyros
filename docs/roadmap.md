@@ -1040,7 +1040,12 @@ seams it grows through.
    limits: the extraction is temp-dir (an in-memory mount is a later
    refinement), the archive is uncompressed (bandwidth over disk), and
    Steam/console storefronts want separated data anyway — this shape
-   is deliberately jam-first.
+   is deliberately jam-first. **MODDING (Rose's ask): loose files
+   beside the executable OVERRIDE the fused archive** — replace files,
+   add files, or replace the scene itself (a modded `scene.json.hyg`
+   IS a different game); the overlay warns-and-continues on a
+   unreadable mod file and skips filesystem-edge executables rather
+   than walking `/`.
 
 ## What hyg will NOT do
 

@@ -96,3 +96,77 @@ fn scene_in_finds_the_document() {
     assert_eq!(found.file_name().unwrap(), "game.json.hyg");
     assert!(scene_in(&dir.join("scripts")).is_none(), "no scene there");
 }
+
+// ---- MODDING: loose files beside the exe override the archive ----
+
+/// The union with mods winning: a loose file REPLACES its archive
+/// sibling, a loose-only file is ADDED, and untouched archive files
+/// stay. That's the whole player-owns-the-game story — modify and even
+/// become a different game.
+#[test]
+fn loose_files_beside_the_exe_override_the_archive() {
+    let dir = temp_dir("hyg-pack-mods");
+
+    // the runtime + the bundle (scene + script)
+    let runtime_bytes: Vec<u8> = b"FAKERUNTIMEBYTES".to_vec();
+    let runtime_path = dir.join("mygame.bin");
+    std::fs::write(&runtime_path, &runtime_bytes).expect("runtime");
+    let bundle = dir.join("bundle");
+    std::fs::create_dir_all(bundle.join("scripts")).expect("bundle dirs");
+    std::fs::write(
+        bundle.join("scene.json.hyg"),
+        "{\"scene\":\"shipped\"}",
+    )
+    .expect("scene");
+    std::fs::write(bundle.join("scripts/patrol.js"), "SPEED = 1").expect("script");
+
+    let fused = dir.join("mygame-fused.bin");
+    pack::fuse(&runtime_path, &bundle, &fused).expect("fuses");
+
+    // unpack (the runtime's first step), then MOD: the exe's own
+    // directory carries loose files — a replaced script, a replaced
+    // scene, and a brand-new file the archive never had. The player
+    // creates the layout beside their game.
+    std::fs::create_dir_all(fused.parent().unwrap().join("scripts")).expect("mod dirs");
+    let extracted = pack::unpack_self(&fused).expect("reads").expect("fused");
+    std::fs::write(fused.parent().unwrap().join("scripts/patrol.js"), "SPEED = 99")
+        .expect("mod script");
+    std::fs::write(
+        fused.parent().unwrap().join("scene.json.hyg"),
+        "{\"scene\":\"MODDED\"}",
+    )
+    .expect("mod scene");
+    std::fs::write(fused.parent().unwrap().join("scripts/newmod.js"), "NEW").expect("new mod");
+
+    let overlaid = pack::overlay_loose(fused.parent().unwrap(), &extracted).expect("overlays");
+    assert!(overlaid >= 3, "scene + script + new file applied: {overlaid}");
+
+    // the mod REPLACED the archive's script
+    assert_eq!(
+        std::fs::read_to_string(extracted.join("scripts/patrol.js")).expect("read"),
+        "SPEED = 99",
+        "the mod wins over the archive"
+    );
+    // the mod ADDED a file
+    assert_eq!(
+        std::fs::read_to_string(extracted.join("scripts/newmod.js")).expect("read"),
+        "NEW"
+    );
+    // the modded scene IS a different game
+    assert_eq!(
+        std::fs::read_to_string(extracted.join("scene.json.hyg")).expect("read"),
+        "{\"scene\":\"MODDED\"}"
+    );
+    // untouched archive files remain
+    let _ = Path::new(&extracted);
+}
+
+/// A filesystem-edge executable (no parent worth walking) overlays
+/// nothing rather than walking all of `/`.
+#[test]
+fn overlay_skips_a_rooted_executable() {
+    let dir = temp_dir("hyg-pack-rootedge");
+    std::fs::create_dir_all(dir.join("game")).expect("dirs");
+    let overlaid = pack::overlay_loose(Path::new("/"), &dir.join("game")).expect("no error");
+    assert_eq!(overlaid, 0, "nothing walked from the filesystem root");
+}

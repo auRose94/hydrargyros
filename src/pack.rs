@@ -176,3 +176,67 @@ pub fn scene_in(root: &Path) -> Option<PathBuf> {
                     .unwrap_or(false)
         })
 }
+
+/// MODDING: loose files beside the executable OVERRIDE the fused
+/// archive. Walks `override_root` (the directory the game file lives
+/// in) and copies every file over its same-relative-path sibling in
+/// `extraction` — replacing archive files, and ADDING files the
+/// archive never had (a modded scene referencing new scripts/assets
+/// brings them along). The union, mods winning: players own the game.
+///
+/// Guards: a root at the filesystem's edge (no parent, or the root
+/// itself) is skipped — walking all of `/` would be catastrophic; a
+/// per-file copy failure warns and continues (one unreadable mod file
+/// must not brick the launch).
+///
+/// Returns how many files were overlaid.
+pub fn overlay_loose(override_root: &Path, extraction: &Path) -> Result<usize, String> {
+    // the exe's directory must be a real directory with a parent of its
+    // own (the filesystem root and drive edges have no parent to speak
+    // of — walking them would be catastrophic)
+    let root = override_root
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", override_root.display()))?;
+    if root.parent().is_none() {
+        return Ok(0);
+    }
+    let mut overlaid = 0usize;
+    let mut stack = vec![root.clone()];
+    while let Some(current) = stack.pop() {
+        let entries = match std::fs::read_dir(&current) {
+            Ok(entries) => entries,
+            Err(e) => {
+                eprintln!("hyg: mods: skipping {}: {e}", current.display());
+                continue;
+            }
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let relative = match path.strip_prefix(&root) {
+                Ok(relative) => relative.to_path_buf(),
+                Err(_) => continue,
+            };
+            let target = extraction.join(&relative);
+            if let Some(parent) = target.parent() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    continue;
+                }
+            }
+            match std::fs::copy(&path, &target) {
+                Ok(_) => overlaid += 1,
+                Err(e) => {
+                    eprintln!("hyg: mods: {}: {e}", path.display());
+                }
+            }
+        }
+    }
+    Ok(overlaid)
+}

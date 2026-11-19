@@ -26,6 +26,18 @@ fn main() {
                     eprintln!("(this binary carries no fused game - pass a scene path)");
                     std::process::exit(2);
                 });
+            // MODDING: loose files BESIDE the executable override the
+            // fused archive (replace files, add files - players own the
+            // game; a modded scene.json.hyg IS a different game)
+            if let Some(exe_dir) = exe.parent() {
+                match hyg::pack::overlay_loose(exe_dir, &extracted) {
+                    Ok(count) if count > 0 => {
+                        println!("mods: {count} loose file(s) applied over the archive");
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("hyg: mods: {e}"),
+                }
+            }
             hyg::pack::scene_in(&extracted).unwrap_or_else(|| {
                 eprintln!("the fused bundle carries no scene");
                 std::process::exit(1);
