@@ -36,6 +36,8 @@
 extern crate self as hyg;
 
 pub mod bundle;
+#[cfg(feature = "pack")]
+pub mod pack;
 pub mod carrier;
 pub mod dynamic;
 pub mod from_var;

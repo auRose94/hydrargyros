@@ -27,6 +27,11 @@ exclude = ["tests/ffi-plugin"]
 #   future job system too.
 # No engine deps yet; Bevy coexistence is a later concern (see docs/roadmap.md).
 
+[[test]]
+name = "pack"
+path = "tests/pack.rs"
+required-features = ["pack"]
+
 [[bin]]
 name = "hyg"
 path = "src/bin/hyg.rs"
@@ -34,7 +39,7 @@ path = "src/bin/hyg.rs"
 [[bin]]
 name = "hyg-runtime"
 path = "src/bin/hyg-runtime.rs"
-required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio"]
+required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio", "pack"]
 
 [dependencies]
 indexmap = "2"
@@ -59,6 +64,9 @@ wgpu = { version = "30", optional = true }
 winit = { version = "0.30", optional = true }
 # blocking on wgpu adapter/device futures for offscreen setup
 pollster = { version = "0.4", optional = true }
+# tar archives (the `pack` feature): the single-file packaging story
+# appends a tar of the bundle to the runtime binary's tail
+tar = { version = "0.4", optional = true }
 # glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
 gltf = { version = "1", optional = true }
 # texture image decoding (the `image` feature): Texture::from_file for PNGs
@@ -116,6 +124,9 @@ default = []
 web = ["dep:axum", "dep:tokio", "dep:futures-util", "dep:axum-server", "dep:rustls", "dep:tokio-rustls"]
 # physics: the rapier world sim (a "none" backend ships without it)
 physics = ["dep:rapier3d"]
+# pack: the single-file packaging story (fuse a bundle onto the
+# runtime's tail; the runtime detects and unpacks its own tail)
+pack = ["dep:tar"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
 # window: the winit desktop windowing backend (gold's windowSystemSDL slot)

@@ -8,17 +8,34 @@
 
 use hyg::game::scene::Scene;
 use hyg::game::{Engine, PhysicsWorld, WgpuRenderer, WinitWindow};
-use std::path::Path;
 
 fn main() {
-    let Some(scene_path) = std::env::args().nth(1) else {
-        eprintln!("USAGE: hyg-runtime <scene.json.hyg>");
-        std::process::exit(2);
+    // BARE invocation: this binary may be FUSED (a bundle tarred onto
+    // its tail) — detect our own archive, unpack it to a temp home,
+    // and play the scene it carries. With a scene path, play that.
+    let scene_path = match std::env::args().nth(1) {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("current_exe: {e}"))
+                .expect("exe path");
+            let extracted = hyg::pack::unpack_self(&exe)
+                .expect("reading our own tail")
+                .unwrap_or_else(|| {
+                    eprintln!("USAGE: hyg-runtime <scene.json.hyg>");
+                    eprintln!("(this binary carries no fused game - pass a scene path)");
+                    std::process::exit(2);
+                });
+            hyg::pack::scene_in(&extracted).unwrap_or_else(|| {
+                eprintln!("the fused bundle carries no scene");
+                std::process::exit(1);
+            })
+        }
     };
-    let scene = match Scene::load(Path::new(&scene_path)) {
+    let scene = match Scene::load(&scene_path) {
         Ok(scene) => scene,
         Err(e) => {
-            eprintln!("hyg-runtime: {scene_path}: {e}");
+            eprintln!("hyg-runtime: {}: {e}", scene_path.display());
             std::process::exit(1);
         }
     };

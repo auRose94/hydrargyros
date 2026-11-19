@@ -333,6 +333,7 @@ removal from the physics world are future work.
 | M3 | Play mode | Play/pause/step with snapshot-restore; script editing + live reload; console shows script errors |
 | M4 | Assets | **LANDED 2026-11-19.** `{"model": path}` mesh renderers (path data, gltf-gated resolve against the scene dir), File → Import Model… (copy into `assets/`, parse-checked, spawns + selects), pick proxies on real model bounds, Physics/Audio dock views over read-only backend records (`tests/assets.rs`, `tests/editor.rs`) |
 | M5 | Polish | Multi-viewport (camera preview), scene tabs, project settings UI, packaging: `hyg build` emits a runtime binary + data bundle |
+| M6 | Single-file | **LANDED 2026-11-19.** `hyg fuse` (feature `pack`): the runtime binary + the bundle's tar appended under a footer; the bare file plays the game it carries — the LOVE2D shape (jam-first: one file for itch.io; Steam/console keep separated data) |
 
 M0/M1 are the honest test of the thesis: if the scene model and the shell
 feel heavy, the design bends there before anything else.

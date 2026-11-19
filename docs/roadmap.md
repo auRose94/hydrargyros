@@ -1020,6 +1020,28 @@ seams it grows through.
    tests; suite **371 `--all-features`**, clippy clean; physics view
    live-verified (rapier + gravity + sorted body rows).
 
+8c. **M6 landed (2026-11-19): single-file packaging — the LOVE2D shape.**
+   Rose's ask: the game ships as ONE file — the runtime binary with the
+   bundle appended to its tail — "perfect for game-jams and itch.io".
+   `hyg fuse --runtime <hyg-runtime> --scene <scene.json.hyg>` builds
+   the bundle (the M4 `bundle::build` walk), pads the runtime to a
+   512-byte boundary, appends the bundle's tar, and seals a 16-byte
+   footer (`HYGFUSE1` + u64 archive length). The bare fused file
+   executes as the runtime, reads its OWN tail, unpacks the archive to
+   a temp home (`hyg-run-<exe-stem>`), and plays the `.json.hyg` it
+   carries; bare invocation of an UNFUSED runtime falls back to the
+   scene-path usage. Feature `pack` (the `tar` crate — the only new
+   dependency); the padding means ordinary tar tools can also read the
+   archive off the fused file. End to end live: the e2e scene fused to
+   a 23 MB `mygame.bin`, launched bare, loaded 3 roots and played.
+   Contract tests: fuse/unpack round trip (runtime head intact,
+   contents exact), unfused = None, scene finder. Suite **384
+   `--all-features`** (3 pack tests), clippy 0 both configs. Known
+   limits: the extraction is temp-dir (an in-memory mount is a later
+   refinement), the archive is uncompressed (bandwidth over disk), and
+   Steam/console storefronts want separated data anyway — this shape
+   is deliberately jam-first.
+
 ## What hyg will NOT do
 
 ## What hyg will NOT do
