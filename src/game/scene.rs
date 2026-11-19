@@ -156,8 +156,19 @@ fn factories() -> &'static RwLock<FactoryMap> {
         );
         map.insert(
             "mesh_renderer".to_string(),
-            Arc::new(|params, _ctx| {
-                MeshRenderer::from_params(params).map(|c| Box::new(c) as Box<dyn Component>)
+            Arc::new(|params, ctx| {
+                let mut renderer = MeshRenderer::from_params(params)?;
+                // asset-backed renderers materialize at load time, path
+                // resolved against the scene's directory (the same rule
+                // the script source path follows). Without the `gltf`
+                // feature the renderer stays unresolved — it round-trips
+                // by path and draws nothing until a build that can load
+                // it.
+                #[cfg(feature = "gltf")]
+                renderer
+                    .resolve(&ctx.base)
+                    .map_err(|e| crate::FromVarError::new(e).at("model"))?;
+                Ok(Box::new(renderer) as Box<dyn Component>)
             }),
         );
         map.insert(

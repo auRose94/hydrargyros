@@ -96,6 +96,11 @@ impl Engine {
     }
 
     /// The physics world, if one is attached.
+    pub fn physics(&self) -> Option<&PhysicsWorld> {
+        self.physics.as_ref()
+    }
+
+    /// The physics world, if one is attached.
     pub fn physics_mut(&mut self) -> Option<&mut PhysicsWorld> {
         self.physics.as_mut()
     }
@@ -105,6 +110,12 @@ impl Engine {
     pub fn set_audio(&mut self, audio: AudioWorld) -> &mut Self {
         self.audio = Some(audio);
         self
+    }
+
+    /// The audio world, if one is attached.
+    #[cfg(feature = "audio")]
+    pub fn audio(&self) -> Option<&AudioWorld> {
+        self.audio.as_ref()
     }
 
     /// The audio world, if one is attached.
@@ -445,6 +456,7 @@ impl Engine {
 
             if let (Some(geometry), Some(renderer)) = (geometry, renderer.as_mut()) {
                 match geometry {
+                    super::render::Geometry::None => {}
                     super::render::Geometry::Quad(quad) => renderer.push_quad(quad),
                     super::render::Geometry::Model { model, color } => {
                         renderer.push_model(&world, &model, color)

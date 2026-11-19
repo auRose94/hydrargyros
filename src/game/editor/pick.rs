@@ -11,9 +11,10 @@
 //! - [`pick_ray`]: a click's pixel → a world ray through the camera's
 //!   near/far planes (the engine maps depth to z ∈ [0, 1]).
 //! - [`pick_entity`]: the ray against each entity's pick proxy — the box
-//!   of its shape-mode renderer (or a unit cube for model-backed ones;
-//!   physics-only entities are not pickable in the viewport). Nearest
-//!   wins. Proxies are boxes by design: one slab test, no per-shape math.
+//!   of its shape-mode renderer, the model's real bounds for model-backed
+//!   ones (a unit cube until an asset resolves; physics-only entities
+//!   are not pickable in the viewport). Nearest wins. Proxies are boxes
+//!   by design: one slab test, no per-shape math.
 
 use crate::game::camera::Camera;
 use crate::game::entity::Entity;
@@ -204,36 +205,54 @@ pub fn pick_ray(camera: &Camera, viewport: &Viewport, px: [f32; 2]) -> Option<Ra
     })
 }
 
-/// The entity's pick proxy: half-extents of a box in entity-local space.
-/// Shape-mode renderers use their own `half_size`; model-backed ones (and
-/// physics bodies without a renderer) use a unit cube — a coarse but
-/// honest proxy until the asset pipeline knows real bounds.
+/// The entity's pick proxy: (center, half-extents) of a box in
+/// entity-local space. Shape-mode renderers use their own `half_size`
+/// (centered at the entity); model-backed ones use the model's real
+/// bounds (`Model::bounds` — center may sit off the entity origin, so
+/// the slab test shifts by it); an UNRESOLVED asset keeps a unit cube
+/// until the load fills the model.
 #[must_use]
-fn pick_half_size(entity: &Entity) -> Option<Vec3> {
+fn pick_box(entity: &Entity) -> Option<(Vec3, Vec3)> {
     for component in entity.iter_components() {
         if let Some(renderer) = component
             .as_any()
             .downcast_ref::<MeshRenderer>()
         {
-            if let MeshGeometry::Shape { half_size, .. } = &renderer.geometry {
-                return Some(*half_size);
-            }
-            return Some(Vec3::splat(0.5)); // model proxy: a unit cube
+            return Some(match &renderer.geometry {
+                MeshGeometry::Shape { half_size, .. } => (Vec3::splat(0.0), *half_size),
+                MeshGeometry::Model { model } => model_pick_box(model),
+                MeshGeometry::Asset { model, .. } => match model {
+                    Some(model) => model_pick_box(model),
+                    None => (Vec3::splat(0.0), Vec3::splat(0.5)),
+                },
+            });
         }
     }
     None
 }
 
-/// Ray vs an axis-aligned box in LOCAL space (center 0, half-extents
+/// The bounds box for a loaded model; a degenerate (vertex-less) model
+/// falls back to a unit cube so the entity stays pickable.
+#[must_use]
+fn model_pick_box(model: &crate::game::model::Model) -> (Vec3, Vec3) {
+    let (center, half) = model.bounds();
+    if half.x + half.y + half.z <= 0.0 {
+        (Vec3::splat(0.0), Vec3::splat(0.5))
+    } else {
+        (center, half)
+    }
+}
+
+/// Ray vs an axis-aligned box in LOCAL space (center `c`, half-extents
 /// `h`): slab test. Returns the entry distance along the ray (> 0).
 #[must_use]
-fn ray_box(ray: &Ray, h: Vec3) -> Option<f32> {
+fn ray_box(ray: &Ray, c: Vec3, h: Vec3) -> Option<f32> {
     let mut t_enter = 0.0f32;
     let mut t_exit = f32::INFINITY;
     for (o, d, half) in [
-        (ray.origin.x, ray.dir.x, h.x),
-        (ray.origin.y, ray.dir.y, h.y),
-        (ray.origin.z, ray.dir.z, h.z),
+        (ray.origin.x - c.x, ray.dir.x, h.x),
+        (ray.origin.y - c.y, ray.dir.y, h.y),
+        (ray.origin.z - c.z, ray.dir.z, h.z),
     ] {
         if d.abs() < 1e-9 {
             if o.abs() > half {
@@ -259,7 +278,7 @@ fn ray_box(ray: &Ray, h: Vec3) -> Option<f32> {
 /// the inverse world transform — translate, rotate⁻¹, scale⁻¹).
 #[must_use]
 fn ray_vs_entity(ray: &Ray, world: &Transform, entity: &Entity) -> Option<f32> {
-    let h = pick_half_size(entity)?;
+    let (c, h) = pick_box(entity)?;
     let inv_rotation = world.rotation.compose(Quat::new(
         -world.rotation.x,
         -world.rotation.y,
@@ -288,7 +307,7 @@ fn ray_vs_entity(ray: &Ray, world: &Transform, entity: &Entity) -> Option<f32> {
         origin: local_origin,
         dir: local_dir.scaled(Vec3::splat(1.0 / len)),
     };
-    ray_box(&local, h).map(|t| t / len)
+    ray_box(&local, c, h).map(|t| t / len)
 }
 
 /// The nearest entity the ray hits, as its tree path — the viewport

@@ -12,6 +12,7 @@
 //!   under egui panels on one surface.
 
 pub mod camera_ctl;
+pub mod debug;
 pub mod gizmo;
 pub mod pick;
 pub mod ui;

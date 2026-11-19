@@ -59,6 +59,20 @@ impl crate::FromVar for BodyType {
     }
 }
 
+/// One body's debug snapshot (the physics debug view's row): what
+/// [`PhysicsWorldBackend::add_body`] was told, plus the backend's name
+/// for it. A read-only record — the simulation stays the backend's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BodyInfo {
+    pub name: String,
+    pub shape: Shape,
+    pub body_type: BodyType,
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub gravity_scale: f32,
+    pub mass: f32,
+}
+
 /// One hit of a [`PhysicsWorld::raycast`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct RayHit {
@@ -107,6 +121,19 @@ pub trait PhysicsWorldBackend: Send {
 
     /// Cast a ray; nearest hit within `max_distance`.
     fn raycast(&mut self, origin: Vec3, direction: Vec3, max_distance: f32) -> Option<RayHit>;
+
+    /// The world's bodies as read-only records (the physics debug
+    /// view's rows). Defaulted empty: a backend that can't enumerate
+    /// shows an empty view rather than failing it.
+    fn bodies(&self) -> Vec<BodyInfo> {
+        Vec::new()
+    }
+
+    /// The world's gravity, if the backend tracks it (`None` = the view
+    /// shows the configured default rather than pretending).
+    fn gravity(&self) -> Option<Vec3> {
+        None
+    }
 }
 
 /// Factory shape for the backend registry: config `Var` in, backend out.
@@ -118,7 +145,7 @@ fn backends() -> &'static RwLock<BackendMap> {
     static BACKENDS: OnceLock<RwLock<BackendMap>> = OnceLock::new();
     BACKENDS.get_or_init(|| {
         let mut map: BackendMap = HashMap::new();
-        map.insert("none".to_string(), Arc::new(|_config| Ok(Box::new(NoPhysicsBackend))));
+        map.insert("none".to_string(), Arc::new(|_config| Ok(Box::new(NoPhysicsBackend::default()))));
         #[cfg(feature = "physics")]
         map.insert("rapier".to_string(), Arc::new(|_config| {
             Ok(Box::new(super::physics_rapier::RapierBackend::new()))
@@ -153,26 +180,58 @@ pub fn create_physics_backend(
 /// register, nothing simulates, raycasts miss — and entity transforms stay
 /// under script control.
 #[derive(Default)]
-pub struct NoPhysicsBackend;
+pub struct NoPhysicsBackend {
+    /// Registered bodies, recorded verbatim: the sim is a no-op but the
+    /// EDITOR still wants the physics view to show what a scene
+    /// declares (the transforms stay under script control; the
+    /// declarations are real data).
+    bodies: Vec<BodyInfo>,
+    gravity: Option<Vec3>,
+}
 
 impl PhysicsWorldBackend for NoPhysicsBackend {
     fn name(&self) -> &str { "none" }
-    fn set_gravity(&mut self, _gravity: Vec3) {}
+    fn set_gravity(&mut self, gravity: Vec3) {
+        self.gravity = Some(gravity);
+    }
     fn step(&mut self, _dt: f32) {}
     fn add_body(
         &mut self,
-        _name: &str,
-        _shape: &Shape,
-        _body_type: BodyType,
-        _position: Vec3,
-        _rotation: Quat,
-        _gravity_scale: f32,
-        _mass: f32,
+        name: &str,
+        shape: &Shape,
+        body_type: BodyType,
+        position: Vec3,
+        rotation: Quat,
+        gravity_scale: f32,
+        mass: f32,
     ) {
+        let info = BodyInfo {
+            name: name.to_string(),
+            shape: *shape,
+            body_type,
+            position,
+            rotation,
+            gravity_scale,
+            mass,
+        };
+        // replace semantics, matching the trait contract
+        if let Some(slot) = self.bodies.iter_mut().find(|b| b.name == name) {
+            *slot = info;
+        } else {
+            self.bodies.push(info);
+        }
     }
     fn body_pose(&self, _name: &str) -> Option<(Vec3, Quat)> { None }
     fn raycast(&mut self, _origin: Vec3, _direction: Vec3, _max_distance: f32) -> Option<RayHit> {
         None
+    }
+    fn bodies(&self) -> Vec<BodyInfo> {
+        let mut bodies = self.bodies.clone();
+        bodies.sort_by(|a, b| a.name.cmp(&b.name));
+        bodies
+    }
+    fn gravity(&self) -> Option<Vec3> {
+        self.gravity
     }
 }
 
@@ -193,7 +252,7 @@ impl PhysicsWorld {
 
     /// A world over the built-in no-op backend.
     pub fn none() -> PhysicsWorld {
-        PhysicsWorld { backend: Box::new(NoPhysicsBackend) }
+        PhysicsWorld { backend: Box::new(NoPhysicsBackend::default()) }
     }
 
     pub fn backend_name(&self) -> &str { self.backend.name() }
@@ -229,4 +288,13 @@ impl PhysicsWorld {
         self.backend.raycast(origin, direction, max_distance)
     }
 
+    /// The bodies as read-only records (the editor's physics debug view).
+    pub fn bodies(&self) -> Vec<BodyInfo> {
+        self.backend.bodies()
+    }
+
+    /// The world's gravity, if the backend tracks it.
+    pub fn gravity(&self) -> Option<Vec3> {
+        self.backend.gravity()
+    }
 }

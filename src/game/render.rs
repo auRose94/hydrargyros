@@ -14,6 +14,10 @@ use crate::game::transform::Transform;
 /// world transform, depth-tested against other models and shaded.
 #[derive(Clone)]
 pub enum Geometry {
+    /// Nothing to draw this frame — an asset-backed renderer whose model
+    /// hasn't materialized (the scene stores the path; the load resolves
+    /// it). A no-op arm keeps `geometry()` total without a placeholder.
+    None,
     Quad(Quad),
     Model {
         model: std::sync::Arc<Model>,

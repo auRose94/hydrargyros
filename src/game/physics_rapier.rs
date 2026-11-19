@@ -20,10 +20,14 @@ pub struct RapierBackend {
     collider_owner: HashMap<ColliderHandle, String>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct NamedBody {
     body: RigidBodyHandle,
     collider: ColliderHandle,
+    /// The add_body spec, kept for the debug view (`bodies()`): the
+    /// declaration as registered — poses move under simulation, this is
+    /// the record of what was asked for.
+    info: super::physics::BodyInfo,
 }
 
 impl RapierBackend {
@@ -129,8 +133,22 @@ impl PhysicsWorldBackend for RapierBackend {
         let (body_handle, collider_handle) =
             self.world.insert(rigid, Self::collider(shape, body_type, mass));
         self.collider_owner.insert(collider_handle, name.to_string());
-        self.bodies_by_name
-            .insert(name.to_string(), NamedBody { body: body_handle, collider: collider_handle });
+        self.bodies_by_name.insert(
+            name.to_string(),
+            NamedBody {
+                body: body_handle,
+                collider: collider_handle,
+                info: super::physics::BodyInfo {
+                    name: name.to_string(),
+                    shape: *shape,
+                    body_type,
+                    position,
+                    rotation,
+                    gravity_scale,
+                    mass,
+                },
+            },
+        );
         // flush the broad phase / query snapshot so raycasts see the new
         // body before the next real step (a zero-dt step moves nothing)
         self.world.integration_parameters.dt = 0.0;
@@ -176,5 +194,16 @@ impl PhysicsWorldBackend for RapierBackend {
             normal: Vec3::new(n.x, n.y, n.z),
             distance: intersection.time_of_impact,
         })
+    }
+
+    fn bodies(&self) -> Vec<super::physics::BodyInfo> {
+        let mut infos: Vec<_> = self.bodies_by_name.values().map(|b| b.info.clone()).collect();
+        infos.sort_by(|a, b| a.name.cmp(&b.name));
+        infos
+    }
+
+    fn gravity(&self) -> Option<Vec3> {
+        let g = self.world.gravity;
+        Some(Vec3::new(g.x, g.y, g.z))
     }
 }

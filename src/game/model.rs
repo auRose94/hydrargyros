@@ -66,6 +66,39 @@ impl Model {
         &self.parts
     }
 
+    /// The model's local-space bounds: center and half-extents over every
+    /// part's vertex positions (node transforms are already baked into
+    /// the vertices, so this is the whole story). The pick path uses it
+    /// as an entity's box proxy — real bounds instead of a unit cube.
+    #[must_use]
+    pub fn bounds(&self) -> (crate::var::Vec3, crate::var::Vec3) {
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for part in &self.parts {
+            for v in part.mesh.vertices() {
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(v.pos[axis]);
+                    max[axis] = max[axis].max(v.pos[axis]);
+                }
+            }
+        }
+        if min[0].is_infinite() {
+            // no vertices at all — a point-sized box keeps the math total
+            return (crate::var::Vec3::splat(0.0), crate::var::Vec3::splat(0.0));
+        }
+        let center = crate::var::Vec3::new(
+            (min[0] + max[0]) * 0.5,
+            (min[1] + max[1]) * 0.5,
+            (min[2] + max[2]) * 0.5,
+        );
+        let half = crate::var::Vec3::new(
+            (max[0] - min[0]) * 0.5,
+            (max[1] - min[1]) * 0.5,
+            (max[2] - min[2]) * 0.5,
+        );
+        (center, half)
+    }
+
     /// Parse a glTF document from memory — `.glb` binary, or JSON with
     /// data-URI / GLB-blob buffers. Textures must be embedded in the GLB
     /// blob (a bufferView image); data-URI and external image files

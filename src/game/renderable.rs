@@ -1,8 +1,9 @@
 //! Renderables — components the
 //! engine's draw pass turns into geometry. A `MeshRenderer` draws either a
-//! solid shape (rect or circle, the quad path) or a model (mesh parts with
-//! optional textures) at its entity's world transform; the camera maps it
-//! to the screen.
+//! solid shape (rect or circle, the quad path), a model (mesh parts with
+//! optional textures), or an ASSET reference (a model file path the load
+//! resolves) at its entity's world transform; the camera maps it to the
+//! screen.
 
 use super::component::{Component, Priority};
 use super::model::Model;
@@ -54,13 +55,24 @@ impl FromVar for MeshShape {
 }
 
 /// What a [`MeshRenderer`] draws: a solid 2D shape (rendered in list
-/// order, no depth) or a model — mesh parts with optional textures,
+/// order, no depth), a model — mesh parts with optional textures,
 /// depth-tested, shaded, transformed by the full entity transform
-/// (position, rotation and scale).
+/// (position, rotation and scale) — or an ASSET reference: a file path
+/// the scene stores and the load materializes (the `gltf` feature).
 #[derive(Clone)]
 pub enum MeshGeometry {
     Shape { shape: MeshShape, half_size: Vec3 },
     Model { model: std::sync::Arc<Model> },
+    /// An asset file reference (`.glb`/`.gltf`), stored AS the path so
+    /// scenes round-trip feature-free: the path is data, the model is
+    /// compiled geometry that can't serialize. [`MeshRenderer::resolve`]
+    /// materializes it against the scene's directory; while unresolved
+    /// nothing draws (a `Geometry::None` frame contribution, not a
+    /// placeholder — the pick path still hits a small proxy box).
+    Asset {
+        path: String,
+        model: Option<std::sync::Arc<Model>>,
+    },
 }
 
 impl std::fmt::Debug for MeshGeometry {
@@ -82,6 +94,11 @@ impl std::fmt::Debug for MeshGeometry {
                         .map(|p| p.mesh.triangle_count())
                         .sum::<usize>(),
                 )
+                .finish(),
+            MeshGeometry::Asset { path, model } => f
+                .debug_struct("Asset")
+                .field("path", path)
+                .field("loaded", &model.is_some())
                 .finish(),
         }
     }
@@ -149,34 +166,98 @@ impl MeshRenderer {
         MeshRenderer::new(MeshGeometry::Model { model }, color)
     }
 
-    /// Build from a scene document's params object (the component
-    /// registry's `mesh_renderer` factory): `shape` (`"rect"` or
-    /// `"circle"`), optional `half_size` `[x, y, z]` (default unit) and
-    /// `color` `[r, g, b, a]` (default white). Model-backed renderers are
-    /// materialized by the asset pipeline, not scene params.
+    /// An asset-backed renderer: the scene stores `path` (relative to the
+    /// scene file); [`resolve`](Self::resolve) loads the model. The
+    /// constructor stays feature-free — a path is data, loading is a
+    /// feature.
+    #[must_use]
+    pub fn asset(path: impl Into<String>, color: [f32; 4]) -> Self {
+        MeshRenderer::new(
+            MeshGeometry::Asset {
+                path: path.into(),
+                model: None,
+            },
+            color,
+        )
+    }
+
+    /// The asset path when this renderer is asset-backed (the inspector's
+    /// model row and the scene save both read it).
+    #[must_use]
+    pub fn asset_path(&self) -> Option<&str> {
+        match &self.geometry {
+            MeshGeometry::Asset { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Materialize an asset-backed renderer: load the model at
+    /// `<base>/<path>`. The scene loader calls this once per component at
+    /// creation time (gltf-gated there); resolving again re-loads (an
+    /// edited path picks up the new file). Unresolved asset renderers
+    /// draw nothing but keep their path — the scene round-trips.
     ///
     /// # Errors
-    /// A `FromVarError` at the offending field.
-    pub fn from_params(v: &Var) -> Result<MeshRenderer, FromVarError> {
-        let Some(shape_var) = super::scene::opt_field(v, "shape") else {
-            return Err(
-                FromVarError::new("\"shape\" is required — \"rect\" or \"circle\"").at("shape")
-            );
+    /// The file can't be read or doesn't parse (the message names the
+    /// path).
+    #[cfg(feature = "gltf")]
+    pub fn resolve(&mut self, base: &std::path::Path) -> Result<(), String> {
+        let MeshGeometry::Asset { path, model } = &mut self.geometry else {
+            return Ok(());
         };
-        let shape = MeshShape::from_var(&shape_var).map_err(|e| e.at("shape"))?;
-        let mut half_size = Vec3::splat(1.0);
-        if let Some(size) = super::scene::opt_field(v, "half_size") {
-            half_size =
-                super::scene::SceneVec3::from_var(&size).map_err(|e| e.at("half_size"))?.0;
-        }
+        let full = base.join(&*path);
+        let loaded = Model::from_gltf_file(&full).map_err(|e| format!("{}: {e}", full.display()))?;
+        *model = Some(std::sync::Arc::new(loaded));
+        Ok(())
+    }
+
+    /// Build from a scene document's params object (the component
+    /// registry's `mesh_renderer` factory): either `model` (an asset
+    /// path, resolved by the load against the scene directory) or `shape`
+    /// (`"rect"` / `"circle"`) with optional `half_size` `[x, y, z]`
+    /// (default unit); optional `color` `[r, g, b, a]` (default white).
+    /// Compiled-model renderers (`MeshGeometry::Model`) are runtime-only —
+    /// procedural geometry has no provenance to save.
+    ///
+    /// # Errors
+    /// A `FromVarError` at the offending field (or neither `model` nor
+    /// `shape` present).
+    pub fn from_params(v: &Var) -> Result<MeshRenderer, FromVarError> {
+        let model = super::scene::opt_field(v, "model");
+        let shape_var = super::scene::opt_field(v, "shape");
+        let geometry = match (model, shape_var) {
+            (Some(m), None) => {
+                let path = m
+                    .as_str()
+                    .ok_or_else(|| FromVarError::new("expected a path string").at("model"))?
+                    .to_string();
+                MeshGeometry::Asset { path, model: None }
+            }
+            (None, Some(shape_var)) => {
+                let shape = MeshShape::from_var(&shape_var).map_err(|e| e.at("shape"))?;
+                let mut half_size = Vec3::splat(1.0);
+                if let Some(size) = super::scene::opt_field(v, "half_size") {
+                    half_size =
+                        super::scene::SceneVec3::from_var(&size).map_err(|e| e.at("half_size"))?.0;
+                }
+                MeshGeometry::Shape { shape, half_size }
+            }
+            (Some(_), Some(_)) => {
+                return Err(FromVarError::new(
+                    "one geometry per renderer — both \"model\" and \"shape\" present",
+                ));
+            }
+            (None, None) => {
+                return Err(FromVarError::new(
+                    "\"model\" (an asset path) or \"shape\" (\"rect\"/\"circle\") is required",
+                ));
+            }
+        };
         let mut color = [1.0, 1.0, 1.0, 1.0];
         if let Some(tint) = super::scene::opt_field(v, "color") {
             color = super::scene::SceneVec4::from_var(&tint).map_err(|e| e.at("color"))?.0;
         }
-        Ok(MeshRenderer::new(
-            MeshGeometry::Shape { shape, half_size },
-            color,
-        ))
+        Ok(MeshRenderer::new(geometry, color))
     }
 }
 
@@ -201,18 +282,26 @@ impl Component for MeshRenderer {
         Some("mesh_renderer")
     }
 
-    /// The params for shape-mode renderers, defaults omitted. Model-backed
-    /// renderers are runtime-only — the geometry is compiled (no
-    /// provenance to re-load it from) until the asset pipeline gives
-    /// models paths.
+    /// The params for shape-mode renderers (`shape`/`half_size`/`color`,
+    /// defaults omitted) and asset-backed renderers (`model` path +
+    /// `color` — the path round-trips feature-free; the load re-resolves
+    /// it). Compiled-model renderers stay runtime-only: procedural
+    /// geometry has no file to point back at.
     fn scene_params(&self, _ctx: &ComponentContext) -> Option<Var> {
-        let MeshGeometry::Shape { shape, half_size } = &self.geometry else {
-            return None;
-        };
         let obj = Object::new();
-        obj.set("shape", Var::from(shape.as_str()));
-        if *half_size != Vec3::splat(1.0) {
-            obj.set("half_size", super::scene::vec3_to_var(*half_size));
+        match &self.geometry {
+            MeshGeometry::Shape { shape, half_size } => {
+                obj.set("shape", Var::from(shape.as_str()));
+                if *half_size != Vec3::splat(1.0) {
+                    obj.set("half_size", super::scene::vec3_to_var(*half_size));
+                }
+            }
+            MeshGeometry::Asset { path, .. } => {
+                obj.set("model", Var::from(path.as_str()));
+            }
+            // a compiled model has no provenance — skip the component on
+            // save rather than write params that can't rebuild it
+            MeshGeometry::Model { .. } => return None,
         }
         if self.color != [1.0, 1.0, 1.0, 1.0] {
             obj.set("color", super::scene::f32s_to_var(&self.color));
@@ -236,6 +325,15 @@ impl Renderable for MeshRenderer {
             MeshGeometry::Model { model } => Geometry::Model {
                 model: model.clone(),
                 color: self.color,
+            },
+            // unresolved asset: nothing yet (the load fills the model);
+            // resolved: exactly the Model path
+            MeshGeometry::Asset { model, .. } => match model {
+                None => Geometry::None,
+                Some(model) => Geometry::Model {
+                    model: model.clone(),
+                    color: self.color,
+                },
             },
         }
     }
