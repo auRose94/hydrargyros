@@ -1294,3 +1294,180 @@ fn gizmo_paint_tessellates_in_the_viewport() {
         }
     }
 }
+
+// ---- glass chrome paint ----
+
+/// Paint one closure into its own headless pass — the gizmo paint
+/// test's pipeline (begin pass, paint, end pass, consume the texture
+/// deltas, tessellate) wrapped for the glass assertions below. Returns
+/// the pass's SHAPES and the tessellated primitives. The shape count is
+/// the honest LAYER count: egui coalesces same-texture shapes into one
+/// mesh at tessellation time, so primitive counts say nothing about how
+/// many layers were painted.
+#[cfg(feature = "editor")]
+fn tessellate_paint(
+    paint: impl FnOnce(&egui::Painter),
+) -> (Vec<egui::epaint::ClippedShape>, Vec<egui::ClippedPrimitive>) {
+    let ctx = egui::Context::default();
+    ctx.begin_pass(egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(400.0, 300.0),
+        )),
+        time: Some(0.0),
+        ..egui::RawInput::default()
+    });
+    paint(&ctx.debug_painter());
+    let mut output = ctx.end_pass();
+    // egui asserts at drop when texture deltas go unhandled — consume
+    // them (the shell feeds them to the renderer; the test only cares
+    // about geometry)
+    let _ = std::mem::take(&mut output.textures_delta.set);
+    let _ = std::mem::take(&mut output.textures_delta.free);
+    let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+    (output.shapes, primitives)
+}
+
+/// The glass look is LAYERED: body, vertical fade, border, specular,
+/// label — strictly more painted shapes than the flat body's fill +
+/// border + label. The assertion is on the shape count (one shape per
+/// painted layer), the honest geometry.
+#[cfg(feature = "editor")]
+#[test]
+fn glass_button_paints_more_layers_than_flat() {
+    use hyg::game::editor::style::{self, ButtonState};
+
+    let rect = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(64.0, 24.0));
+    let (glass_shapes, _) = tessellate_paint(|p| {
+        style::paint_glass_button(p, rect, "play", style::PLAY_GREEN, ButtonState::Idle, true);
+    });
+    let (flat_shapes, _) = tessellate_paint(|p| {
+        style::paint_flat_button(p, rect, "play", style::PLAY_GREEN, ButtonState::Idle, true);
+    });
+    assert!(
+        glass_shapes.len() > flat_shapes.len(),
+        "glass paints more layers than flat: {} vs {}",
+        glass_shapes.len(),
+        flat_shapes.len()
+    );
+}
+
+/// Hover paints the fake glow — concentric outline layers that live
+/// OUTSIDE the button body (egui has no blur; the halo is real
+/// geometry). The hovered paint's vertices must reach past the rect;
+/// the idle paint's must not.
+#[cfg(feature = "editor")]
+#[test]
+fn hovered_glass_paints_a_glow_beyond_the_body() {
+    use hyg::game::editor::style::{self, ButtonState};
+
+    let rect = egui::Rect::from_min_size(egui::pos2(30.0, 30.0), egui::vec2(64.0, 24.0));
+    let (idle_shapes, idle) = tessellate_paint(|p| {
+        style::paint_glass_button(p, rect, "stop", style::STOP_RED, ButtonState::Idle, true);
+    });
+    let (hovered_shapes, hovered) = tessellate_paint(|p| {
+        style::paint_glass_button(p, rect, "stop", style::STOP_RED, ButtonState::Hovered, true);
+    });
+    assert!(
+        hovered_shapes.len() > idle_shapes.len(),
+        "hover adds glow outline layers: {} vs {}",
+        hovered_shapes.len(),
+        idle_shapes.len()
+    );
+
+    let bounds = |primitives: &[egui::ClippedPrimitive]| {
+        let mut min = egui::pos2(f32::INFINITY, f32::INFINITY);
+        let mut max = egui::pos2(f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for primitive in primitives {
+            if let egui::epaint::Primitive::Mesh(mesh) = &primitive.primitive {
+                for vertex in &mesh.vertices {
+                    min.x = min.x.min(vertex.pos.x);
+                    min.y = min.y.min(vertex.pos.y);
+                    max.x = max.x.max(vertex.pos.x);
+                    max.y = max.y.max(vertex.pos.y);
+                }
+            }
+        }
+        (min, max)
+    };
+    let (hovered_min, hovered_max) = bounds(&hovered);
+    assert!(
+        hovered_min.x <= rect.left() - 2.0 && hovered_max.x >= rect.right() + 2.0,
+        "hover glow reaches outside the body: {:?}..{:?} vs {}..{}",
+        hovered_min.x,
+        hovered_max.x,
+        rect.left(),
+        rect.right()
+    );
+    let (idle_min, idle_max) = bounds(&idle);
+    assert!(
+        idle_min.x >= rect.left() - 1.0 && idle_max.x <= rect.right() + 1.0,
+        "idle paint stays inside the body: {:?}..{:?}",
+        idle_min.x,
+        idle_max.x
+    );
+}
+
+/// The label sits INSIDE the glass: every paint helper (both styles,
+/// both themes, idle and engaged) must return a label rect contained
+/// in the button rect — the "text inside the glass" contract.
+#[cfg(feature = "editor")]
+#[test]
+fn button_labels_land_inside_the_body() {
+    use hyg::game::editor::style::{self, ButtonState};
+
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(72.0, 26.0));
+    let ctx = egui::Context::default();
+    ctx.begin_pass(egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::pos2(0.0, 0.0),
+            egui::vec2(200.0, 100.0),
+        )),
+        time: Some(0.0),
+        ..egui::RawInput::default()
+    });
+    let painter = ctx.debug_painter();
+    let mut text_rects = Vec::new();
+    for accent in [
+        style::PLAY_GREEN,
+        style::STOP_RED,
+        style::RESTART_ORANGE,
+        style::ACCENT_DIM,
+    ] {
+        for dark in [true, false] {
+            text_rects.push(style::paint_glass_button(
+                &painter,
+                rect,
+                "step",
+                accent,
+                ButtonState::Idle,
+                dark,
+            ));
+            text_rects.push(style::paint_glass_button(
+                &painter,
+                rect,
+                "step",
+                accent,
+                ButtonState::Active,
+                dark,
+            ));
+            text_rects.push(style::paint_flat_button(
+                &painter,
+                rect,
+                "step",
+                accent,
+                ButtonState::Hovered,
+                dark,
+            ));
+        }
+    }
+    let mut output = ctx.end_pass();
+    let _ = std::mem::take(&mut output.textures_delta.set);
+    let _ = std::mem::take(&mut output.textures_delta.free);
+    for text_rect in text_rects {
+        assert!(
+            rect.contains_rect(text_rect),
+            "label escapes the glass: {text_rect:?} not inside {rect:?}"
+        );
+    }
+}

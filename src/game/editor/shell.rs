@@ -342,6 +342,9 @@ pub struct EditorState {
     press_hit: Option<GizmoHit>,
     scene_path: String,
     dark: bool,
+    /// The color buttons' paint (glass is the default; a View menu
+    /// toggle swaps in the flat fills).
+    button_style: style::ButtonStyle,
     /// The status line the bottom bar shows (save/load results, hints).
     status: String,
     fps_frames: u32,
@@ -440,6 +443,7 @@ impl EditorState {
             press_hit: None,
             scene_path: "scene.json.hyg".to_string(),
             dark: true,
+            button_style: style::ButtonStyle::Glass,
             status: "click the viewport to pick · W/E/R move/rotate/scale · Ctrl+Z undo · Del deletes"
                 .to_string(),
             fps_frames: 0,
@@ -986,6 +990,19 @@ fn draw_ui(
                                 style::apply(view.ctx(), state.dark);
                                 view.close();
                             }
+                            if view
+                                .button(match state.button_style {
+                                    style::ButtonStyle::Glass => "Flat buttons",
+                                    style::ButtonStyle::Flat => "Glass buttons",
+                                })
+                                .clicked()
+                            {
+                                state.button_style = match state.button_style {
+                                    style::ButtonStyle::Glass => style::ButtonStyle::Flat,
+                                    style::ButtonStyle::Flat => style::ButtonStyle::Glass,
+                                };
+                                view.close();
+                            }
                         });
                     });
                     // the transport, far right of the SAME row
@@ -993,40 +1010,45 @@ fn draw_ui(
                         egui::Layout::right_to_left(egui::Align::Center),
                         |right| {
                             let playing_now = shared.playing.load(Ordering::SeqCst);
-                            if right
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("restart").color(style::dark::TEXT),
-                                    )
-                                    .fill(style::RESTART_ORANGE),
-                                )
-                                .on_hover_text("restore the play snapshot and replay")
-                                .clicked()
+                            if style::color_button(
+                                right,
+                                "restart",
+                                style::RESTART_ORANGE,
+                                false,
+                                true,
+                                state.dark,
+                                state.button_style,
+                            )
+                            .on_hover_text("restore the play snapshot and replay")
+                            .clicked()
                             {
                                 restart(state, engine, shared);
                             }
-                            if right
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("stop").color(style::dark::TEXT),
-                                    )
-                                    .fill(style::STOP_RED),
-                                )
-                                .on_hover_text("back to the edit state")
-                                .clicked()
+                            if style::color_button(
+                                right,
+                                "stop",
+                                style::STOP_RED,
+                                false,
+                                true,
+                                state.dark,
+                                state.button_style,
+                            )
+                            .on_hover_text("back to the edit state")
+                            .clicked()
                             {
                                 stop(state, engine, shared);
                             }
-                            if right
-                                .add_enabled(
-                                    !playing_now,
-                                    egui::Button::new(
-                                        egui::RichText::new("step").color(style::dark::TEXT),
-                                    )
-                                    .fill(style::ACCENT_DIM),
-                                )
-                                .on_hover_text("one frame while paused")
-                                .clicked()
+                            if style::color_button(
+                                right,
+                                "step",
+                                style::ACCENT_DIM,
+                                false,
+                                !playing_now,
+                                state.dark,
+                                state.button_style,
+                            )
+                            .on_hover_text("one frame while paused")
+                            .clicked()
                             {
                                 // one frame, exactly: update + draw + render
                                 engine.update(1.0 / 60.0);
@@ -1035,35 +1057,39 @@ fn draw_ui(
                                 state.set_status("stepped one frame");
                                 shared.touch();
                             }
-                            if right
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("pause").color(style::dark::TEXT),
-                                    )
-                                    .fill(if playing_now {
-                                        style::GOLD_DIM
-                                    } else {
-                                        style::ACCENT_DIM
-                                    }),
-                                )
-                                .on_hover_text("pause the sim, keep the played state")
-                                .clicked()
+                            if style::color_button(
+                                right,
+                                "pause",
+                                if playing_now {
+                                    style::GOLD_DIM
+                                } else {
+                                    style::ACCENT_DIM
+                                },
+                                playing_now,
+                                true,
+                                state.dark,
+                                state.button_style,
+                            )
+                            .on_hover_text("pause the sim, keep the played state")
+                            .clicked()
                             {
                                 pause(state, shared);
                             }
-                            if right
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("play").color(style::dark::TEXT),
-                                    )
-                                    .fill(if playing_now {
-                                        style::GOLD_DIM
-                                    } else {
-                                        style::PLAY_GREEN
-                                    }),
-                                )
-                                .on_hover_text("snapshot the edit state and run")
-                                .clicked()
+                            if style::color_button(
+                                right,
+                                "play",
+                                if playing_now {
+                                    style::GOLD_DIM
+                                } else {
+                                    style::PLAY_GREEN
+                                },
+                                playing_now,
+                                true,
+                                state.dark,
+                                state.button_style,
+                            )
+                            .on_hover_text("snapshot the edit state and run")
+                            .clicked()
                             {
                                 if playing_now {
                                     pause(state, shared);
@@ -1516,9 +1542,14 @@ fn draw_dock(dock: &mut egui::Ui, state: &mut EditorState, engine: &Engine, shar
             (DockTab::Debugger, "Debugger"),
             (DockTab::Profiler, "Profiler"),
         ] {
-            if tabs
-                .selectable_label(state.dock_tab == tab, label)
-                .clicked()
+            if style::tab_button(
+                tabs,
+                label,
+                state.dock_tab == tab,
+                state.dark,
+                state.button_style,
+            )
+            .clicked()
             {
                 state.dock_tab = tab;
             }
@@ -1652,19 +1683,24 @@ fn draw_toolbar(
     let _ = engine;
     bar.horizontal(|row| {
         // the gizmo modes, color-coded to their gizmo axes of heart:
-        // move red, rotate green, scale blue
+        // move red, rotate green, scale blue (the active mode wears the
+        // pressed/engaged glow)
         for (mode, color) in [
             (GizmoMode::Translate, egui::Color32::from_rgb(232, 85, 95)),
             (GizmoMode::Rotate, egui::Color32::from_rgb(105, 212, 107)),
             (GizmoMode::Scale, egui::Color32::from_rgb(91, 141, 240)),
         ] {
-            let label = egui::RichText::new(mode.name());
-            let label = if state.mode == mode {
-                label.strong().color(color)
-            } else {
-                label
-            };
-            if row.selectable_label(state.mode == mode, label).clicked() {
+            if style::color_button(
+                row,
+                mode.name(),
+                color,
+                state.mode == mode,
+                true,
+                state.dark,
+                state.button_style,
+            )
+            .clicked()
+            {
                 state.mode = mode;
             }
         }
@@ -1675,12 +1711,11 @@ fn draw_toolbar(
         let mut switch_tab: Option<usize> = None;
         for (i, tab) in state.tabs.iter().enumerate() {
             let label = if tab.dirty {
-                egui::RichText::new(format!("{} *", tab.label))
+                format!("{} *", tab.label)
             } else {
-                egui::RichText::new(&tab.label)
+                tab.label.clone()
             };
-            if row
-                .selectable_label(i == state.active_tab, label)
+            if style::tab_button(row, &label, i == state.active_tab, state.dark, state.button_style)
                 .clicked()
             {
                 switch_tab = Some(i);

@@ -5,7 +5,10 @@
 //! rooms; the sense of style grows from here (themes are data, not
 //! decisions).
 
-use egui::{Color32, Context, ThemePreference, Visuals};
+use egui::{
+    Align2, Color32, Context, CornerRadius, FontId, Mesh, Painter, Rect, Sense, Shape, Stroke,
+    StrokeKind, ThemePreference, Ui, Visuals,
+};
 
 // chrome colors (dim button fills — text stays the palette's TEXT on
 // them). Single source for the transport's color coding and any future
@@ -115,4 +118,392 @@ fn palette(
         state.corner_radius = egui::CornerRadius::same(4);
     }
     v
+}
+
+// ---- glass chrome ----
+//
+// The color buttons and tabs paint themselves as layered translucent
+// shapes (the mid-2000s glass look): a tinted translucent body, a
+// vertical brightness fade toward the top, a thin light border, and a
+// specular highlight in the upper portion. egui has no blur, so the
+// hover glow is faked with concentric rounded-rect strokes that grow
+// and fade; pressed/toggled states pinch the same glow tighter and
+// brighter so the state reads at a glance. Everything is 2D vector
+// paint — no shaders, no textures, no new dependencies.
+
+/// Which paint the chrome's color buttons use. [`ButtonStyle::Glass`]
+/// is the layered translucent look; [`ButtonStyle::Flat`] is the plain
+/// opaque fill (the same body a filled [`egui::Button`] draws). A View
+/// menu toggle switches between them at runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ButtonStyle {
+    /// Layered translucent glass (the default look).
+    #[default]
+    Glass,
+    /// Flat opaque fill.
+    Flat,
+}
+
+/// A button's interaction state at paint time, explicit rather than
+/// read from the pointer — paint helpers stay pure, and headless tests
+/// paint each state directly without simulating input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonState {
+    Idle,
+    Hovered,
+    /// Pressed, or engaged by selection/toggle (the playing transport
+    /// button, the active gizmo mode, the open tab).
+    Active,
+    Disabled,
+}
+
+/// Corner radius of the chrome's buttons.
+const BUTTON_RADIUS: u8 = 5;
+/// Corner radius of the chrome's tabs (top corners only).
+const TAB_RADIUS: u8 = 6;
+/// The chrome's button/tab label size.
+const LABEL_SIZE: f32 = 12.0;
+
+/// Linear mix of two colors, alpha included (the glass builds its tints
+/// by blending an accent into white/dark).
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let lerp = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(
+        lerp(a.r(), b.r()),
+        lerp(a.g(), b.g()),
+        lerp(a.b(), b.b()),
+        lerp(a.a(), b.a()),
+    )
+}
+
+/// The same color with its alpha replaced.
+fn with_alpha(c: Color32, a: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+}
+
+/// The halo color for a button's glow. On the dark theme a dim fill
+/// color (the transport's dim variants) must still read as light, so it
+/// lifts toward white; on the light theme white would vanish, so the
+/// accent glows as itself.
+fn glow_tint(accent: Color32, dark: bool) -> Color32 {
+    if dark {
+        mix(accent, Color32::from_rgb(255, 255, 255), 0.4)
+    } else {
+        accent
+    }
+}
+
+/// The glow as concentric outline layers, outside-in skipped: each
+/// entry is `(outset, stroke width, alpha)`. Hover = a loose fading
+/// halo; active = fewer, tighter, brighter — the halo "pinches" onto
+/// the button so pressed/toggled reads at a glance.
+fn glow_layers(state: ButtonState) -> &'static [(f32, f32, u8)] {
+    match state {
+        ButtonState::Idle | ButtonState::Disabled => &[],
+        ButtonState::Hovered => &[(2.0, 2.0, 55), (4.5, 1.5, 30), (7.5, 1.0, 14)],
+        ButtonState::Active => &[(1.5, 3.0, 105), (3.5, 2.0, 60)],
+    }
+}
+
+fn label_color(state: ButtonState, dark: bool) -> Color32 {
+    match (state, dark) {
+        (ButtonState::Disabled, true) => with_alpha(dark::FAINT, 150),
+        (ButtonState::Disabled, false) => with_alpha(light::FAINT, 150),
+        (ButtonState::Idle, true) => dark::TEXT,
+        (ButtonState::Idle, false) => light::TEXT,
+        // engaged/hovered labels lift toward white (dark) or black
+        // (light) so they stay readable over the brighter glass
+        (_, true) => mix(dark::TEXT, Color32::from_rgb(255, 255, 255), 0.6),
+        (_, false) => mix(light::TEXT, Color32::from_rgb(0, 0, 0), 0.4),
+    }
+}
+
+/// Paint the glow outlines around `rect` (a rounded rect per layer,
+/// corner radius growing with the outset to keep the halo smooth).
+fn paint_glow(painter: &Painter, rect: Rect, accent: Color32, state: ButtonState, dark: bool) {
+    let tint = glow_tint(accent, dark);
+    for (outset, width, alpha) in glow_layers(state) {
+        painter.rect_stroke(
+            rect.expand(*outset),
+            CornerRadius::same(BUTTON_RADIUS + *outset as u8),
+            Stroke::new(*width, with_alpha(tint, *alpha)),
+            StrokeKind::Middle,
+        );
+    }
+}
+
+/// A vertical fade as one tiny mesh: four vertices, two triangles,
+/// vertex colors carrying the top/bottom tint (egui has no gradient
+/// rect fill, and one 4-vertex mesh is cheaper than stacked bands
+/// while keeping a smooth fade). Inset by the corner radius so the
+/// rounded body silhouette stays visible at the edges.
+fn paint_vertical_fade(
+    painter: &Painter,
+    rect: Rect,
+    radius: u8,
+    top: Color32,
+    bottom: Color32,
+) {
+    let r = f32::from(radius);
+    let inner = Rect::from_min_max(
+        egui::pos2(rect.left() + r, rect.top() + r),
+        egui::pos2(rect.right() - r, rect.bottom() - r),
+    );
+    let mut mesh = Mesh::default();
+    mesh.colored_vertex(egui::pos2(inner.left(), inner.top()), top);
+    mesh.colored_vertex(egui::pos2(inner.right(), inner.top()), top);
+    mesh.colored_vertex(egui::pos2(inner.right(), inner.bottom()), bottom);
+    mesh.colored_vertex(egui::pos2(inner.left(), inner.bottom()), bottom);
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    painter.add(Shape::mesh(mesh));
+}
+
+/// The glass body's layers for a state: `(body alpha, fade top alpha,
+/// fade bottom alpha, border alpha, specular alpha)`. Hover brightens
+/// the glass slightly, active brightens more — the surface answers the
+/// pointer before the glow even starts.
+fn glass_layers(state: ButtonState, dark: bool) -> (u8, u8, u8, u8, u8) {
+    if dark {
+        match state {
+            ButtonState::Idle => (95, 55, 45, 45, 28),
+            ButtonState::Hovered => (115, 75, 55, 75, 40),
+            ButtonState::Active => (140, 95, 70, 100, 52),
+            ButtonState::Disabled => (60, 30, 25, 28, 14),
+        }
+    } else {
+        match state {
+            ButtonState::Idle => (150, 170, 90, 70, 110),
+            ButtonState::Hovered => (175, 195, 110, 95, 130),
+            ButtonState::Active => (200, 215, 130, 120, 150),
+            ButtonState::Disabled => (110, 110, 60, 45, 70),
+        }
+    }
+}
+
+/// Paint a glass button inside `rect` and return the label's rect (the
+/// "text sits inside the glass" assertion at geometry level). `accent`
+/// drives the body tint, the border hue and the glow — the semantic
+/// color of the button (green play, red stop, …).
+pub fn paint_glass_button(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    accent: Color32,
+    state: ButtonState,
+    dark: bool,
+) -> Rect {
+    paint_glow(painter, rect, accent, state, dark);
+    let (body_a, top_a, bottom_a, border_a, spec_a) = glass_layers(state, dark);
+    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.3);
+    painter.rect_filled(rect, CornerRadius::same(BUTTON_RADIUS), with_alpha(body, body_a));
+    let fade_top = mix(
+        Color32::from_rgb(255, 255, 255),
+        accent,
+        if dark { 0.25 } else { 0.1 },
+    );
+    let fade_bottom = mix(accent, if dark { dark::BASE } else { light::BASE }, 0.25);
+    paint_vertical_fade(
+        painter,
+        rect,
+        BUTTON_RADIUS,
+        with_alpha(fade_top, top_a),
+        with_alpha(fade_bottom, bottom_a),
+    );
+    let border = if dark {
+        Color32::from_rgb(255, 255, 255)
+    } else {
+        mix(accent, Color32::from_rgb(70, 80, 100), 0.5)
+    };
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(BUTTON_RADIUS),
+        Stroke::new(1.0, with_alpha(border, border_a)),
+        StrokeKind::Inside,
+    );
+    // the specular: a soft white window in the top portion — the light
+    // "catching" the glass
+    let spec = Rect::from_min_max(
+        egui::pos2(rect.left() + 6.0, rect.top() + 2.0),
+        egui::pos2(rect.right() - 6.0, rect.top() + rect.height() * 0.42),
+    );
+    painter.rect_filled(spec, CornerRadius::same(3), with_alpha(Color32::WHITE, spec_a));
+    paint_label(painter, rect, label, state, dark)
+}
+
+/// Paint the flat alternative: an opaque semantic fill with a thin
+/// border and the same glow treatment (the halo is what both styles
+/// share). The body a filled [`egui::Button`] draws, kept.
+pub fn paint_flat_button(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    accent: Color32,
+    state: ButtonState,
+    dark: bool,
+) -> Rect {
+    paint_glow(painter, rect, accent, state, dark);
+    let fill = if state == ButtonState::Disabled {
+        accent.gamma_multiply(0.5)
+    } else {
+        accent
+    };
+    painter.rect_filled(rect, CornerRadius::same(BUTTON_RADIUS), fill);
+    let border_a = match state {
+        ButtonState::Idle => if dark { 40 } else { 50 },
+        ButtonState::Hovered => 70,
+        ButtonState::Active => 100,
+        ButtonState::Disabled => 25,
+    };
+    let border = if dark {
+        Color32::from_rgb(255, 255, 255)
+    } else {
+        Color32::from_rgb(30, 35, 45)
+    };
+    painter.rect_stroke(
+        rect,
+        CornerRadius::same(BUTTON_RADIUS),
+        Stroke::new(1.0, with_alpha(border, border_a)),
+        StrokeKind::Inside,
+    );
+    // flat keeps one label color on both themes: the fill is a
+    // mid-tone semantic color, so light-on-color reads everywhere
+    let text = match state {
+        ButtonState::Disabled => mix(dark::TEXT, dark::WINDOW, 0.55),
+        _ => dark::TEXT,
+    };
+    paint_label_text(painter, rect, label, text)
+}
+
+/// A chrome tab: rounded-top glass when engaged, a fainter strip when
+/// idle. The same paint language as the buttons, at lower contrast —
+/// tabs stay background furniture.
+pub fn paint_tab(
+    painter: &Painter,
+    rect: Rect,
+    label: &str,
+    accent: Color32,
+    state: ButtonState,
+    dark: bool,
+) -> Rect {
+    let radius = CornerRadius {
+        nw: TAB_RADIUS,
+        ne: TAB_RADIUS,
+        sw: 0,
+        se: 0,
+    };
+    let (body_a, fade_a, border_a) = match state {
+        ButtonState::Active => (if dark { 85 } else { 160 }, if dark { 60 } else { 110 }, 80),
+        ButtonState::Hovered => (if dark { 45 } else { 120 }, if dark { 30 } else { 75 }, 50),
+        _ => (if dark { 22 } else { 90 }, 0, 30),
+    };
+    let body = mix(accent, if dark { dark::WINDOW } else { light::WINDOW }, 0.3);
+    painter.rect_filled(rect, radius, with_alpha(body, body_a));
+    if fade_a > 0 {
+        let top = if dark { Color32::WHITE } else { mix(Color32::WHITE, accent, 0.15) };
+        paint_vertical_fade(painter, rect, TAB_RADIUS, with_alpha(top, fade_a), Color32::TRANSPARENT);
+    }
+    let border = if dark {
+        Color32::from_rgb(255, 255, 255)
+    } else {
+        mix(accent, Color32::from_rgb(70, 80, 100), 0.5)
+    };
+    painter.rect_stroke(rect, radius, Stroke::new(1.0, with_alpha(border, border_a)), StrokeKind::Inside);
+    paint_label(painter, rect, label, state, dark)
+}
+
+/// Center the label inside the glass (state-aware color).
+fn paint_label(painter: &Painter, rect: Rect, label: &str, state: ButtonState, dark: bool) -> Rect {
+    paint_label_text(painter, rect, label, label_color(state, dark))
+}
+
+fn paint_label_text(painter: &Painter, rect: Rect, label: &str, color: Color32) -> Rect {
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(LABEL_SIZE),
+        color,
+    )
+}
+
+/// Resolve a live [`egui::Response`] into a paint state.
+fn response_state(response: &egui::Response, selected: bool, enabled: bool) -> ButtonState {
+    if !enabled {
+        ButtonState::Disabled
+    } else if selected || response.is_pointer_button_down_on() {
+        ButtonState::Active
+    } else if response.hovered() {
+        ButtonState::Hovered
+    } else {
+        ButtonState::Idle
+    }
+}
+
+/// One chrome color button: allocate the space, paint the style's
+/// body under the pointer/selection state, and hand back the response
+/// (call sites keep `.on_hover_text(...).clicked()`). `accent` is the
+/// semantic color — the fill in [`ButtonStyle::Flat`], the glass tint
+/// and glow hue in [`ButtonStyle::Glass`]. `selected` engages the
+/// active glow (toggled-on buttons).
+pub fn color_button(
+    ui: &mut Ui,
+    label: &str,
+    accent: Color32,
+    selected: bool,
+    enabled: bool,
+    dark: bool,
+    style: ButtonStyle,
+) -> egui::Response {
+    let font = FontId::proportional(LABEL_SIZE);
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, Color32::WHITE);
+    let size = egui::vec2(galley.size().x + 16.0, (galley.size().y + 7.0).max(20.0));
+    // the disabled gate scopes the allocation: the response inherits
+    // enabled=false (clicked() stays false) and the painter fades
+    ui.add_enabled_ui(enabled, |ui| {
+        let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+        let state = response_state(&response, selected, enabled);
+        // the glow strokes live outside the rect — paint with a clip
+        // wide enough to hold them
+        let painter = ui.painter_at(rect.expand(8.0));
+        match style {
+            ButtonStyle::Glass => {
+                paint_glass_button(&painter, rect, label, accent, state, dark);
+            }
+            ButtonStyle::Flat => {
+                paint_flat_button(&painter, rect, label, accent, state, dark);
+            }
+        }
+        response
+    })
+    .inner
+}
+
+/// One chrome tab (the scene tabs, the bottom dock's row). Glass when
+/// [`ButtonStyle::Glass`] (active = the open tab), the plain
+/// selectable label when [`ButtonStyle::Flat`].
+pub fn tab_button(
+    ui: &mut Ui,
+    label: &str,
+    selected: bool,
+    dark: bool,
+    style: ButtonStyle,
+) -> egui::Response {
+    if style == ButtonStyle::Flat {
+        return ui.selectable_label(selected, label);
+    }
+    let accent = if dark { dark::ACCENT } else { light::ACCENT };
+    let font = FontId::proportional(LABEL_SIZE);
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, Color32::WHITE);
+    let size = egui::vec2(galley.size().x + 18.0, (galley.size().y + 6.0).max(22.0));
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let state = if selected {
+        ButtonState::Active
+    } else if response.hovered() {
+        ButtonState::Hovered
+    } else {
+        ButtonState::Idle
+    };
+    let painter = ui.painter_at(rect.expand(3.0));
+    paint_tab(&painter, rect, label, accent, state, dark);
+    response
 }
