@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 
+#[cfg(all(feature = "script", feature = "web"))]
 use hyg::dynamic::engine::{HostFn, ScriptError};
 use hyg::dynamic::functions::{register_function, FunctionMeta};
 use hyg::dynamic::graph::model::{Graph, GraphError, GRAPH_FORMAT};
@@ -80,6 +81,7 @@ fn callable(
 
 /// Register a callable that FAILS — the table's Result voice, the shape
 /// a plugin error or a script throw takes.
+#[cfg(all(feature = "script", feature = "web"))]
 fn failing_callable(name: &'static str, inputs: Vec<Ty>, output: Ty) {
     let host: HostFn = Arc::new(Mutex::new(Box::new(
         move |_args: &[Var]| -> Result<Var, ScriptError> {

@@ -10,9 +10,9 @@ use std::sync::{Arc, Mutex};
 
 use hyg::dynamic::functions::{register_function, FunctionMeta};
 use hyg::dynamic::graph::model::{Graph, GRAPH_FORMAT};
-use hyg::dynamic::graph::to_rust::{
-    build_generated, generate, GraphCrateSpec, RustBinding, RustVocabulary,
-};
+use hyg::dynamic::graph::to_rust::{generate, GraphCrateSpec, RustBinding, RustVocabulary};
+#[cfg(feature = "dynamic-ffi")]
+use hyg::dynamic::graph::to_rust::build_generated;
 use hyg::var::Ty;
 use hyg::Var;
 

@@ -1167,6 +1167,34 @@ seams it grows through.
    fallback. If imports need those formats sooner, the same feature
    can land early — the analysis above is the design.
 
+8h. **Packaging polish landed (2026-11-19): footer v2, the compression
+   knob, and `--metrics`.** The **footer grew a body**: `HYGFUSE2` +
+   archive length + **flags** (bit 0 = gzip) + a **32-byte version
+   stamp** — the runtime's launch line now names what fused the game
+   (`fused archive: hyg v0.1.0, 567 B stored, gzip`), so a jam
+   submission that misbehaves names its build. **The compression
+   knob** (`hyg fuse --compress`, the `pack-compress` feature,
+   flate2's miniz_oxide backend — pure Rust): the archive gzips
+   before appending, and a runtime built without the feature refuses
+   a compressed archive with a message naming the rebuild (both sides
+   must opt in; the default fuse stays uncompressed — bandwidth over
+   disk, the M6 decision, now a flag). **The fuse carries the
+   runtime's permissions to the output** — a fused game RUNS BARE,
+   and a fresh non-executable `game.bin` (caught live in the e2e)
+   was a trip hazard. **`--metrics` on every `hyg` command** prints
+   one compact JSON document (`{"command":"fuse","fused_bytes":…,
+   "compressed":true,"duration_ms":…}`) — the corporate ask's metric
+   collections, build-script-shaped; human lines stay the default
+   through a shared `cli.rs` both binaries ride (the bins moved to
+   directories: `src/bin/hyg/main.rs`, `src/bin/hyg-runtime/main.rs`).
+   E2E live: the demo scene fused compressed to 27.5 MB, launched
+   bare — footer parse, decompress, three roots playing. Also swept:
+   the whole core-config clippy/test surface is clean again (the
+   gated test helpers `cfg`-gated, not deleted). Suite **257 core /
+   420 `--all-features`**, clippy 0 both configs. Still queued: the
+   in-memory archive mount (skip the temp extraction — needs the VFS
+   seams), and the Studio themes + icon font (Rose's visual gate).
+
 ## What hyg will NOT do
 
 - **Not integrate into Bevy.** Bevy is ECS-first (homogeneous typed

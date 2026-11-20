@@ -34,11 +34,11 @@ required-features = ["pack"]
 
 [[bin]]
 name = "hyg"
-path = "src/bin/hyg.rs"
+path = "src/bin/hyg/main.rs"
 
 [[bin]]
 name = "hyg-runtime"
-path = "src/bin/hyg-runtime.rs"
+path = "src/bin/hyg-runtime/main.rs"
 required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio", "pack", "import-unity", "import-unreal"]
 
 [dependencies]
@@ -67,6 +67,10 @@ pollster = { version = "0.4", optional = true }
 # tar archives (the `pack` feature): the single-file packaging story
 # appends a tar of the bundle to the runtime binary's tail
 tar = { version = "0.4", optional = true }
+# gzip compression (the `pack-compress` feature): `hyg fuse --compress`
+# shrinks the archive; the runtime decompresses through the same crate.
+# miniz_oxide backend — pure Rust, no C
+flate2 = { version = "1", optional = true, default-features = false, features = ["rust_backend"] }
 # Unity asset parsing (the `import-unity` feature): .unity/.prefab YAML
 # scenes load for migration into hyg projects
 unity-asset = { version = "0.2", optional = true, default-features = false }
@@ -146,6 +150,9 @@ physics = ["dep:rapier3d"]
 # pack: the single-file packaging story (fuse a bundle onto the
 # runtime's tail; the runtime detects and unpacks its own tail)
 pack = ["dep:tar"]
+# pack-compress: the fuse compression knob (gzip; a compressed archive
+# needs a runtime built WITH this feature to play)
+pack-compress = ["dep:flate2"]
 # import-unity: migrate Unity projects (scenes, prefabs, scripts)
 import-unity = ["dep:unity-asset"]
 import-unreal = ["dep:rust-uasset"]

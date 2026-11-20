@@ -6,6 +6,10 @@
 //!
 //! Builds only with the runtime features (see the [[bin]] entry).
 
+// the report style rides with the packaging CLI's helpers
+#[path = "../hyg/cli.rs"]
+mod cli;
+
 use hyg::game::scene::Scene;
 use hyg::game::{Engine, PhysicsWorld, WgpuRenderer, WinitWindow};
 
@@ -54,6 +58,17 @@ fn main() {
             let exe = std::env::current_exe()
                 .map_err(|e| format!("current_exe: {e}"))
                 .expect("exe path");
+            // the footer speaks: what hyg fused this, how big, compressed?
+            match hyg::pack::fuse_info(&exe) {
+                Ok(Some(info)) => println!(
+                    "fused archive: hyg v{}, {} stored, {}",
+                    info.version,
+                    cli::human(info.archive_len),
+                    if info.compressed { "gzip" } else { "uncompressed" }
+                ),
+                Ok(None) => {}
+                Err(e) => eprintln!("hyg: footer: {e}"),
+            }
             let extracted = hyg::pack::unpack_self(&exe)
                 .expect("reading our own tail")
                 .unwrap_or_else(|| {

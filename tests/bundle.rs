@@ -7,10 +7,8 @@
 use hyg::bundle;
 use hyg::carrier;
 use hyg::game::scene::Scene;
-use hyg::game::{Camera, Entity};
 #[cfg(feature = "script")]
-use hyg::game::ScriptedComponent;
-use hyg::game::MeshRenderer;
+use hyg::game::{Camera, Entity, MeshRenderer, ScriptedComponent};
 use hyg::Var;
 use std::path::Path;
 

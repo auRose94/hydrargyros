@@ -7,26 +7,155 @@
 //! ```text
 //! [runtime binary, zero-padded to a 512-byte multiple]
 //! [tar archive of the bundle]     ← the game: scene + scripts + assets
-//! [magic "HYGFUSE1"][u64 LE tar length]   (the 16-byte footer)
+//! [footer]                         (52 bytes, see FUSE_FOOTER_SIZE)
 //! ```
 //!
+//! The footer:
+//!
+//! ```text
+//! [magic "HYGFUSE2"][u64 LE archive length][u32 LE flags][32-byte version, NUL-padded]
+//! ```
+//!
+//! Flags (bit 0 set = the archive is gzip): the compression knob —
+//! `hyg fuse --compress` shrinks the payload; a runtime built with the
+//! `pack-compress` feature decompresses it, one built without refuses
+//! with a message that names the rebuild. The version stamp records
+//! the hyg that fused the game (the runtime prints it on launch — a
+//! jam submission that misbehaves names its build).
+//!
 //! Padding aligns the archive so ordinary tar tools can also read it
-//! straight off the fused file. The runtime, launched bare, reads its
-//! OWN tail: footer present → unpack the archive into a temp directory
-//! and play the scene it finds there.
+//! straight off an UNcompressed fused file. The runtime, launched
+//! bare, reads its OWN tail: footer present → unpack the archive into
+//! a temp directory and play the scene it finds there.
 //!
 //! Feature `pack` (the `tar` crate): fuse + unpack are data in → files
-//! out, so the round trip runs and tests headless.
+//! out, so the round trip runs and tests headless. Feature
+//! `pack-compress` (flate2, the miniz_oxide backend) adds the
+//! compression knob.
 
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 /// The footer's magic: eight bytes before the archive length.
-const FUSE_MAGIC: &[u8; 8] = b"HYGFUSE1";
-/// The footer's size: magic + u64 archive length.
-const FOOTER_SIZE: u64 = 16;
+const FUSE_MAGIC: &[u8; 8] = b"HYGFUSE2";
+/// Archive flag bit 0: the archive is gzip (the compression knob).
+const FLAG_GZIP: u32 = 1;
+/// The version stamp's width — every hyg version fits.
+const VERSION_WIDTH: usize = 32;
+/// The footer's size: magic + u64 length + u32 flags + the version.
+const FOOTER_SIZE: u64 = 8 + 8 + 4 + VERSION_WIDTH as u64;
 /// The alignment the runtime is padded to before the archive appends.
 const ALIGN: u64 = 512;
+
+/// What a fuse produces: the sizes (the `--metrics` story), whether
+/// the archive compressed, and the version stamped into the footer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FuseStats {
+    /// The fused file's total size.
+    pub fused_bytes: u64,
+    /// The archive before compression.
+    pub archive_raw: usize,
+    /// The archive as stored (equal to `archive_raw` uncompressed).
+    pub archive_stored: usize,
+    /// Whether the archive is gzip.
+    pub compressed: bool,
+    /// The version stamped into the footer.
+    pub version: &'static str,
+}
+
+/// Fuse knobs. Default: uncompressed (bandwidth over disk — the M6
+/// decision; `--compress` opts into gzip).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FuseOptions {
+    /// Gzip the archive before appending.
+    pub compress: bool,
+}
+
+/// Detect a fused archive at `path`'s tail and read it in: the archive
+/// bytes, its flags, and the version stamp. `None` when the file
+/// carries no footer (a bare runtime or a too-short file).
+///
+/// # Errors
+/// The file can't be read, the footer claims an archive longer than
+/// the file, or a gzip archive meets a build without `pack-compress`.
+fn read_footer(path: &Path) -> Result<Option<(Vec<u8>, bool, String)>, String> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .len();
+    if size < FOOTER_SIZE {
+        return Ok(None);
+    }
+    let tail = {
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        file.seek(std::io::SeekFrom::Start(size - FOOTER_SIZE))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        tail
+    };
+    if tail[..8] != *FUSE_MAGIC {
+        return Ok(None);
+    }
+    let archive_len = u64::from_le_bytes(
+        tail[8..16]
+            .try_into()
+            .expect("the footer carries 8 length bytes"),
+    );
+    let flags = u32::from_le_bytes(
+        tail[16..20]
+            .try_into()
+            .expect("the footer carries 4 flag bytes"),
+    );
+    let version = String::from_utf8_lossy(&tail[20..20 + VERSION_WIDTH])
+        .trim_end_matches('\0')
+        .to_string();
+    let archive_start = size
+        .checked_sub(FOOTER_SIZE)
+        .and_then(|tail_start| tail_start.checked_sub(archive_len))
+        .ok_or_else(|| "corrupt footer: archive longer than the file".to_string())?;
+
+    let archive_bytes = {
+        let mut file = std::fs::File::open(path)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        file.seek(std::io::SeekFrom::Start(archive_start))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut bytes = vec![0u8; archive_len as usize];
+        file.read_exact(&mut bytes)
+            .map_err(|e| format!("reading the archive: {e}"))?;
+        bytes
+    };
+    Ok(Some((
+        archive_bytes,
+        flags & FLAG_GZIP != 0,
+        version,
+    )))
+}
+
+/// The fused file's footer facts, without the archive bytes — the
+/// runtime's launch line and the tooling's introspection.
+///
+/// # Errors
+/// The file can't be read.
+pub fn fuse_info(path: &Path) -> Result<Option<FuseInfo>, String> {
+    Ok(read_footer(path)?.map(|(archive_bytes, compressed, version)| FuseInfo {
+        archive_len: archive_bytes.len() as u64,
+        compressed,
+        version,
+    }))
+}
+
+/// A fused file's footer facts (sizes only — no archive read).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FuseInfo {
+    /// The stored archive's length.
+    pub archive_len: u64,
+    /// Whether the archive is gzip.
+    pub compressed: bool,
+    /// The version stamp (the hyg that fused the game).
+    pub version: String,
+}
 
 /// Tar a directory tree in memory: files only (a bundle is files —
 /// `bundle::build` lays the scene and its references out flat-ish),
@@ -65,31 +194,121 @@ fn tar_dir(dir: &Path) -> Result<Vec<u8>, String> {
     Ok(tar_bytes)
 }
 
-/// FUSE: pad the runtime to [`ALIGN`], append the bundle's tar, append
-/// the footer. Overwrites `out` — a fuse is reproducible by
-/// construction. Returns the fused file's size.
+/// The hyg that fuses the game — stamped into every footer.
+pub const FUSE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// FUSE: pad the runtime to [`ALIGN`], append the bundle's tar
+/// (gzip-compressed under [`FuseOptions::compress`] — needs the
+/// `pack-compress` feature), append the footer. Overwrites `out` — a
+/// fuse is reproducible by construction.
 ///
 /// # Errors
-/// The runtime or the bundle can't be read, or the write fails.
-pub fn fuse(runtime: &Path, bundle_dir: &Path, out: &Path) -> Result<u64, String> {
+/// The runtime or the bundle can't be read, compression was requested
+/// without the `pack-compress` feature, or the write fails.
+pub fn fuse(
+    runtime: &Path,
+    bundle_dir: &Path,
+    out: &Path,
+    options: FuseOptions,
+) -> Result<FuseStats, String> {
     let mut runtime_bytes = std::fs::read(runtime)
         .map_err(|e| format!("{}: {e}", runtime.display()))?;
-    let archive = tar_dir(bundle_dir)?;
+    let archive_raw = tar_dir(bundle_dir)?;
+
+    let (archive_stored, compressed) = if options.compress {
+        #[cfg(feature = "pack-compress")]
+        {
+            let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+            encoder
+                .write_all(&archive_raw)
+                .map_err(|e| format!("compressing the archive: {e}"))?;
+            (encoder.finish().map_err(|e| format!("compressing the archive: {e}"))?, true)
+        }
+        #[cfg(not(feature = "pack-compress"))]
+        {
+            let _ = &archive_raw;
+            return Err(
+                "compression needs the pack-compress feature (rebuild with --features pack-compress)"
+                    .to_string(),
+            );
+        }
+    } else {
+        (archive_raw.clone(), false)
+    };
 
     // zero-pad the runtime so the archive starts 512-aligned (ordinary
-    // tar tools can then read it off the fused file)
+    // tar tools can then read an UNcompressed archive off the fused file)
     let remainder = runtime_bytes.len() as u64 % ALIGN;
     if remainder != 0 {
         runtime_bytes.resize(runtime_bytes.len() + (ALIGN - remainder) as usize, 0);
     }
 
+    let mut version_bytes = [0u8; VERSION_WIDTH];
+    let version = FUSE_VERSION;
+    let copy_len = version.len().min(VERSION_WIDTH);
+    version_bytes[..copy_len].copy_from_slice(&version.as_bytes()[..copy_len]);
+
     let mut fused = runtime_bytes;
-    fused.extend_from_slice(&archive);
+    fused.extend_from_slice(&archive_stored);
     fused.extend_from_slice(FUSE_MAGIC);
-    fused.extend_from_slice(&(archive.len() as u64).to_le_bytes());
+    fused.extend_from_slice(&(archive_stored.len() as u64).to_le_bytes());
+    fused.extend_from_slice(&(if compressed { FLAG_GZIP } else { 0 }).to_le_bytes());
+    fused.extend_from_slice(&version_bytes);
 
     std::fs::write(out, &fused).map_err(|e| format!("{}: {e}", out.display()))?;
-    Ok(fused.len() as u64)
+
+    // the fused game must RUN BARE — that's the whole shape — so the
+    // runtime's permissions carry to the output (the executable bit
+    // most of all; a chmod-by-hand after every fuse is a trip hazard)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(runtime)
+            .map_err(|e| format!("{}: {e}", runtime.display()))?
+            .permissions()
+            .mode();
+        std::fs::set_permissions(out, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("{}: {e}", out.display()))?;
+    }
+
+    Ok(FuseStats {
+        fused_bytes: fused.len() as u64,
+        archive_raw: archive_raw.len(),
+        archive_stored: archive_stored.len(),
+        compressed,
+        version,
+    })
+}
+
+/// The archive of a fused file, decompressed when the footer says so.
+///
+/// # Errors
+/// The file isn't fused, or a gzip archive meets a build without
+/// `pack-compress` (the message names the rebuild).
+fn archive_of(path: &Path) -> Result<Option<(Vec<u8>, bool, String)>, String> {
+    let Some((archive_bytes, compressed, version)) = read_footer(path)? else {
+        return Ok(None);
+    };
+    if compressed {
+        #[cfg(feature = "pack-compress")]
+        {
+            let mut decoder = flate2::read::MultiGzDecoder::new(&archive_bytes[..]);
+            let mut raw = Vec::new();
+            decoder
+                .read_to_end(&mut raw)
+                .map_err(|e| format!("decompressing the archive: {e}"))?;
+            return Ok(Some((raw, compressed, version)));
+        }
+        #[cfg(not(feature = "pack-compress"))]
+        {
+            let _ = &archive_bytes;
+            return Err(format!(
+                "{path:?} carries a COMPRESSED game archive — this runtime lacks the \
+                 pack-compress feature (rebuild with --features pack-compress)"
+            ));
+        }
+    }
+    Ok(Some((archive_bytes, compressed, version)))
 }
 
 /// Detect a fused archive at the tail of `path` and unpack it into a
@@ -99,44 +318,8 @@ pub fn fuse(runtime: &Path, bundle_dir: &Path, out: &Path) -> Result<u64, String
 /// # Errors
 /// The file can't be read or the extraction fails.
 pub fn unpack_self(path: &Path) -> Result<Option<PathBuf>, String> {
-    let size = std::fs::metadata(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?
-        .len();
-    if size < FOOTER_SIZE {
+    let Some((archive_bytes, _compressed, _version)) = archive_of(path)? else {
         return Ok(None);
-    }
-    let tail = {
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        file.seek(std::io::SeekFrom::Start(size - FOOTER_SIZE))
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut tail = Vec::new();
-        file.read_to_end(&mut tail)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        tail
-    };
-    if tail[..8] != *FUSE_MAGIC {
-        return Ok(None);
-    }
-    let archive_len = u64::from_le_bytes(
-        tail[8..16]
-            .try_into()
-            .expect("the footer carries 8 length bytes"),
-    );
-    let archive_start = size
-        .checked_sub(FOOTER_SIZE)
-        .and_then(|tail_start| tail_start.checked_sub(archive_len))
-        .ok_or_else(|| "corrupt footer: archive longer than the file".to_string())?;
-
-    let archive_bytes = {
-        let mut file = std::fs::File::open(path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        file.seek(std::io::SeekFrom::Start(archive_start))
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut bytes = vec![0u8; archive_len as usize];
-        file.read_exact(&mut bytes)
-            .map_err(|e| format!("reading the archive: {e}"))?;
-        bytes
     };
 
     // the extraction home: temp + the exe's stem (a fused "mygame.bin"
@@ -256,44 +439,8 @@ pub fn extract_archive(
     out_dir: &Path,
     skip_existing: bool,
 ) -> Result<usize, String> {
-    let size = std::fs::metadata(fused)
-        .map_err(|e| format!("{}: {e}", fused.display()))?
-        .len();
-    if size < FOOTER_SIZE {
+    let Some((archive_bytes, _compressed, _version)) = archive_of(fused)? else {
         return Err(format!("{} carries no fused archive", fused.display()));
-    }
-    let tail = {
-        let mut file = std::fs::File::open(fused)
-            .map_err(|e| format!("{}: {e}", fused.display()))?;
-        file.seek(std::io::SeekFrom::Start(size - FOOTER_SIZE))
-            .map_err(|e| format!("{}: {e}", fused.display()))?;
-        let mut tail = Vec::new();
-        file.read_to_end(&mut tail)
-            .map_err(|e| format!("{}: {e}", fused.display()))?;
-        tail
-    };
-    if tail[..8] != *FUSE_MAGIC {
-        return Err(format!("{} carries no fused archive", fused.display()));
-    }
-    let archive_len = u64::from_le_bytes(
-        tail[8..16]
-            .try_into()
-            .expect("the footer carries 8 length bytes"),
-    );
-    let archive_start = size
-        .checked_sub(FOOTER_SIZE)
-        .and_then(|tail_start| tail_start.checked_sub(archive_len))
-        .ok_or_else(|| "corrupt footer: archive longer than the file".to_string())?;
-
-    let archive_bytes = {
-        let mut file = std::fs::File::open(fused)
-            .map_err(|e| format!("{}: {e}", fused.display()))?;
-        file.seek(std::io::SeekFrom::Start(archive_start))
-            .map_err(|e| format!("{}: {e}", fused.display()))?;
-        let mut bytes = vec![0u8; archive_len as usize];
-        file.read_exact(&mut bytes)
-            .map_err(|e| format!("reading the archive: {e}"))?;
-        bytes
     };
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;

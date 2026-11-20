@@ -29,19 +29,30 @@ bundle: starsweeper/scene-bundle/scene.json.hyg
 
 $ hyg fuse --runtime target/release/hyg-runtime \
             --scene   starsweeper/scene.json.hyg \
-            --out     mygame.bin
-fused mygame.bin (22833 KB)
+            --out     mygame.bin --compress --metrics
+fused mygame.bin (27.5 MB)
+  archive: 4.0 KB → 567 B (0 files)
+  version 0.1.0 stamped — the runtime runs the game bare (no args)
+{"archive_raw_bytes":4096,"archive_stored_bytes":567,"command":"fuse",
+ "compressed":true,"duration_ms":10,"fused_bytes":28818539,"files":0,
+ "out":"mygame.bin","version":"0.1.0"}
 ```
 
 - **`hyg new`** scaffolds a playable project: `project.json.hyg`, a
   hello scene, a starter script, and the `scripts/` + `assets/` homes.
 - **`hyg build`** gathers the scene and every file it references into
-  one directory, preserving relative layout. A missing reference is a
+  one directory, preserving relative layout (sub-scenes recursed, each
+  dependency at its referrer's position). A missing reference is a
   loud error naming the path.
 - **`hyg fuse`** builds the bundle, pads the runtime to a 512-byte
-  boundary, appends the bundle as a tar archive, and seals a 16-byte
-  footer (`HYGFUSE1` + archive length). The padding means ordinary
-  tar tools can read the archive straight off the fused file.
+  boundary, appends the bundle as a tar archive, and seals a 52-byte
+  footer (`HYGFUSE2` + archive length + flags + the hyg version the
+  game was fused with — the runtime prints it on launch). The padding
+  means ordinary tar tools can read an UNcompressed archive straight
+  off the fused file. `--compress` gzips the archive (needs the
+  `pack-compress` feature in BOTH the fusing CLI and the runtime); the
+  runtime's permissions carry to the output, so the fused game runs
+  bare. Every command appends `--metrics` JSON for build scripts.
 
 ## The runtime
 

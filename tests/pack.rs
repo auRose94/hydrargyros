@@ -37,16 +37,32 @@ fn fuse_and_unpack_round_trips() {
     std::fs::write(bundle.join("scripts/patrol.js"), "function update(dt) {}").expect("script");
 
     let fused = dir.join("mygame.bin");
-    let size = pack::fuse(&runtime_path, &bundle, &fused).expect("fuses");
+    let stats = pack::fuse(&runtime_path, &bundle, &fused, pack::FuseOptions::default())
+        .expect("fuses");
 
     // the tail: footer magic, then the archive length
     let fused_bytes = std::fs::read(&fused).expect("read the fused file");
-    assert_eq!(fused_bytes.len() as u64, size, "the size matches");
+    assert_eq!(fused_bytes.len() as u64, stats.fused_bytes, "the size matches");
+    assert!(!stats.compressed, "default fuse is uncompressed");
+    assert_eq!(stats.version, env!("CARGO_PKG_VERSION"), "the version stamps");
     assert!(
         fused_bytes.starts_with(&runtime_bytes[..8.min(runtime_bytes.len())]),
         "the file still starts as the runtime binary"
     );
-    assert_eq!(&fused_bytes[fused_bytes.len() - 16..fused_bytes.len() - 8], b"HYGFUSE1");
+    // the footer v2: magic, then u64 archive length, u32 flags, and the
+    // 32-byte NUL-padded version stamp (52 bytes total)
+    assert_eq!(
+        &fused_bytes[fused_bytes.len() - 52..fused_bytes.len() - 44],
+        b"HYGFUSE2",
+        "footer v2 magic"
+    );
+    let version = env!("CARGO_PKG_VERSION").as_bytes();
+    assert_eq!(
+        &fused_bytes[fused_bytes.len() - 32..fused_bytes.len() - 32 + version.len()],
+        version,
+        "the version stamp rides the footer verbatim (NUL-padded after)"
+    );
+    assert_eq!(&fused_bytes[fused_bytes.len() - 36..fused_bytes.len() - 32], &[0u8; 4]);
 
     // unpack restores the bundle: the scene loads FROM the extraction
     let extracted = pack::unpack_self(&fused).expect("reads its own tail").expect("fused");
@@ -121,7 +137,7 @@ fn loose_files_beside_the_exe_override_the_archive() {
     std::fs::write(bundle.join("scripts/patrol.js"), "SPEED = 1").expect("script");
 
     let fused = dir.join("mygame-fused.bin");
-    pack::fuse(&runtime_path, &bundle, &fused).expect("fuses");
+    pack::fuse(&runtime_path, &bundle, &fused, pack::FuseOptions::default()).expect("fuses");
 
     // unpack (the runtime's first step), then MOD: the exe's own
     // directory carries loose files — a replaced script, a replaced
@@ -191,7 +207,7 @@ fn extract_is_nondestructive_by_default() {
     std::fs::write(bundle.join("mod.js"), "SPEED = 1").expect("script");
 
     let fused = dir.join("game.bin");
-    pack::fuse(&runtime_path, &bundle, &fused).expect("fuses");
+    pack::fuse(&runtime_path, &bundle, &fused, pack::FuseOptions::default()).expect("fuses");
 
     // first extract: both files land
     let out = dir.join("assets-out");
@@ -219,4 +235,55 @@ fn extract_is_nondestructive_by_default() {
         "SPEED = 1",
         "the forced pass restores the shipped file"
     );
+}
+
+/// The compression knob (`pack-compress`): a compressed fuse round
+/// trips, the footer's flag records it, and `fuse_info` reports the
+/// stored size without reading the archive.
+#[test]
+#[cfg(feature = "pack-compress")]
+fn compressed_fuse_round_trips() {
+    let dir = temp_dir("hyg-pack-compressed");
+    let runtime_path = dir.join("runtime.bin");
+    let runtime_bytes = vec![7u8; 1000];
+    std::fs::write(&runtime_path, &runtime_bytes).expect("fake runtime");
+
+    // a compressible payload: one script, repeated to real size
+    let bundle = dir.join("bundle");
+    std::fs::create_dir_all(bundle.join("scripts")).expect("scripts");
+    let patrol = "function update(dt) { x += 1; }\n".repeat(400);
+    std::fs::write(bundle.join("scripts/patrol.js"), &patrol).expect("script");
+    let fused = dir.join("game.bin");
+    let stats = pack::fuse(
+        &runtime_path,
+        &bundle,
+        &fused,
+        pack::FuseOptions {
+            compress: true,
+        },
+    )
+    .expect("fuses");
+    assert!(stats.compressed, "the knob compressed");
+    assert!(
+        stats.archive_stored < stats.archive_raw,
+        "the repetitive script shrank: {} → {}",
+        stats.archive_raw,
+        stats.archive_stored
+    );
+
+    // the footer reports the compressed shape (no archive read)
+    let info = pack::fuse_info(&fused).expect("footer").expect("fused");
+    assert!(info.compressed);
+    assert_eq!(info.archive_len, stats.archive_stored as u64);
+    assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+
+    // the round trip: bare launch unpacks the gzip back to the files
+    let extracted = pack::unpack_self(&fused).expect("reads").expect("fused");
+    let script = std::fs::read_to_string(extracted.join("scripts/patrol.js")).expect("read");
+    assert_eq!(script, patrol, "contents exact after the round trip");
+
+    // --extract works against a compressed archive too
+    let out = dir.join("extracted");
+    let written = pack::extract_archive(&fused, &out, true).expect("extracts");
+    assert_eq!(written, 1, "one file came out");
 }

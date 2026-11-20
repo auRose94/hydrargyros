@@ -3459,12 +3459,12 @@ pub fn export_game(
     let staging = scene_dir.join(format!("{stem}-bundle"));
     let report = hyg::bundle::build(&scene_path, &staging)?;
     let out = scene_dir.join(format!("{stem}.bin"));
-    let size = hyg::pack::fuse(runtime, &staging, &out)?;
+    let stats = hyg::pack::fuse(runtime, &staging, &out, hyg::pack::FuseOptions::default())?;
     state.set_status(format!(
         "exported {} ({} files, {} KB) — the single file plays the game",
         out.display(),
         report.files.len(),
-        size / 1024
+        stats.fused_bytes / 1024
     ));
     Ok(out)
 }

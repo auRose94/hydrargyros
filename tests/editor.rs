@@ -5,6 +5,8 @@
 //! shell's panels are a thin view over exactly these operations.
 
 use hyg::game::camera::{Camera, Projection};
+#[cfg(all(feature = "editor", feature = "physics"))]
+use hyg::game::Mesh;
 use hyg::game::editor::gizmo::{self, GizmoMode};
 use hyg::game::editor::pick::{self, Viewport};
 use hyg::game::editor::ui::EditorUi;
@@ -13,8 +15,6 @@ use hyg::game::physics::Shape;
 use hyg::game::physics_body::PhysicsBody;
 use hyg::game::renderable::{MeshGeometry, MeshRenderer, MeshShape};
 use hyg::game::scene::Scene;
-use hyg::game::Mesh;
-use hyg::game::Model;
 use hyg::game::{Engine, Entity};
 use hyg::var::{Quat, Vec3};
 
@@ -1791,6 +1791,7 @@ fn fly_camera_looks_down_the_heading() {
 #[test]
 fn export_game_bundles_and_fuses() {
     use hyg::game::editor::shell::{export_game, EditorState};
+    use hyg::game::Model;
 
     let dir = temp_dir("hyg-export-test");
     std::fs::create_dir_all(dir.join("scripts")).expect("dirs");
@@ -1858,6 +1859,7 @@ fn export_game_failures_teach() {
 }
 
 /// A fresh temp directory for one test (cleared on entry).
+#[cfg(all(feature = "editor", any(feature = "pack", feature = "physics")))]
 fn temp_dir(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(name);
     let _ = std::fs::remove_dir_all(&dir);
