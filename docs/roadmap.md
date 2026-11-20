@@ -1144,6 +1144,29 @@ seams it grows through.
    animation are their own rung; USD reading rides a later feature
    knob (Unreal Interchange's format) when a project needs it.
 
+8g. **glycin verified — adoption deferred to the mod-browser rung
+   (decision record, 2026-11-19).** Rose's second pick, verified
+   against the vendored source before adoption: **glycin 4** (GNOME's
+   sandboxed image decoding) decodes in sandboxed loader PROCESSES —
+   a malicious image crashes a throwaway sandbox, not the game. That
+   security shape is exactly right for one future feature and wrong
+   for the texture pipeline today: on Linux the loaders are **external
+   system binaries** (the crate's own docs: install `glycin-loaders`,
+   `bubblewrap`, `libseccomp` — IPC over zbus, native glib/fontconfig
+   linkage), and the in-process `builtin` path is its NON-Linux
+   fallback. Requiring distro packages breaks the M6 promise (one
+   fused `.bin`, passed around, plays — jam-first distribution), and
+   a per-OS texture stack diverges on the platforms matrix. The
+   formats hyg's pipeline needs today (PNG/JPEG/WebP in glTF and
+   meshes) `image` decodes in-process, pure Rust, everywhere.
+   **Decision: `image` stays the texture path; glycin lands when the
+   MOD BROWSER rung arrives** — downloading untrusted content packs
+   is precisely its threat model (Studio included, where its
+   format breadth — AVIF/JXL/HEIF — also helps imports), behind a
+   Linux-gated `texture-glycin` feature with `image` as the portable
+   fallback. If imports need those formats sooner, the same feature
+   can land early — the analysis above is the design.
+
 ## What hyg will NOT do
 
 - **Not integrate into Bevy.** Bevy is ECS-first (homogeneous typed
