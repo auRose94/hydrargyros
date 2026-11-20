@@ -159,25 +159,25 @@ fn factories() -> &'static RwLock<FactoryMap> {
         map.insert(
             "mesh_renderer".to_string(),
             Arc::new(|params, ctx| {
-                // mut only under gltf (resolve mutates); feature-free
-                // builds bind an immutable renderer
-                #[cfg(feature = "gltf")]
+                // mut only when an importer can resolve (resolve
+                // mutates); feature-free builds bind an immutable
+                // renderer
+                #[cfg(any(feature = "gltf", feature = "mesh-import"))]
                 let mut renderer = MeshRenderer::from_params(params)?;
-                #[cfg(not(feature = "gltf"))]
+                #[cfg(not(any(feature = "gltf", feature = "mesh-import")))]
                 let renderer = MeshRenderer::from_params(params)?;
                 // asset-backed renderers materialize at load time, path
                 // resolved against the scene's directory (the same rule
-                // the script source path follows). Without the `gltf`
-                // feature the renderer stays unresolved — it round-trips
-                // by path and draws nothing until a build that can load
-                // it.
-                #[cfg(feature = "gltf")]
+                // the script source path follows). Without an importer
+                // the renderer stays unresolved — it round-trips by path
+                // and draws nothing until a build that can load it.
+                #[cfg(any(feature = "gltf", feature = "mesh-import"))]
                 renderer
                     .resolve(&ctx.base)
                     .map_err(|e| crate::FromVarError::new(e).at("model"))?;
-                // without the gltf feature the ctx stays unused (the
+                // without an importer the ctx stays unused (the
                 // renderer round-trips by path; nothing resolves)
-                #[cfg(not(feature = "gltf"))]
+                #[cfg(not(any(feature = "gltf", feature = "mesh-import")))]
                 let _ = &ctx;
                 Ok(Box::new(renderer) as Box<dyn Component>)
             }),

@@ -43,6 +43,8 @@ pub mod engine;
 pub mod entity;
 pub mod light;
 pub mod mesh;
+#[cfg(feature = "mesh-import")]
+pub mod mesh_import;
 pub mod object_path;
 pub mod model;
 pub mod scene;

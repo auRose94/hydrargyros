@@ -1110,6 +1110,40 @@ seams it grows through.
    rung), and the hierarchy doesn't badge instance roots yet (Studio
    polish).
 
+8f. **Mesh import landed (2026-11-19): real geometry for the
+   non-glTF formats — polysmelt.** Rose's pick, verified before
+   adoption: **polysmelt 0.13** (pure Rust, MIT-0, sync API) reads
+   FBX/OBJ/STL/PLY/VOX/3DS into a glTF-shaped document whose
+   `flatten(Pose::Rest)` produces material-grouped triangle lists —
+   almost a mirror of hyg's `Model`/`ModelPart` shape. The
+   **`mesh-import` feature** (polysmelt with `default-features =
+   false` — its glTF reader stays OFF: `.gltf`/`.glb` keep the proven
+   gltf-crate path; `MeshRenderer::resolve` dispatches by extension,
+   and a build with neither importer enabled keeps the M4
+   round-trip-by-path contract). The conversion bakes each prim into
+   a `ModelPart`: material base colors fill vertex colors where the
+   file carries none (polysmelt normalizes MTL sRGB → linear — the
+   glTF path's color space), faceted sources (STL) get
+   `smooth_normals`, base-color textures decode through `image`
+   (PNG/JPEG bytes, deduplicated per index; without `image` a
+   textured material keeps its base color), UVs ride through
+   top-left. Untrusted-file discipline: parts build through the
+   VALIDATED `Mesh::new`. **Live-verified on real projects**: a
+   23-part, 52,742-triangle custom FBX drone from the R3D UE 5.4
+   project imports in ~100 ms; a 293 MB wall FBX refuses on
+   polysmelt's hostile-file triangle cap (the message says so); a
+   Mixamo walk reports "no meshes" — **skinned meshes don't flatten
+   yet** (polysmelt's boundary; they wait for hyg's animation rung,
+   which has no consumer for them yet). Tests: 6 in
+   `tests/mesh_import.rs` (OBJ with MTL colors/normals/UVs, STL
+   smoothing + gray fill, PLY vertex colors, resolve dispatch +
+   unknown-extension refusal, texture decode, nested
+   references-resolve-against-the-model's-dir). Suite **257 core /
+   419 `--all-features`**, clippy 0 both configs. Next rungs: GLB
+   WRITE is the export story (hyg → other engines); skinned meshes +
+   animation are their own rung; USD reading rides a later feature
+   knob (Unreal Interchange's format) when a project needs it.
+
 ## What hyg will NOT do
 
 - **Not integrate into Bevy.** Bevy is ECS-first (homogeneous typed

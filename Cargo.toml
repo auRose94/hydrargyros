@@ -73,6 +73,19 @@ unity-asset = { version = "0.2", optional = true, default-features = false }
 # Unreal asset parsing (the `import-unreal` feature): UE5 .umap/.uasset
 # packages (levels, World Partition external actors) load for migration
 rust-uasset = { version = "0.3", optional = true }
+# polysmelt (the `mesh-import` feature): pure-Rust mesh reading for the
+# formats the gltf crate doesn't cover — FBX, OBJ, STL, PLY, VOX, 3DS —
+# the migration rung's geometry half. polysmelt's own glTF reader stays
+# OFF: .gltf/.glb keep the proven gltf-crate path
+polysmelt = { version = "0.13", optional = true, default-features = false, features = [
+    "fs",
+    "stl",
+    "ply",
+    "vox",
+    "obj",
+    "3ds",
+    "fbx",
+] }
 # glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
 gltf = { version = "1", optional = true }
 # texture image decoding (the `image` feature): Texture::from_file for PNGs
@@ -136,6 +149,10 @@ pack = ["dep:tar"]
 # import-unity: migrate Unity projects (scenes, prefabs, scripts)
 import-unity = ["dep:unity-asset"]
 import-unreal = ["dep:rust-uasset"]
+# mesh-import: real geometry for the non-glTF mesh formats (FBX, OBJ,
+# STL, PLY, VOX, 3DS) via polysmelt — asset-backed renderers resolve
+# these through the same Model registry the gltf path feeds
+mesh-import = ["dep:polysmelt"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
 # window: the winit desktop windowing backend (gold's windowSystemSDL slot)

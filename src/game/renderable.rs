@@ -193,20 +193,56 @@ impl MeshRenderer {
 
     /// Materialize an asset-backed renderer: load the model at
     /// `<base>/<path>`. The scene loader calls this once per component at
-    /// creation time (gltf-gated there); resolving again re-loads (an
-    /// edited path picks up the new file). Unresolved asset renderers
-    /// draw nothing but keep their path — the scene round-trips.
+    /// creation time (gated on any importer there); resolving again
+    /// re-loads (an edited path picks up the new file). Unresolved asset
+    /// renderers draw nothing but keep their path — the scene
+    /// round-trips. The extension picks the importer: `.gltf`/`.glb` go
+    /// through the glTF crate, the rest through polysmelt
+    /// (`mesh-import`: FBX, OBJ, STL, PLY, VOX, 3DS).
     ///
     /// # Errors
     /// The file can't be read or doesn't parse (the message names the
-    /// path).
-    #[cfg(feature = "gltf")]
+    /// path), or no importer for the extension is enabled in this build.
+    #[cfg(any(feature = "gltf", feature = "mesh-import"))]
     pub fn resolve(&mut self, base: &std::path::Path) -> Result<(), String> {
         let MeshGeometry::Asset { path, model } = &mut self.geometry else {
             return Ok(());
         };
         let full = base.join(&*path);
-        let loaded = Model::from_gltf_file(&full).map_err(|e| format!("{}: {e}", full.display()))?;
+        let ext = full
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        let loaded = match ext.as_str() {
+            "gltf" | "glb" => {
+                #[cfg(feature = "gltf")]
+                {
+                    Model::from_gltf_file(&full).map_err(|e| format!("{}: {e}", full.display()))
+                }
+                #[cfg(not(feature = "gltf"))]
+                {
+                    Err(format!(
+                        "{}: this build has no glTF importer (enable the gltf feature)",
+                        full.display()
+                    ))
+                }
+            }
+            _ => {
+                #[cfg(feature = "mesh-import")]
+                {
+                    super::mesh_import::load_model(&full, &ext)
+                        .map_err(|e| format!("{}: {e}", full.display()))
+                }
+                #[cfg(not(feature = "mesh-import"))]
+                {
+                    Err(format!(
+                        "{}: this build has no importer for .{ext} (enable the mesh-import feature)",
+                        full.display()
+                    ))
+                }
+            }
+        }?;
         *model = Some(std::sync::Arc::new(loaded));
         Ok(())
     }
