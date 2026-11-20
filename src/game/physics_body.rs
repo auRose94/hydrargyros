@@ -56,6 +56,10 @@ impl PhysicsBody {
     }
 
     pub fn name(&self) -> &str { &self.name }
+
+    /// The body's collision shape (the physics debug view reads it;
+    /// so do the migration tests).
+    pub fn shape(&self) -> &Shape { &self.shape }
 }
 
 impl PhysicsBody {

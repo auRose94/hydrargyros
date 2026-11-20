@@ -67,6 +67,9 @@ pollster = { version = "0.4", optional = true }
 # tar archives (the `pack` feature): the single-file packaging story
 # appends a tar of the bundle to the runtime binary's tail
 tar = { version = "0.4", optional = true }
+# Unity asset parsing (the `import-unity` feature): .unity/.prefab YAML
+# scenes load for migration into hyg projects
+unity-asset = { version = "0.2", optional = true, default-features = false }
 # glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
 gltf = { version = "1", optional = true }
 # texture image decoding (the `image` feature): Texture::from_file for PNGs
@@ -127,6 +130,8 @@ physics = ["dep:rapier3d"]
 # pack: the single-file packaging story (fuse a bundle onto the
 # runtime's tail; the runtime detects and unpacks its own tail)
 pack = ["dep:tar"]
+# import-unity: migrate Unity projects (scenes, prefabs, scripts)
+import-unity = ["dep:unity-asset"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
 # window: the winit desktop windowing backend (gold's windowSystemSDL slot)

@@ -42,6 +42,8 @@ pub mod carrier;
 pub mod dynamic;
 pub mod from_var;
 pub mod game;
+#[cfg(feature = "import-unity")]
+pub mod import;
 pub mod list;
 pub mod object;
 pub mod proxy;
