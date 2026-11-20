@@ -39,7 +39,7 @@ path = "src/bin/hyg.rs"
 [[bin]]
 name = "hyg-runtime"
 path = "src/bin/hyg-runtime.rs"
-required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio", "pack"]
+required-features = ["wgpu", "winit", "script", "gltf", "physics", "audio", "pack", "import-unity", "import-unreal"]
 
 [dependencies]
 indexmap = "2"
@@ -70,6 +70,9 @@ tar = { version = "0.4", optional = true }
 # Unity asset parsing (the `import-unity` feature): .unity/.prefab YAML
 # scenes load for migration into hyg projects
 unity-asset = { version = "0.2", optional = true, default-features = false }
+# Unreal asset parsing (the `import-unreal` feature): UE5 .umap/.uasset
+# packages (levels, World Partition external actors) load for migration
+rust-uasset = { version = "0.3", optional = true }
 # glTF model loading (the `gltf` feature): meshes load from .gltf/.glb files
 gltf = { version = "1", optional = true }
 # texture image decoding (the `image` feature): Texture::from_file for PNGs
@@ -132,6 +135,7 @@ physics = ["dep:rapier3d"]
 pack = ["dep:tar"]
 # import-unity: migrate Unity projects (scenes, prefabs, scripts)
 import-unity = ["dep:unity-asset"]
+import-unreal = ["dep:rust-uasset"]
 # render: the wgpu offscreen renderer
 wgpu = ["dep:wgpu", "dep:pollster"]
 # window: the winit desktop windowing backend (gold's windowSystemSDL slot)

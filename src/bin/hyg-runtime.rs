@@ -18,7 +18,8 @@ fn main() {
     // modders get the loose layout to edit (the overlay then picks it
     // up on every later launch). Default destination: beside the exe,
     // where the loose-files overlay looks first.
-    if args.next().map(|a| a == "--extract").unwrap_or(false) {
+    let first = args.next();
+    if first.as_deref() == Some("--extract") {
         let exe = std::env::current_exe()
             .map_err(|e| format!("current_exe: {e}"))
             .expect("exe path");
@@ -47,7 +48,7 @@ fn main() {
     // BARE invocation: this binary may be FUSED (a bundle tarred onto
     // its tail) — detect our own archive, unpack it to a temp home,
     // and play the scene it carries. With a scene path, play that.
-    let scene_path = match args.next() {
+    let scene_path = match first {
         Some(path) => std::path::PathBuf::from(path),
         None => {
             let exe = std::env::current_exe()
@@ -78,11 +79,32 @@ fn main() {
             })
         }
     };
-    let scene = match Scene::load(&scene_path) {
-        Ok(scene) => scene,
-        Err(e) => {
-            eprintln!("hyg-runtime: {}: {e}", scene_path.display());
-            std::process::exit(1);
+    // .umap files import through the Unreal importer (M7 job 2);
+    // .json.hyg scenes load directly
+    let scene = if scene_path.extension().and_then(|e| e.to_str()) == Some("umap") {
+        let import = hyg::import::unreal::import_level(&scene_path)
+            .unwrap_or_else(|e| {
+                eprintln!("hyg-runtime: {e}");
+                std::process::exit(1);
+            });
+        println!(
+            "imported {} — {} actors, world partition: {}",
+            import.report.level,
+            import.report.actors,
+            import.report.world_partition
+        );
+        hyg::game::scene::Scene::from_var(&import.document)
+            .unwrap_or_else(|e| {
+                eprintln!("hyg-runtime: imported document failed to parse: {e}");
+                std::process::exit(1);
+            })
+    } else {
+        match Scene::load(&scene_path) {
+            Ok(scene) => scene,
+            Err(e) => {
+                eprintln!("hyg-runtime: {}: {e}", scene_path.display());
+                std::process::exit(1);
+            }
         }
     };
 
