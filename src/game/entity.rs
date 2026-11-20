@@ -18,6 +18,10 @@ pub struct Entity {
     components: Vec<ComponentSlot>,
     children: Vec<Entity>,
     enabled: bool,
+    /// Set on the children a parent's `sub_scene` instance spliced in:
+    /// they regenerate from the referenced file at every load, so the
+    /// save and snapshot walks skip them (the reference is the truth).
+    spliced: bool,
 }
 
 impl Entity {
@@ -28,7 +32,22 @@ impl Entity {
             components: Vec::new(),
             children: Vec::new(),
             enabled: true,
+            spliced: false,
         }
+    }
+
+    /// Whether this entity was spliced in by a parent's
+    /// [`SubScene`](super::sub_scene::SubScene) instance. Spliced
+    /// entities live in the tree (selectable, transformable) but are
+    /// not written by the scene save — the sub_scene reference is what
+    /// the document keeps.
+    pub fn is_spliced(&self) -> bool {
+        self.spliced
+    }
+
+    /// Mark this entity as a sub-scene instance's spliced content.
+    pub(crate) fn set_spliced(&mut self) {
+        self.spliced = true;
     }
 
     pub fn name(&self) -> &str {
@@ -100,6 +119,9 @@ impl Entity {
     }
 
     /// The children, mutable — the editor's live-reload walk.
+    // the editor's reparent walk is the only mutator (gated — the
+    // feature-free build never mutates children directly)
+    #[cfg(feature = "editor")]
     pub(crate) fn children_mut(&mut self) -> &mut Vec<Entity> {
         &mut self.children
     }

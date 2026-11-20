@@ -144,13 +144,13 @@ struct ActorDraft {
     mapped_classes: Vec<String>,
 }
 
-/// Map one UE component class to hyg components on `entity`, or skip
-/// it into the report. Returns the mapped class for the report.
+/// Map one UE component class to hyg components on `entity`. Returns
+/// the mapped class name, or `None` when nothing maps — the caller
+/// records the skip into the report.
 fn map_component(
     class: &str,
     entity: &mut Entity,
     properties: &serde_json::Value,
-    report: &mut UnrealImportReport,
 ) -> Option<String> {
     // Lights: any UE light component becomes a point light, carrying
     // the UE color (BGRA order in the Color struct)
@@ -290,7 +290,7 @@ fn parse_actor_file(
         if class.contains("Actor") && !class.ends_with("Component") {
             continue; // the actor itself / actor-level helpers
         }
-        if let Some(mapped) = map_component(class, &mut entity, properties, report) {
+        if let Some(mapped) = map_component(class, &mut entity, properties) {
             mapped_classes.push(mapped);
         } else {
             report.skip_component(class);

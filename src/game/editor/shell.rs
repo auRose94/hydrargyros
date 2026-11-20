@@ -1755,12 +1755,26 @@ pub fn restart(state: &mut EditorState, engine: &mut Engine, shared: &ShellShare
 
 fn restore_snapshot(state: &mut EditorState, engine: &mut Engine) {
     if let Some(snapshot) = state.snapshot.clone() {
-        if let Ok(scene) = Scene::from_var(&snapshot) {
+        // relative paths (scripts, models, sub-scenes) resolve against
+        // the SCENE's directory — not wherever the process launched
+        let base = scene_base(&state.scene_path);
+        if let Ok(scene) = Scene::from_var_with_base(&snapshot, base) {
             engine.set_camera(scene.camera);
             engine.set_roots(scene.entities);
             state.name_edit = None;
         }
     }
+}
+
+/// The base directory a scene's file references resolve against: the
+/// scene file's own directory (empty/untitled scenes use the working
+/// directory, the loader's bare-`from_var` rule).
+fn scene_base(path: impl AsRef<std::path::Path>) -> std::path::PathBuf {
+    path.as_ref()
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 // ---- scene tabs ----
@@ -1815,8 +1829,14 @@ fn activate_tab(state: &mut EditorState, engine: &mut Engine, index: usize) {
     state.active_tab = index;
     state.name_edit = None;
     // the incoming tab: its live state if it has one, else its document
+    // (the document's relative paths resolve against the TAB's scene
+    // directory — the same rule snapshot restore follows)
     if let Some(doc) = &incoming_state {
-        if let Ok(scene) = Scene::from_var(doc) {
+        let base = incoming_path
+            .as_deref()
+            .map(scene_base)
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        if let Ok(scene) = Scene::from_var_with_base(doc, base) {
             state.scene_camera = scene.camera;
             engine.set_camera(scene.camera);
             engine.set_roots(scene.entities);

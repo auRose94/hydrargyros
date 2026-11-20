@@ -149,6 +149,10 @@ pub trait ScriptEngine: Send + Sync {
 fn engines() -> &'static RwLock<HashMap<String, Arc<dyn ScriptEngine>>> {
     static ENGINES: OnceLock<RwLock<HashMap<String, Arc<dyn ScriptEngine>>>> = OnceLock::new();
     ENGINES.get_or_init(|| {
+        // `mut` is the script feature's seed — a feature-free build
+        // never inserts, so the mutability itself is gated (the
+        // gated-code-lie rule: cfg, don't delete)
+        #[cfg_attr(not(feature = "script"), allow(unused_mut))]
         let mut map: HashMap<String, Arc<dyn ScriptEngine>> = HashMap::new();
         #[cfg(feature = "script")]
         {
@@ -227,6 +231,7 @@ pub(crate) fn validate_identifier(name: &str) -> Result<(), ScriptError> {
 }
 
 /// Reject user names in the bridge's reserved namespace.
+#[cfg(feature = "script")]
 pub(crate) fn validate_user_name(name: &str) -> Result<(), ScriptError> {
     validate_identifier(name)?;
     if name.starts_with(RESERVED_PREFIX) {
@@ -241,6 +246,7 @@ pub(crate) fn validate_user_name(name: &str) -> Result<(), ScriptError> {
 /// restores a registered `Func` through the serde contract, so a function
 /// handle that crossed in can cross back out. Parsed from the TEXT (not a
 /// `serde_json::Value` tree) so object key order survives.
+#[cfg(any(feature = "script", feature = "dynamic-wasm", feature = "dynamic-ffi"))]
 pub(crate) fn json_to_var(json: &str) -> Result<Var, ScriptError> {
     serde_json::from_str(json).map_err(|e| ScriptError::type_err(format!("script value: {e}")))
 }

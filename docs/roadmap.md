@@ -1069,7 +1069,46 @@ seams it grows through.
    knob (script host `find(path)`, follow/target components, project
    entry-scene references).
 
-## What hyg will NOT do
+8e. **Sub-scenes landed (2026-11-19): composition — the prefab
+   shape.** A scene references another scene as DATA: an entity
+   carrying [`SubScene`](game::sub_scene) (`{"type": "sub_scene",
+   "path": "rooms/room.json.hyg"}`) is an INSTANCE — the referenced
+   scene's entities splice in as its children at load time, positioned
+   by the instance entity's transform. **The reference is the truth**:
+   the save and snapshot walks skip spliced children (`Entity::
+   is_spliced`), so documents carry the reference and every load
+   re-splices from the file — change the prefab file, change every
+   instance (Unity prefab semantics; instance-children edits are
+   session edits, like play-mode edits). Nested references resolve
+   against the SUB-SCENE's own directory (a prefab's scripts, models,
+   and deeper sub-scenes stay relative to their file); the
+   sub-document's camera is ignored — instances contribute entities,
+   the instancing scene keeps its view. Cycles refuse loudly at load
+   AND at bundle time (the canonical-path stack catches a → b → a and
+   self-inclusion, naming the cycle). **The bundler recurses
+   through sub-scenes**: each dependency lands at ITS referrer's
+   bundle position (`rooms/scripts/lamp.js`, not a flattened
+   `scripts/`), so the copied scene plays from the bundle root with
+   the whole chain spliced; references that escape the bundle root
+   (`../…`) refuse — a bundle that reaches outside itself cannot be
+   tared or fused as one file. **The editor's restore seams now
+   resolve against the scene's directory** (`Scene::from_var_with_base`
+   is public): play-snapshot restore and tab-switch restore used the
+   working directory — a latent break for every relative script/model
+   path, load-bearing the moment instances re-splice. Factory
+   registered (`sub_scene`, strict: a non-empty path is required —
+   the UI's "+ component" refusal names it). Tests: 6 in
+   `tests/sub_scene.rs` (splice + round-trip, cycles, missing file,
+   nested base-dir rule, snapshot carry, factory contract) + 3 bundle
+   tests (positions, cycle, escape). Also: `tests/bundle.rs`'s script
+   import is now feature-gated (the core suite had been broken since
+   the M5 commit — only `--all-features` had been run since), and four
+   core-config clippy lies gated (AGENTS rule: cfg, don't delete).
+   Suite **257 core / 413 `--all-features`**, clippy 0 both configs.
+   Known limits, stated: no instance-override capture yet (editing a
+   spliced child doesn't persist — Unity overrides are a future
+   rung), and the hierarchy doesn't badge instance roots yet (Studio
+   polish).
 
 ## What hyg will NOT do
 

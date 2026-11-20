@@ -46,6 +46,7 @@ pub mod mesh;
 pub mod object_path;
 pub mod model;
 pub mod scene;
+pub mod sub_scene;
 #[cfg(feature = "audio")]
 pub mod audio;
 #[cfg(feature = "winit")]
@@ -100,6 +101,7 @@ pub use scene::{
     create_component, register_component_factory, registered_component_types, ComponentContext,
     ComponentFactory, Scene, SCENE_FORMAT,
 };
+pub use sub_scene::SubScene;
 #[cfg(feature = "script")]
 pub use scripted::{HookNames, ScriptedComponent};
 #[cfg(feature = "stream")]

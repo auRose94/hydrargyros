@@ -43,8 +43,9 @@
 //! fails with `"entities.0.components.0.mass": expected a number, found
 //! string`, never silently) and materializes components through the
 //! **component registry** — type name → factory, pre-seeded with the
-//! built-ins (`light`, `mesh_renderer`, `physics_body`, and `script` behind
-//! the `script` feature). Plugins and user code register their own with
+//! built-ins (`light`, `mesh_renderer`, `physics_body`, `sub_scene`, and
+//! `script` behind the `script` feature). Plugins and user code register
+//! their own with
 //! [`register_component_factory`]. Unknown component types are explicit
 //! errors naming what IS registered.
 //!
@@ -90,6 +91,7 @@ use super::entity::Entity;
 use super::light::Light;
 use super::physics_body::PhysicsBody;
 use super::renderable::MeshRenderer;
+use super::sub_scene::SubScene;
 use super::transform::Transform;
 #[cfg(feature = "script")]
 use super::scripted::ScriptedComponent;
@@ -193,6 +195,15 @@ fn factories() -> &'static RwLock<FactoryMap> {
             Arc::new(|params, ctx| {
                 ScriptedComponent::from_scene_params(params, &ctx.base)
                     .map(|c| Box::new(c) as Box<dyn Component>)
+            }),
+        );
+        map.insert(
+            "sub_scene".to_string(),
+            Arc::new(|params, _ctx| {
+                // no file IO in the factory — the entity walk splices
+                // the instance after the components materialize (it
+                // needs the cycle stack and the sub-document's own base)
+                SubScene::from_params(params).map(|c| Box::new(c) as Box<dyn Component>)
             }),
         );
         RwLock::new(map)
@@ -489,7 +500,23 @@ impl Scene {
         Scene::from_var_with_base(doc, PathBuf::from("."))
     }
 
-    fn from_var_with_base(doc: &Var, base: PathBuf) -> Result<Scene, FromVarError> {
+    /// [`Scene::from_var`] with an explicit base directory for
+    /// file-referencing params — the editor's snapshot restore seam: a
+    /// snapshot's relative paths (scripts, models, sub-scenes) resolve
+    /// against the scene file's directory, wherever the process was
+    /// launched from.
+    ///
+    /// # Errors
+    /// The same as [`Scene::from_var`].
+    pub fn from_var_with_base(doc: &Var, base: PathBuf) -> Result<Scene, FromVarError> {
+        Scene::from_var_inner(doc, base, &mut Vec::new())
+    }
+
+    fn from_var_inner(
+        doc: &Var,
+        base: PathBuf,
+        stack: &mut Vec<PathBuf>,
+    ) -> Result<Scene, FromVarError> {
         if !matches!(doc.ty(), Ty::Object) {
             return Err(FromVarError::new(format!(
                 "scene document: expected an object, found {}",
@@ -533,7 +560,7 @@ impl Scene {
                 FromVarError::new(format!("\"entities\": expected a list, found {}", roots.ty()))
             })?;
             for (i, item) in items.iter().iter().enumerate() {
-                entities.push(parse_entity(item, &format!("entities.{i}"), &base)?);
+                entities.push(parse_entity(item, &format!("entities.{i}"), &base, stack)?);
             }
         }
 
@@ -620,8 +647,14 @@ impl Scene {
 
 /// Parse and materialize one entity (recursing through `children`).
 /// `path` is the composed document path so far (`entities.0.children.2`) —
-/// every failure names its field through it.
-fn parse_entity(v: &Var, path: &str, base: &Path) -> Result<Entity, FromVarError> {
+/// every failure names its field through it. `stack` carries the
+/// sub-scene files currently being spliced (the cycle guard).
+fn parse_entity(
+    v: &Var,
+    path: &str,
+    base: &Path,
+    stack: &mut Vec<PathBuf>,
+) -> Result<Entity, FromVarError> {
     if !matches!(v.ty(), Ty::Object) {
         return Err(
             FromVarError::new(format!("expected an object, found {}", v.ty())).at(path),
@@ -671,7 +704,12 @@ fn parse_entity(v: &Var, path: &str, base: &Path) -> Result<Entity, FromVarError
                     .at(format!("{path}.children"))
             })?;
             for (i, child) in list.iter().iter().enumerate() {
-                entity.add_child(parse_entity(child, &format!("{path}.children.{i}"), base)?);
+                entity.add_child(parse_entity(
+                    child,
+                    &format!("{path}.children.{i}"),
+                    base,
+                    stack,
+                )?);
             }
         }
     }
@@ -714,7 +752,69 @@ fn parse_entity(v: &Var, path: &str, base: &Path) -> Result<Entity, FromVarError
         }
     }
 
+    // sub-scene instances: the spliced children join AFTER the authored
+    // ones, positioned by this entity's transform (the prefab shape —
+    // `SubScene`'s module docs carry the whole contract)
+    let instance = entity
+        .iter_components()
+        .find_map(|c| c.as_any().downcast_ref::<SubScene>().map(|s| s.path().to_string()));
+    if let Some(sub_path) = instance {
+        splice_sub_scene(&mut entity, &sub_path, path, base, stack)?;
+    }
+
     Ok(entity)
+}
+
+/// Splice a `sub_scene` instance: load the referenced scene file, build
+/// its entities against the SUB-SCENE's own directory (nested references
+/// stay relative to their file), and attach them as the instance
+/// entity's children — each marked spliced (the save/snapshot walks skip
+/// them; the reference regenerates them). The cycle guard holds the
+/// canonical paths of the scenes currently being loaded: a revisit is a
+/// loud error naming the cycle.
+fn splice_sub_scene(
+    entity: &mut Entity,
+    sub_rel: &str,
+    at_path: &str,
+    base: &Path,
+    stack: &mut Vec<PathBuf>,
+) -> Result<(), FromVarError> {
+    let file = base.join(sub_rel);
+    let canonical = std::fs::canonicalize(&file).map_err(|e| {
+        FromVarError::new(format!("sub-scene {sub_rel:?} is missing: {e}")).at(at_path)
+    })?;
+    if let Some(start) = stack.iter().position(|p| *p == canonical) {
+        let mut cycle: Vec<String> = stack[start..]
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect();
+        cycle.push(canonical.display().to_string());
+        return Err(FromVarError::new(format!(
+            "sub-scene cycle (a scene may not include itself, directly or through a chain): {}",
+            cycle.join(" → ")
+        ))
+        .at(at_path));
+    }
+
+    let doc = crate::carrier::read(&file).map_err(|e| {
+        FromVarError::new(format!("sub-scene {sub_rel:?} failed to read: {e}")).at(at_path)
+    })?;
+
+    stack.push(canonical.clone());
+    let sub_dir = canonical
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let sub = Scene::from_var_inner(&doc, sub_dir, stack)
+        .map_err(|e| e.at(format!("{at_path} (sub-scene {sub_rel:?})")));
+    stack.pop();
+    let sub = sub?;
+
+    for mut child in sub.entities {
+        child.set_spliced();
+        entity.add_child(child);
+    }
+    Ok(())
 }
 
 // ---- the save walk ----
@@ -724,7 +824,14 @@ fn parse_entity(v: &Var, path: &str, base: &Path) -> Result<Entity, FromVarError
 /// `components`.
 fn entity_to_var(entity: &Entity) -> Var {
     let transform = entity.transform();
-    let children: List = entity.children().iter().map(entity_to_var).collect();
+    // spliced children are absent from documents — the parent's
+    // sub_scene reference regenerates them at every load
+    let children: List = entity
+        .children()
+        .iter()
+        .filter(|c| !c.is_spliced())
+        .map(entity_to_var)
+        .collect();
     let components: List = entity
         .iter_components()
         .filter_map(|c| component_to_var(c, entity.name()))
@@ -781,7 +888,15 @@ fn component_snapshot_to_var(component: &dyn Component, entity_name: &str) -> Op
 /// lossless path.
 fn entity_snapshot_to_var(entity: &Entity) -> Var {
     let transform = entity.transform();
-    let children: List = entity.children().iter().map(entity_snapshot_to_var).collect();
+    // the snapshot keeps the sub_scene reference, not the spliced
+    // content — restore re-splices from the file (its base is the
+    // scene's directory, so the file is wherever the scene lives)
+    let children: List = entity
+        .children()
+        .iter()
+        .filter(|c| !c.is_spliced())
+        .map(entity_snapshot_to_var)
+        .collect();
     let components: List = entity
         .iter_components()
         .filter_map(|c| component_snapshot_to_var(c, entity.name()))
